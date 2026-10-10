@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: ahuza-apparel
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    autoDeploy: false
+    disk:
+      name: ahuza-data
+      mountPath: /opt/render/project/src/.data
+      sizeGB: 1
+    envVars:
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: OWNER_API_KEY
+        sync: false
+      - key: PAYMENT_PROVIDER
+        value: razorpay
+      - key: PAYMENT_ENVIRONMENT
+        value: test
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
+      - key: RAZORPAY_ACCOUNT_ID
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
