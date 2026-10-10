@@ -63,6 +63,19 @@ npm start
 The production server serves the built frontend and API from one origin on `PORT` (default `3001`).
 `npm start` sets `NODE_ENV=production` for the server; leave `NODE_ENV` out of `.env` so Vite can select its own build mode.
 
+## Deploy from GitHub with Railway
+
+GitHub Pages cannot host this application because it needs the Express API for the catalog, customer accounts, orders, checkout, and Owner Studio. GitHub Actions deploys the full Node application to Railway after the checks pass:
+
+1. Create a Railway project and an empty service for this application. In the service settings, set the build command to `npm ci && npm run build`, the start command to `npm start`, and the health-check path to `/api/health`. Do not enable Railway's own GitHub auto-deploy; GitHub Actions performs the deploy after verification.
+2. Add a Railway volume to the service mounted at `/app/.data`. Set `DATA_FILE=/app/.data/ahuza-db.json` and `SESSION_FILE_PATH=/app/.data/sessions` so the database and customer sessions survive deploys and restarts. Keep this as a single service instance; the JSON database and file-backed sessions are not safe for multiple instances.
+3. Add `SESSION_SECRET` (a stable random value of at least 32 characters) and `OWNER_API_KEY` in Railway's service variables. Railway supplies `PORT`. Leave payment and other integration variables unset until their providers are configured; payment checkout stays disabled without approved Razorpay credentials.
+4. Create a Railway project token. In the GitHub repository, add it under **Settings → Secrets and variables → Actions → Secrets** as `RAILWAY_TOKEN`. Add the Railway web service name or ID under **Settings → Secrets and variables → Actions → Variables** as `RAILWAY_SERVICE`. Do not commit or paste the token into the repository.
+5. Push to `main` or manually run **Actions → Verify and deploy to Railway**. The workflow runs `npm test` and `npm run build` first, then deploys only if those checks pass. Once Railway assigns a public domain, verify `/api/health` and the storefront.
+6. Before accepting payments, configure the Razorpay webhook at `https://<railway-domain>/api/payments/razorpay/webhook` and complete the provider's test and live verification described above.
+
+Configure a Railway volume and stable secrets before treating the deployment as production-ready.
+
 ## API overview
 
 - `GET /api/products`, `GET /api/products/:id`
@@ -78,11 +91,4 @@ The production server serves the built frontend and API from one origin on `PORT
 
 ## Deployment notes
 
-The repository includes a Render Blueprint in `render.yaml` and a GitHub Actions workflow in `.github/workflows/deploy-render.yml`. To activate it:
-
-1. Create a Render account, connect this GitHub repository, and create the web service from the Blueprint. It uses Node, `npm ci && npm run build`, `npm run start`, `/api/health`, and a persistent disk mounted at `.data`. Auto-deploy is disabled so GitHub Actions runs tests/build before triggering deployment.
-2. In the Render service settings, create a Deploy Hook. In GitHub **Settings → Secrets and variables → Actions**, add it as `RENDER_DEPLOY_HOOK`. Never paste the hook into source files or logs.
-3. Set `OWNER_API_KEY` in Render's environment. Add real payment credentials only after Razorpay merchant approval; the Blueprint defaults to test environment and leaves payment secrets unset, so payments remain unavailable by default. Configure the production webhook URL after the Render service has a public URL.
-4. Push the deployment workflow and application changes to `main`, or select **Actions → Test and deploy to Render → Run workflow** on `main`. The workflow runs `npm test` and `npm run build`, then calls the Render deploy hook. Check the GitHub Actions run and Render Events/Logs for deployment completion, then verify `https://<render-host>/api/health`.
-
-This starter uses a JSON-file database and supports only a single server process; do not scale to multiple instances or high-volume commerce without migrating to PostgreSQL with transactions. The Render persistent disk preserves `.data` across deploys, but is not a substitute for database backups. Use a shared production session store such as Redis before scaling horizontally, configure HTTPS and stable random secrets, and restrict CORS if deploying the API separately from the frontend. The email adapter sends through Resend when configured and otherwise logs the event; configure a real email provider before launch. Do not treat client-side ad events as verified purchases.
+This starter uses a JSON-file database and supports only a single server process; do not scale to multiple instances or high-volume commerce without migrating to PostgreSQL with transactions. Persistent storage is not a substitute for database backups. Use a shared production session store such as Redis before scaling horizontally, configure HTTPS and stable random secrets, and restrict CORS if deploying the API separately from the frontend. The email adapter sends through Resend when configured and otherwise logs the event; configure a real email provider before launch. Do not treat client-side ad events as verified purchases.
