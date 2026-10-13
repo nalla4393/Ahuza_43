@@ -322,7 +322,7 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
 
   return <div className="customer-support">
     {open && <section className="customer-support-panel" role="dialog" aria-label="AHUZA customer support">
-      <header className="customer-support-header"><div><strong>AHUZA Support</strong><span className={supportAvailable ? 'support-status is-open' : 'support-status'}><i />{supportAvailable ? 'Available now' : 'Replies 10:00 AM–9:00 PM IST'}</span></div><button type="button" onClick={() => setOpen(false)} aria-label="Close support chat"><X size={18} /></button></header>
+      <header className="customer-support-header"><div><strong>Beulah · AHUZA Support</strong><span className={supportAvailable ? 'support-status is-open' : 'support-status'}><i />{supportAvailable ? 'Available now' : 'Replies 10:00 AM–9:00 PM IST'}</span></div><button type="button" onClick={() => setOpen(false)} aria-label="Close support chat"><X size={18} /></button></header>
       <div className="customer-support-messages" aria-live="polite">
         {messages.map((message, index) => <div className={`support-message ${message.role}`} key={`${message.role}-${index}`}><p>{message.text}</p></div>)}
         {busy && <div className="support-thinking"><LoaderCircle size={15} className="support-spin" /> Checking…</div>}
