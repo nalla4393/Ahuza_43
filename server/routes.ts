@@ -6,7 +6,7 @@ import { hashPassword, verifyPassword } from './services/auth.js';
 import { extractPaymentReceipt, generateCustomerEmailBody, generateCustomerSupportReply, generateOwnerAgentPlan, generateSocialPost, isTextAiConfigured, type CustomerEmailKind, type OwnerAgentIntent } from './services/ai.js';
 import { getDatabase, mergeImageSettings, mutateDatabase, type Database, type Order, type PaymentReceiptReview, type Product, type ShippingAddress, type StorefrontContent, type SupportTicket } from './services/database.js';
 import { deleteProductImageFiles, detectImageType, maxUploadBytes, sanitizeImageSettings, saveProductImage } from './services/images.js';
-import { expirePendingOrders, getMarketingWebhookUrls, notifySupportTicket, recordMarketingEvent, sendEmail, sendOrderConfirmation, sendShippingNotice, testMarketingWebhooks, triggerAutomations } from './services/integrations.js';
+import { expirePendingOrders, getMarketingWebhookUrls, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail, sendOrderEmail, sendOrderConfirmation, sendShippingNotice, testMarketingWebhooks, triggerAutomations } from './services/integrations.js';
 import { createUpiIntent, getUpiConfiguration } from './services/upi.js';
 
 export const api = Router();
@@ -264,6 +264,9 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     return true;
   });
   if (!persisted) { response.status(409).json({ error: 'Inventory changed while placing your order. Please refresh your bag.' }); return; }
+  const placed = (await getDatabase()).orders.find((entry) => entry.id === localOrderId);
+  const customerEmail = (await getDatabase()).customers.find((entry) => entry.id === request.session.userId)?.email;
+  if (placed && customerEmail) void sendOrderEmail('order_placed', placed, customerEmail).catch((error) => console.error('Order received email failed:', error));
   if (paymentMethod === 'cod') {
     response.status(201).json({ orderId: localOrderId, paymentMethod, status: 'confirmed', amount, currency: 'INR' });
     return;
@@ -649,8 +652,8 @@ api.get('/owner/integrations', requireOwner, ownerLimit, async (_request, respon
   response.json({ integrations: {
     googleAds: Boolean(urls.googleAds),
     zapier: Boolean(urls.zapier),
-    email: Boolean(process.env.RESEND_API_KEY),
-    followUps: Boolean(process.env.RESEND_API_KEY),
+    email: isEmailConfigured(),
+    followUps: isEmailConfigured(),
     ai: isTextAiConfigured(),
   } });
 });
@@ -931,7 +934,7 @@ api.post('/owner/email-agent/send', requireOwner, ownerLimit, async (request, re
   if (!stringValue(request.body?.subject, 180) || !stringValue(request.body?.body, 5000)) {
     response.status(400).json({ error: 'Review and provide an email subject and message.' }); return;
   }
-  if (!process.env.RESEND_API_KEY) { response.status(503).json({ error: 'Email sending is not configured. Set RESEND_API_KEY first.' }); return; }
+  if (!isEmailConfigured()) { response.status(503).json({ error: 'Email sending is not configured. Set SMTP_HOST, SMTP_USER and SMTP_PASS (or RESEND_API_KEY).' }); return; }
   try {
     await sendEmail(selected.email, request.body.subject.trim(), request.body.body.trim());
     response.status(202).json({ sent: true, to: selected.email });

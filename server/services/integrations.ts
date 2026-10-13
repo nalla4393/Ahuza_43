@@ -1,5 +1,7 @@
 import { getDatabase, mutateDatabase, type Order, type StoreEvent, type SupportTicket } from './database.js';
 import { randomUUID } from 'node:crypto';
+import nodemailer from 'nodemailer';
+import { generateOrderEmailBody, type OrderEmailKind } from './ai.js';
 
 type IntegrationEvent = { name: string; orderId?: string; amount?: number; currency?: string; page?: string; campaign?: string; consent?: boolean };
 
@@ -56,7 +58,7 @@ export async function triggerAutomations(event: IntegrationEvent): Promise<void>
 }
 
 export async function notifySupportTicket(ticket: SupportTicket): Promise<void> {
-  if (!process.env.RESEND_API_KEY?.trim()) throw new Error('RESEND_API_KEY is not configured.');
+  if (!isEmailConfigured()) throw new Error('Email is not configured.');
   await sendEmail('Info@ahuzawear.com', `Customer support ticket ${ticket.id}`, `A customer support ticket needs follow-up.\n\nReference: ${ticket.id}\nCategory: ${ticket.category}\nCustomer: ${ticket.email}\nCreated: ${ticket.createdAt}\n\n${ticket.message}\n\nPlease respond within 48 working hours.`);
 }
 
@@ -67,31 +69,71 @@ export async function recordMarketingEvent(event: Omit<StoreEvent, 'id' | 'creat
   });
 }
 
+export function isEmailConfigured(): boolean {
+  return Boolean(process.env.RESEND_API_KEY?.trim() || (process.env.SMTP_HOST?.trim() && process.env.SMTP_USER?.trim() && process.env.SMTP_PASS));
+}
+
 export async function sendEmail(to: string, subject: string, text: string): Promise<void> {
+  const from = process.env.EMAIL_FROM || (process.env.SMTP_USER ? `Ahuza Apparel <${process.env.SMTP_USER}>` : 'Ahuza Apparel <onboarding@resend.dev>');
+  if (process.env.SMTP_HOST?.trim() && process.env.SMTP_USER?.trim() && process.env.SMTP_PASS) {
+    const port = Number(process.env.SMTP_PORT) || 465;
+    const transport = nodemailer.createTransport({ host: process.env.SMTP_HOST.trim(), port, secure: port === 465, auth: { user: process.env.SMTP_USER.trim(), pass: process.env.SMTP_PASS }, connectionTimeout: 10000, socketTimeout: 15000 });
+    await transport.sendMail({ from, to, subject, text });
+    return;
+  }
   const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey) {
     console.info(`[email not configured] ${subject} -> ${to}`);
     return;
   }
-  const authorization = 'Bearer ' + apiKey;
-  await postJson('https://api.resend.com/emails', {
-    from: process.env.EMAIL_FROM || 'Ahuza Apparel <onboarding@resend.dev>',
-    to: [to],
-    subject,
-    text,
-  }, { Authorization: authorization });
+  await postJson('https://api.resend.com/emails', { from, to: [to], subject, text }, { Authorization: 'Bearer ' + apiKey });
+}
+
+const orderEmailSubjects: Record<OrderEmailKind, (id: string) => string> = {
+  order_placed: (id) => `We've received your Ahuza order ${id}`,
+  payment_confirmed: (id) => `Payment confirmed for your Ahuza order ${id}`,
+  shipped: (id) => `Your Ahuza order ${id} is on its way`,
+  follow_up: () => 'How are you enjoying your Ahuza pieces?',
+};
+
+function fallbackOrderEmail(kind: OrderEmailKind, order: Order): string {
+  const total = `${order.currency} ${(order.amount / 100).toFixed(2)}`;
+  if (kind === 'order_placed') return order.paymentMethod === 'cod'
+    ? `Hi ${order.shippingAddress.name}, your order ${order.id} (${total}) has been placed successfully and is confirmed.\n\nAHUZA Customer Care`
+    : `Hi ${order.shippingAddress.name}, we've received your order ${order.id} (${total}). Your payment is not confirmed yet; we will email you once it is verified.\n\nAHUZA Customer Care`;
+  if (kind === 'payment_confirmed') return `Hi ${order.shippingAddress.name}, your payment for order ${order.id} (${total}) is verified and your order is confirmed.\n\nAHUZA Customer Care`;
+  if (kind === 'shipped') return `Hi ${order.shippingAddress.name}, your order ${order.id} has shipped.${order.trackingNumber ? ` Tracking number: ${order.trackingNumber}.` : ''}\n\nAHUZA Customer Care`;
+  return `Hi ${order.shippingAddress.name}, we hope your order ${order.id} feels right at home. You can request a return or replacement within 7 days of delivery.\n\nAHUZA Customer Care`;
+}
+
+export async function sendOrderEmail(kind: OrderEmailKind, order: Order, email: string): Promise<void> {
+  if (!isEmailConfigured()) return;
+  const details = JSON.stringify({
+    customerName: order.shippingAddress.name,
+    orderReference: order.id,
+    paymentMethod: order.paymentMethod,
+    paymentStatus: order.paymentStatus,
+    status: order.status,
+    items: order.items.map(({ name, quantity }) => ({ name, quantity })),
+    total: `${order.currency} ${(order.amount / 100).toFixed(2)}`,
+    trackingNumber: order.trackingNumber || 'Not provided',
+  });
+  let body: string;
+  try { body = await generateOrderEmailBody(kind, details); }
+  catch (error) { console.error('AI email draft failed; using template:', error instanceof Error ? error.message : error); body = fallbackOrderEmail(kind, order); }
+  await sendEmail(email, orderEmailSubjects[kind](order.id), body);
 }
 
 export async function sendOrderConfirmation(order: Order, email: string): Promise<void> {
-  await sendEmail(email, `Your Ahuza order ${order.id} is confirmed`, `Thank you for your order. Total: ${order.currency} ${(order.amount / 100).toFixed(2)}. Track your order at /api/orders/${order.id}.`);
+  await sendOrderEmail('payment_confirmed', order, email);
 }
 
 export async function sendShippingNotice(order: Order, email: string): Promise<void> {
-  await sendEmail(email, `Your Ahuza order ${order.id} is on its way`, `Your order has shipped. Track its status at /api/orders/${order.id}.`);
+  await sendOrderEmail('shipped', order, email);
 }
 
 export async function sendSevenDayFollowUps(): Promise<void> {
-  if (!process.env.RESEND_API_KEY) return;
+  if (!isEmailConfigured()) return;
   const now = Date.now();
   const cutoff = now - 7 * 24 * 60 * 60 * 1000;
   const candidates = (await getDatabase()).orders.filter((order) => order.status === 'delivered' && !order.followUpSentAt && order.deliveredAt && new Date(order.deliveredAt).getTime() <= cutoff);
@@ -99,7 +141,7 @@ export async function sendSevenDayFollowUps(): Promise<void> {
     const customer = (await getDatabase()).customers.find((entry) => entry.id === candidate.userId);
     if (!customer) continue;
     try {
-      await sendEmail(customer.email, 'How are you enjoying your Ahuza pieces?', `We hope your order ${candidate.id} feels right at home. If you need a return or replacement, you can request one within 7 days of delivery.`);
+      await sendOrderEmail('follow_up', candidate, customer.email);
       await mutateDatabase((database) => {
         const order = database.orders.find((entry) => entry.id === candidate.id);
         if (order && !order.followUpSentAt) order.followUpSentAt = new Date().toISOString();

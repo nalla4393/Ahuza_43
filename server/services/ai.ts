@@ -178,3 +178,16 @@ Verified order details:
 ${orderDetails.slice(0, 3000)}`);
   return text || 'I could not prepare an email draft. Please try again.';
 }
+export type OrderEmailKind = 'order_placed' | 'payment_confirmed' | 'shipped' | 'follow_up';
+
+export async function generateOrderEmailBody(kind: OrderEmailKind, orderDetails: string): Promise<string> {
+  const purpose = {
+    order_placed: 'Tell the customer their order request has been received and placed successfully. If payment is pending verification, say clearly that payment is not yet confirmed and that they will get another email once it is verified. If it is cash on delivery, say the order is confirmed.',
+    payment_confirmed: 'Tell the customer their payment has been verified and the order is confirmed.',
+    shipped: 'Tell the customer the order has shipped and include the tracking number only if one is provided.',
+    follow_up: 'Write a friendly post-delivery follow-up asking how the order worked out and mention the existing 7-day return/replacement window.',
+  }[kind];
+  const text = await completeText(`Write the body of a concise, warm, human-sounding customer email for AHUZA Apparel. ${purpose} Use only the supplied order details. Do not invent delivery dates, policies, discounts or product claims. Do not request sensitive information. Keep it under 120 words, greet the customer by name if given, and sign off as AHUZA Customer Care. Output only the email body.\n\nVerified order details:\n${orderDetails.slice(0, 3000)}`);
+  if (!text) throw new Error('Empty email draft.');
+  return text;
+}

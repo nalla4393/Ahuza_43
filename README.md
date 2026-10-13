@@ -99,3 +99,7 @@ This starter uses a JSON-file database and supports only a single server process
 - **Image Settings** tab: aspect ratio, fit, alignment, background, radius, sizes, spacing (desktop and mobile), quality options, and gallery/thumbnail/zoom/card layout. Settings are saved in the database and applied only to product imagery.
 - **Storage:** files are sent to `POST /api/owner/images` (owner key required, magic-byte validated, size-limited) and stored on the server disk under `UPLOAD_DIR` (default: an `uploads` folder next to `DATA_FILE`), served from `/uploads`. The original is kept plus responsive WebP versions; the database stores only references and metadata, never Base64. On Railway this lives on the existing volume at `/app/.data`, so no new service or credentials are needed. Without a persistent volume, uploads are lost on redeploy.
 - **Configuration:** `MAX_UPLOAD_MB` (default 10) and optional `UPLOAD_DIR`. Existing products keep their current images until you upload replacements.
+
+## Customer order emails
+
+Order received, payment confirmed, shipped and 7-day follow-up emails are drafted by OpenAI (`OPENAI_API_KEY`) and sent automatically; a plain template is used if the AI call fails. Sending needs `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` (Gmail: use an app password) or `RESEND_API_KEY`. UPI orders are only described as "received, payment pending" until the owner records the bank reference.
