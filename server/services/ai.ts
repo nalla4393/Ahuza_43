@@ -9,27 +9,44 @@ export function isTextAiConfigured(): boolean {
   return Boolean(process.env.OPENAI_API_KEY?.trim() || process.env.GEMINI_API_KEY?.trim());
 }
 
-async function completeText(prompt: string, options: { json?: boolean } = {}): Promise<string> {
-  const openAiKey = process.env.OPENAI_API_KEY?.trim();
-  if (openAiKey) {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openAiKey}` },
-      body: JSON.stringify({
-        model: process.env.OPENAI_MODEL?.trim() || 'gpt-4o-mini',
-        temperature: 0.5,
-        max_tokens: 700,
-        ...(options.json ? { response_format: { type: 'json_object' } } : {}),
-        messages: [{ role: 'user', content: prompt }],
-      }),
-      signal: AbortSignal.timeout(30000),
-    });
-    if (!response.ok) throw new Error(`OpenAI request failed (HTTP ${response.status}).`);
-    const result = await response.json() as { choices?: { message?: { content?: string } }[] };
-    return result.choices?.[0]?.message?.content?.trim() || '';
-  }
+async function completeWithOpenAi(prompt: string, json: boolean): Promise<string> {
+  const openAiKey = process.env.OPENAI_API_KEY!.trim();
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openAiKey}` },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL?.trim() || 'gpt-4o-mini',
+      temperature: 0.5,
+      max_tokens: 700,
+      ...(json ? { response_format: { type: 'json_object' } } : {}),
+      messages: [{ role: 'user', content: prompt }],
+    }),
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!response.ok) throw new Error(`OpenAI request failed (HTTP ${response.status}).`);
+  const result = await response.json() as { choices?: { message?: { content?: string } }[] };
+  return result.choices?.[0]?.message?.content?.trim() || '';
+}
+
+async function completeWithGemini(prompt: string): Promise<string> {
   const response = await getAiClient().models.generateContent({ model: 'gemini-3.8-flash', contents: prompt });
   return response.text?.trim() || '';
+}
+
+// Gemini is preferred when configured; OpenAI is used as the other provider or as a fallback.
+async function completeText(prompt: string, options: { json?: boolean } = {}): Promise<string> {
+  const hasGemini = Boolean(process.env.GEMINI_API_KEY?.trim());
+  const hasOpenAi = Boolean(process.env.OPENAI_API_KEY?.trim());
+  const attempts: (() => Promise<string>)[] = [];
+  if (hasGemini) attempts.push(() => completeWithGemini(prompt));
+  if (hasOpenAi) attempts.push(() => completeWithOpenAi(prompt, Boolean(options.json)));
+  if (!attempts.length) throw new Error('AI_NOT_CONFIGURED');
+  let lastError: unknown;
+  for (const attempt of attempts) {
+    try { const text = await attempt(); if (text) return text; }
+    catch (error) { lastError = error; console.error('AI provider failed:', error instanceof Error ? error.message : error); }
+  }
+  throw lastError instanceof Error ? lastError : new Error('AI returned no text.');
 }
 
 export type PaymentReceiptExtraction = {
@@ -149,7 +166,10 @@ async function generateOpenAiSupportReply(message: string, storeContext: string,
 }
 
 export async function generateCustomerSupportReply(message: string, storeContext: string, history: SupportTurn[] = []): Promise<string> {
-  if (process.env.OPENAI_API_KEY?.trim()) return generateOpenAiSupportReply(message, storeContext, history);
+  if (process.env.OPENAI_API_KEY?.trim()) {
+    try { return await generateOpenAiSupportReply(message, storeContext, history); }
+    catch (error) { if (!process.env.GEMINI_API_KEY?.trim()) throw error; console.error('OpenAI support reply failed; using Gemini:', error instanceof Error ? error.message : error); }
+  }
   const ai = getAiClient();
   const response = await ai.models.generateContent({
     model: 'gemini-3.8-flash',
