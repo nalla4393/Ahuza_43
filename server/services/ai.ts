@@ -211,3 +211,12 @@ export async function generateOrderEmailBody(kind: OrderEmailKind, orderDetails:
   if (!text) throw new Error('Empty email draft.');
   return text;
 }
+
+export async function generateMarketingEmail(goal: string, customerContext: string): Promise<{ subject: string; body: string }> {
+  const text = await completeText(`You write marketing emails for AHUZA Apparel. Goal set by the owner: ${goal.slice(0, 500)}\nWrite a short, warm, human-sounding email (under 110 words) to one customer who opted in to marketing. Use only the details given; do not invent discounts, prices, deadlines, policies or product claims. Sign off as AHUZA Customer Care. Return only JSON: {"subject":"...","body":"..."}.\n\nCustomer details:\n${customerContext.slice(0, 1000)}`, { json: true });
+  try {
+    const parsed = JSON.parse(text.replace(/^```(?:json)?|```$/g, '').trim()) as { subject?: unknown; body?: unknown };
+    if (typeof parsed.subject === 'string' && typeof parsed.body === 'string' && parsed.subject.trim() && parsed.body.trim()) return { subject: parsed.subject.trim().slice(0, 150), body: parsed.body.trim() };
+  } catch { /* fall through */ }
+  throw new Error('AI returned an unusable draft.');
+}

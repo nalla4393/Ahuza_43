@@ -1,6 +1,7 @@
 import { getDatabase, mutateDatabase, type Order, type StoreEvent, type SupportTicket } from './database.js';
 import { randomUUID } from 'node:crypto';
 import nodemailer from 'nodemailer';
+import { runAutomations } from './automations.js';
 import { generateOrderEmailBody, type OrderEmailKind } from './ai.js';
 
 type IntegrationEvent = { name: string; orderId?: string; amount?: number; currency?: string; page?: string; campaign?: string; consent?: boolean };
@@ -152,6 +153,8 @@ export async function sendSevenDayFollowUps(): Promise<void> {
 
 export function startFollowUpScheduler(): void {
   void sendSevenDayFollowUps().catch((error) => console.error('Follow-up scan failed:', error));
+  void runAutomations().catch((error) => console.error('Automation scan failed:', error));
+  setInterval(() => void runAutomations().catch((error) => console.error('Automation scan failed:', error)), 15 * 60 * 1000).unref();
   const timer = setInterval(() => void sendSevenDayFollowUps().catch((error) => console.error('Follow-up scan failed:', error)), 60 * 60 * 1000);
   timer.unref();
 }

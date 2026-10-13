@@ -152,6 +152,18 @@ export const defaultStorefrontContent: StorefrontContent = {
   storyImageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1200&q=85',
 };
 
+export type AutomationTrigger = 'order_placed' | 'order_delivered' | 'win_back';
+export type AutomationRule = {
+  id: string;
+  name: string;
+  trigger: AutomationTrigger;
+  delayDays: number;
+  goal: string;
+  enabled: boolean;
+  createdAt: string;
+};
+export type AutomationRun = { key: string; ruleId: string; ruleName: string; to: string; status: 'sent' | 'failed' | 'skipped'; detail?: string; at: string };
+
 export type Database = {
   products: Product[];
   customers: Customer[];
@@ -164,6 +176,8 @@ export type Database = {
   content: StorefrontContent;
   imageSettings?: ImageSettings;
   imageLibrary?: ProductImage[];
+  automations?: AutomationRule[];
+  automationRuns?: AutomationRun[];
 };
 
 const databasePath = path.resolve(process.env.DATA_FILE || '.data/ahuza-db.json');
@@ -210,6 +224,8 @@ async function loadDatabase(): Promise<Database> {
       content: { ...structuredClone(defaultStorefrontContent), ...(parsed.content && typeof parsed.content === 'object' ? parsed.content : {}) },
       imageSettings: mergeImageSettings(parsed.imageSettings),
       imageLibrary: Array.isArray(parsed.imageLibrary) ? parsed.imageLibrary : [],
+      automations: Array.isArray(parsed.automations) ? parsed.automations : [],
+      automationRuns: Array.isArray(parsed.automationRuns) ? parsed.automationRuns : [],
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;

@@ -6,6 +6,8 @@ import { hashPassword, verifyPassword } from './services/auth.js';
 import { extractPaymentReceipt, generateCustomerEmailBody, generateCustomerSupportReply, generateOwnerAgentPlan, generateSocialPost, isTextAiConfigured, type CustomerEmailKind, type OwnerAgentIntent } from './services/ai.js';
 import { getDatabase, mergeImageSettings, mutateDatabase, type Database, type Order, type PaymentReceiptReview, type Product, type ShippingAddress, type StorefrontContent, type SupportTicket } from './services/database.js';
 import { deleteProductImageFiles, detectImageType, maxUploadBytes, sanitizeImageSettings, saveProductImage } from './services/images.js';
+import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
+import { generateMarketingEmail } from './services/ai.js';
 import { expirePendingOrders, getMarketingWebhookUrls, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail, sendOrderEmail, sendOrderConfirmation, sendShippingNotice, testMarketingWebhooks, triggerAutomations } from './services/integrations.js';
 import { createUpiIntent, getUpiConfiguration } from './services/upi.js';
 
@@ -980,6 +982,46 @@ api.post('/owner/social-post', requireOwner, ownerLimit, async (request, respons
   if (!product) { response.status(404).json({ error: 'Active product not found.' }); return; }
   try { response.json({ caption: await generateSocialPost(product.name, `${product.description}. Category: ${product.category}.`) }); }
   catch (error) { asyncError(response, error); }
+});
+
+api.get('/owner/marketing-automations', requireOwner, ownerLimit, async (_request, response) => { response.json(await listAutomations()); });
+
+api.post('/owner/marketing-automations', requireOwner, ownerLimit, async (request, response) => {
+  const rule = validateRule(request.body);
+  if (typeof rule === 'string') { response.status(400).json({ error: rule }); return; }
+  response.status(201).json({ rule: await createRule(rule) });
+});
+
+api.patch('/owner/marketing-automations/:id', requireOwner, ownerLimit, async (request, response) => {
+  if (typeof request.body?.enabled !== 'boolean') { response.status(400).json({ error: 'Provide enabled true or false.' }); return; }
+  const rule = await mutateDatabase((database) => {
+    const found = database.automations?.find((entry) => entry.id === request.params.id);
+    if (found) found.enabled = request.body.enabled;
+    return found ? structuredClone(found) : null;
+  });
+  if (!rule) { response.status(404).json({ error: 'Automation not found.' }); return; }
+  response.json({ rule });
+});
+
+api.delete('/owner/marketing-automations/:id', requireOwner, ownerLimit, async (request, response) => {
+  const removed = await mutateDatabase((database) => {
+    const before = database.automations?.length || 0;
+    database.automations = (database.automations || []).filter((entry) => entry.id !== request.params.id);
+    return before !== database.automations.length;
+  });
+  if (!removed) { response.status(404).json({ error: 'Automation not found.' }); return; }
+  response.status(204).end();
+});
+
+api.post('/owner/marketing-automations/preview', requireOwner, ownerLimit, async (request, response) => {
+  const rule = validateRule({ trigger: 'win_back', delayDays: 0, ...request.body });
+  if (typeof rule === 'string') { response.status(400).json({ error: rule }); return; }
+  try { response.json(await generateMarketingEmail(rule.goal, JSON.stringify({ customerName: 'Sample Customer', lastOrderItems: ['Sample product'] }))); }
+  catch (error) { asyncError(response, error); }
+});
+
+api.post('/owner/marketing-automations/run', requireOwner, ownerLimit, async (_request, response) => {
+  try { response.json({ sent: await runAutomations() }); } catch (error) { asyncError(response, error); }
 });
 
 api.post('/owner/automations/test', requireOwner, ownerLimit, async (_request, response) => {

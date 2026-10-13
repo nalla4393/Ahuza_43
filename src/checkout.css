@@ -66,3 +66,12 @@
 .customer-wishlist h3{margin:0;font-size:12px;letter-spacing:.12em;text-transform:uppercase}
 .wishlist-item{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .wishlist-item span{flex:1 1 160px;min-width:0}
+
+.studio-automations{display:grid;gap:12px;margin-top:20px}
+.automation-form{display:grid;gap:10px}
+.automation-form label{display:grid;gap:4px}
+.automation-actions{display:flex;gap:8px;flex-wrap:wrap}
+.automation-rule{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line)}
+.automation-rule>div{flex:1 1 220px;display:grid;gap:2px}
+.automation-preview{padding:12px;border:1px solid var(--line)}
+.automation-run{margin:0;font-size:13px}
