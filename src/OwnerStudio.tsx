@@ -92,7 +92,6 @@ function EmailAgentPanel({ orders, emailEnabled, selectedOrderId, kind, draft, r
     <section className="studio-panel">
       <div className="studio-panel-heading"><div><h2>AI customer email agent</h2><span>Generate a draft from verified order details, review it, then send.</span></div><Sparkles size={18} /></div>
       <p className="studio-muted">Manual email drafts are separate from automatic order confirmations and shipping notices. AI drafting needs OPENAI_API_KEY (or GEMINI_API_KEY).</p>
-      {!emailEnabled && <p className="studio-email-warning" role="status">Email sending is unavailable until RESEND_API_KEY is configured.</p>}
       <div className="studio-form-grid">
         <label>Order<select value={selectedOrderId} onChange={(event) => onSelectOrder(event.target.value)} disabled={eligibleOrders.length === 0}>
           {eligibleOrders.length === 0 && <option value="">No paid orders available</option>}
