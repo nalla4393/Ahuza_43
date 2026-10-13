@@ -24,34 +24,30 @@ Local customer sessions are encrypted and stored under `.data/sessions`, expire 
 
 Open **Owner Studio** from the storefront footer and enter the configured owner key. The key stays in browser memory and is sent only to owner APIs using `X-Owner-Key`. The dashboard includes sales and low-stock overview, product and ghost-mannequin editing, storefront content, fulfillment and return requests, integration status, an AI owner agent, reviewed customer-email drafts, and social caption generation.
 
-Owner Studio has a **Publish site / Unpublish site** control in its header. Unpublishing displays a maintenance page to visitors and blocks public storefront APIs and new checkouts; the owner can still access Owner Studio, existing customer orders and payment status, and provider webhooks. The storefront publication setting is persisted with the database and defaults to published for existing installations.
+Owner Studio has a **Publish site / Unpublish site** control in its header. Unpublishing displays a maintenance page to visitors and blocks public storefront APIs and new checkouts; the owner can still access Owner Studio, existing customer orders and direct UPI status. The storefront publication setting is persisted with the database and defaults to published for existing installations.
 
 The AI owner agent reads current store data and can propose inventory updates, order-status changes, and customer-email drafts. Write actions require owner approval; email drafts must still be reviewed before sending. Exact inventory commands such as `set stock AH-SFS-001 to 20` work without Gemini and produce an approval proposal. Set `GEMINI_API_KEY` for natural-language planning and email drafting. Configure `RESEND_API_KEY`, `ZAPIER_WEBHOOK_URL`, and `GOOGLE_ADS_WEBHOOK_URL` in `.env` to enable those integrations.
 
-## UPI payments
+## Direct UPI payments
 
-Checkout uses a custom AHUZA interface with a Razorpay one-time, fixed-amount UPI QR. The customer pays with a supported UPI app by scanning the QR; this Razorpay API flow does **not** supply an UPI intent/deep link or hosted checkout, so neither is fabricated. A scan, browser redirect, or uploaded receipt never confirms payment. The backend computes subtotal from current server catalog prices, adds ₹100 shipping below ₹2,500 (free shipping at/above ₹2,500), applies no currently configured discounts or extra taxes, then polls Razorpay's authenticated QR/payment APIs and accepts signed `qr_code.credited` webhooks. Amount, currency, UPI method, merchant account, QR, internal reference, and order must match before a live order is settled.
+Checkout uses a native `upi://pay` intent to open an installed UPI application. On desktop, checkout displays a QR encoding the same intent so a customer can scan it with a UPI app on their phone; the QR is rendered locally and does not send payment data to a third-party QR service. Configure `UPI_VPA` and optionally `UPI_MERCHANT_NAME` on the server; the VPA must be an AHUZA merchant account verified with the bank/UPI provider. `GET /api/payments/config` exposes only the public VPA and whether it passes syntax validation. Syntax validation does not verify VPA ownership. Direct UPI links have no API credentials and no third-party gateway is used.
 
-Without configured approved merchant credentials, `GET /api/payments/config` reports payments unavailable and checkout stays disabled. For a Razorpay test account, set these server environment values (for local development, copy `.env.example` to the ignored `.env`; in Codespaces, add them as repository/environment Secrets):
+The backend calculates the order amount from current catalog prices, creates a unique order reference, pre-fills the merchant VPA, amount, INR currency and reference in the intent, and reserves stock for 20 minutes. At expiry, the order is cancelled and the reservation is released. A cancelled or expired link must not be reused.
+
+**Automatic payment verification is not available.** A UPI intent can open an app but cannot securely report a bank settlement to this server. An app callback, success screen, customer claim, screenshot, receipt or AI extraction is not payment proof. Orders remain `pending_payment` until an authorized AHUZA owner matches the settled amount and bank UTR in the merchant bank account using **Owner Studio → Orders & receipts → Confirm after bank verification**. This owner-only operation records the bank reference and verification timestamp. The customer status endpoint never accepts client-supplied payment status and cannot mark an order paid. No external bank verification API is configured in this project; automatic confirmation requires a bank-supported API or a verified payment provider.
+
+Set these server variables (never use a `VITE_` prefix):
 
 ```dotenv
-PAYMENT_PROVIDER=razorpay
-PAYMENT_ENVIRONMENT=test
-RAZORPAY_KEY_ID=rzp_test_...
-RAZORPAY_KEY_SECRET=...
-RAZORPAY_WEBHOOK_SECRET=...
-RAZORPAY_ACCOUNT_ID=...
+UPI_VPA=your-verified-merchant-vpa@bank
+UPI_MERCHANT_NAME=AHUZA Apparel
 ```
 
-Obtain the API key ID/secret and account ID from the approved Razorpay merchant dashboard, and create a webhook secret when registering the webhook. Never put these values in frontend variables, source control, `VITE_*` variables, or screenshots. The configured key prefix must match the environment (`rzp_test_` for test; `rzp_live_` for live). Use GitHub Codespaces **Settings → Secrets and variables → Codespaces** (or repository/environment secrets with least privilege) for hosted development. `.env` is ignored by Git; `.env.example` contains only placeholders.
+`UPI_VPA` is public payment information, not an API secret. Do not deploy until you have verified the exact merchant VPA and completed a small real transaction. In local development, use `.env`; production environments should set these through their deployment variable manager. Without a syntactically valid VPA, direct UPI checkout is disabled while cash on delivery remains available.
 
-For a reachable deployment, register `https://<your-public-host>/api/payments/razorpay/webhook` in Razorpay and subscribe to `qr_code.credited`, `refund.created`, `refund.processed`, and `refund.failed`. Use the exact webhook secret in `RAZORPAY_WEBHOOK_SECRET`; the server verifies the signature against the unparsed raw request bytes and checks the configured account ID. Razorpay must be able to reach this HTTPS URL. Never mark an order paid from browser-controlled fields. Cancellation/expiry first queries and closes the QR, checks for captures, and only then releases reserved stock.
+Cash on delivery remains available. COD orders are saved as `confirmed` with payment status `pending` and reserve inventory. In **Owner Studio → Orders & receipts**, mark the order delivered, then use **Mark cash collected / paid** after cash has been received. COD revenue is counted only after the owner records payment.
 
-Test flow: use `PAYMENT_ENVIRONMENT=test` and Razorpay test-mode keys; sign in, add an in-stock product, create a checkout QR, complete a test UPI payment in the provider's supported test setup, then confirm status through both the customer checkout and the Razorpay dashboard/webhook delivery log. Test orders are marked `test_paid`, inventory is restored, invoices/fulfillment/revenue automation are not enabled. The unit suite is `npm test`. Test refusal cases by testing an invalid webhook signature, duplicate event delivery, wrong amount/currency/reference, failed and pending UPI attempts, cancellation, and repeated refund requests using provider sandbox tooling where available. Full refund controls are owner-only, live-mode-only, require a verified payment, and reuse the exact persisted idempotency key/body after an uncertain network result.
-
-For production, obtain Razorpay's live UPI QR/API approval and live credentials from the merchant account, set `PAYMENT_ENVIRONMENT=live`, deploy the Node server with persistent storage, HTTPS, stable `SESSION_SECRET`, an owner key, and the server-side variables above. Configure the production webhook URL before opening checkout. Verify end to end with a small real UPI transaction: check the captured payment in Razorpay, ensure a matching signed webhook or authenticated server poll records the same payment/amount/currency/reference, confirm the order and invoice become available, then test a full refund and verify Razorpay's final refund event/status. This integration has not been verified with production merchant credentials; do not enable live checkout until this test passes.
-
-For an unpaid order, a customer can optionally submit a payment receipt image for owner review. When `GEMINI_API_KEY` is configured, Gemini extracts visible details, but the image is not stored and AI never approves a payment or changes an order's payment status. The owner reviews extracted details against independent records in **Owner Studio → Orders & receipts**. Marking a receipt reviewed is only an acknowledgement; payment status and invoices still require Razorpay's signed capture webhook.
+Customers may optionally submit an image of payment proof for owner review. AI may extract visible details, but neither an AI result nor a receipt review confirms payment. Independently check the bank settlement before using the owner-only confirmation.
 
 ## Build and run
 
@@ -69,10 +65,10 @@ GitHub Pages cannot host this application because it needs the Express API for t
 
 1. Create a Railway project and an empty service for this application. In the service settings, set the build command to `npm ci && npm run build`, the start command to `npm start`, and the health-check path to `/api/health`. Do not enable Railway's own GitHub auto-deploy; GitHub Actions performs the deploy after verification.
 2. Add a Railway volume to the service mounted at `/app/.data`. Set `DATA_FILE=/app/.data/ahuza-db.json` and `SESSION_FILE_PATH=/app/.data/sessions` so the database and customer sessions survive deploys and restarts. Keep this as a single service instance; the JSON database and file-backed sessions are not safe for multiple instances.
-3. Add `SESSION_SECRET` (a stable random value of at least 32 characters) and `OWNER_API_KEY` in Railway's service variables. Railway supplies `PORT`. Leave payment and other integration variables unset until their providers are configured; payment checkout stays disabled without approved Razorpay credentials.
+3. Add `SESSION_SECRET` (a stable random value of at least 32 characters) and `OWNER_API_KEY` in Railway's service variables. Railway supplies `PORT`. Leave payment and other integration variables unset until their providers are configured; direct UPI checkout stays disabled until `UPI_VPA` is configured.
 4. Create a Railway project token. In the GitHub repository, add it under **Settings → Secrets and variables → Actions → Secrets** as `RAILWAY_TOKEN`. Add the Railway web service name or ID under **Settings → Secrets and variables → Actions → Variables** as `RAILWAY_SERVICE`. Do not commit or paste the token into the repository.
 5. Push to `main` or manually run **Actions → Verify and deploy to Railway**. The workflow runs `npm test` and `npm run build` first, then deploys only if those checks pass. Once Railway assigns a public domain, verify `/api/health` and the storefront.
-6. Before accepting payments, configure the Razorpay webhook at `https://<railway-domain>/api/payments/razorpay/webhook` and complete the provider's test and live verification described above.
+6. Before accepting direct UPI payments, set `UPI_VPA` to the bank-verified AHUZA merchant VPA and complete a small live transaction. Payment confirmation is manual bank reconciliation; this project has no bank verification API.
 
 Configure a Railway volume and stable secrets before treating the deployment as production-ready.
 
@@ -80,8 +76,8 @@ Configure a Railway volume and stable secrets before treating the deployment as 
 
 - `GET /api/products`, `GET /api/products/:id`
 - `POST /api/auth/signup`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
-- `GET /api/payments/config`, `POST /api/payments/orders`, `GET /api/payments/orders/:id/status`, `POST /api/payments/orders/:id/cancel`, `POST /api/payments/razorpay/webhook` (raw-body signature verified)
-- `POST /api/owner/orders/:id/refund` (owner-only, full live-payment refund using provider idempotency)
+- `GET /api/payments/config`, `POST /api/payments/orders`, `GET /api/payments/orders/:id/status`, `POST /api/payments/orders/:id/cancel` (direct UPI intent; customer status is never trusted for confirmation)
+- `PATCH /api/owner/orders/:id/upi-payment` (owner-only; records manual bank reconciliation and requires the bank UTR/reference)
 - `POST /api/orders/:id/payment-receipts` (authenticated JPEG/PNG/WebP image, maximum 5 MB); owners review extracted details via `GET /api/owner/payment-receipts` and `PATCH /api/owner/payment-receipts/:id`
 - `GET /api/orders`, `GET /api/orders/:id`, `GET /api/orders/:id/invoice` (PDF after payment confirmation), `POST /api/orders/:id/returns`
 - Storefront content: `GET /api/storefront`; owner edits via `PATCH /api/owner/content`
@@ -92,3 +88,10 @@ Configure a Railway volume and stable secrets before treating the deployment as 
 ## Deployment notes
 
 This starter uses a JSON-file database and supports only a single server process; do not scale to multiple instances or high-volume commerce without migrating to PostgreSQL with transactions. Persistent storage is not a substitute for database backups. Use a shared production session store such as Redis before scaling horizontally, configure HTTPS and stable random secrets, and restrict CORS if deploying the API separately from the frontend. The email adapter sends through Resend when configured and otherwise logs the event; configure a real email provider before launch. Do not treat client-side ad events as verified purchases.
+
+## Owner Studio image management
+
+- **Products & stock** → *Upload Image* opens the phone gallery/photo picker (or the computer file picker). JPG, PNG and WebP, several files at once, with instant preview, progress, retry, replace, delete, set-main and reorder. A product cannot be saved while an upload is pending or failed. Status (Published/Unpublished) controls storefront visibility.
+- **Image Settings** tab: aspect ratio, fit, alignment, background, radius, sizes, spacing (desktop and mobile), quality options, and gallery/thumbnail/zoom/card layout. Settings are saved in the database and applied only to product imagery.
+- **Storage:** files are sent to `POST /api/owner/images` (owner key required, magic-byte validated, size-limited) and stored on the server disk under `UPLOAD_DIR` (default: an `uploads` folder next to `DATA_FILE`), served from `/uploads`. The original is kept plus responsive WebP versions; the database stores only references and metadata, never Base64. On Railway this lives on the existing volume at `/app/.data`, so no new service or credentials are needed. Without a persistent volume, uploads are lost on redeploy.
+- **Configuration:** `MAX_UPLOAD_MB` (default 10) and optional `UPLOAD_DIR`. Existing products keep their current images until you upload replacements.

@@ -6,6 +6,7 @@ import createFileStore from 'session-file-store';
 import helmet from 'helmet';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
+import { uploadRoot } from './server/services/images.js';
 import { api, expireReservationsOnStartup } from './server/routes.js';
 import { expirePendingOrders, startFollowUpScheduler } from './server/services/integrations.js';
 
@@ -28,7 +29,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
       imgSrc: ["'self'", 'https:', 'data:'],
-      connectSrc: ["'self'", 'https://api.razorpay.com'],
+      connectSrc: ["'self'"],
       frameSrc: ["'self'"],
       formAction: ["'self'"],
       objectSrc: ["'none'"],
@@ -43,10 +44,9 @@ if (process.env.FRONTEND_ORIGIN || !isProduction) app.use(cors({
     callback(new Error('Origin is not allowed by CORS.'));
   },
   credentials: true,
-  allowedHeaders: ['Content-Type', 'X-Owner-Key'],
-  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'X-Owner-Key', 'X-File-Name'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
-app.use('/api/payments/razorpay/webhook', express.raw({ type: 'application/json', limit: '32kb' }));
 app.use(express.json({ limit: '32kb' }));
 app.use(session({
   name: 'ahuza.sid',
@@ -63,6 +63,7 @@ app.use(session({
   cookie: { httpOnly: true, secure: isProduction, sameSite: 'lax', maxAge: 7 * 24 * 60 * 60 * 1000 },
 }));
 
+app.use('/uploads', express.static(uploadRoot, { index: false, dotfiles: 'deny', immutable: true, maxAge: '365d', setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff') }));
 app.use('/api', api);
 const frontendPath = path.resolve('dist');
 if (existsSync(frontendPath)) {

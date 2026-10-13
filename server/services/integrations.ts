@@ -1,6 +1,5 @@
 import { getDatabase, mutateDatabase, type Order, type StoreEvent, type SupportTicket } from './database.js';
 import { randomUUID } from 'node:crypto';
-import { applyCapturedQrPayment, createPaymentProvider, getPaymentConfiguration } from './payments.js';
 
 type IntegrationEvent = { name: string; orderId?: string; amount?: number; currency?: string; page?: string; campaign?: string; consent?: boolean };
 
@@ -117,61 +116,12 @@ export function startFollowUpScheduler(): void {
 
 export async function expirePendingOrders(): Promise<void> {
   const now = Date.now();
-  const expiredOrders = (await getDatabase()).orders.filter((order) => order.status === 'pending_payment'
+  const expiredOrders = (await getDatabase()).orders.filter((order) => order.paymentMethod === 'upi' && order.status === 'pending_payment'
     && order.reservationExpiresAt && new Date(order.reservationExpiresAt).getTime() <= now);
-  if (!expiredOrders.length) return;
-  const configured = getPaymentConfiguration().configured;
-  const provider = configured ? createPaymentProvider() : null;
   for (const candidate of expiredOrders) {
-    if (candidate.razorpayQrCodeId && !provider) {
-      console.error(`Keeping expired reservation for ${candidate.id}: Razorpay is not configured to confirm or close its QR.`);
-      continue;
-    }
-    if (candidate.razorpayQrCodeId && provider) {
-      try {
-        let status = await provider.fetchQrStatus(candidate.razorpayQrCodeId);
-        if (status.status === 'captured') {
-          if (status.capturedPayments.length > 1) {
-            for (const [index, payment] of status.capturedPayments.entries()) {
-              await mutateDatabase((database) => applyCapturedQrPayment(database, {
-                eventId: `expiry_multiple_${candidate.razorpayQrCodeId}_${payment.id}_${index}`,
-                qrCodeId: candidate.razorpayQrCodeId!,
-                paymentReference: null,
-                internalOrderId: null,
-                payment,
-              }));
-            }
-            continue;
-          }
-          for (const [index, payment] of status.capturedPayments.entries()) {
-            const result = await mutateDatabase((database) => applyCapturedQrPayment(database, {
-              eventId: `expiry_${candidate.razorpayQrCodeId}_${payment.id}_${index}`,
-              qrCodeId: candidate.razorpayQrCodeId!,
-              paymentReference: status.reference,
-              internalOrderId: status.orderId,
-              payment,
-            }));
-            if (result.outcome === 'paid' && result.order) {
-              const email = (await getDatabase()).customers.find((customer) => customer.id === result.order!.userId)?.email;
-              if (email) void sendOrderConfirmation(result.order, email).catch((error) => console.error('Confirmation email failed:', error));
-              void triggerAutomations({ name: 'purchase', orderId: result.order.id, amount: result.order.amount / 100, currency: result.order.currency, consent: result.order.marketingConsent });
-            }
-          }
-          continue;
-        }
-        if (status.qrStatus === 'active') {
-          await provider.closeQrCode(candidate.razorpayQrCodeId);
-          status = await provider.fetchQrStatus(candidate.razorpayQrCodeId);
-        }
-        if (status.status === 'captured' || status.qrStatus === 'active') continue;
-      } catch (error) {
-        console.error(`Could not safely close or verify expired Razorpay QR for ${candidate.id}; reservation retained:`, error);
-        continue;
-      }
-    }
     await mutateDatabase((database) => {
       const order = database.orders.find((entry) => entry.id === candidate.id && entry.status === 'pending_payment'
-        && entry.reservationExpiresAt && new Date(entry.reservationExpiresAt).getTime() <= now);
+        && entry.paymentMethod === 'upi' && entry.reservationExpiresAt && new Date(entry.reservationExpiresAt).getTime() <= now);
       if (!order) return;
       for (const item of order.items) {
         const product = database.products.find((entry) => entry.id === item.productId);

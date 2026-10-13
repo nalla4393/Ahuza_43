@@ -5,6 +5,7 @@ import './checkout.css';
 import './owner-studio.css';
 import './styles.css';
 import './mobile-navigation.css';
+import './image-management.css';
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

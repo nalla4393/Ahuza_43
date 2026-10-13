@@ -13,6 +13,43 @@ export type Product = {
   imageUrl: string;
   active: boolean;
   ghostMannequin: { imageUrl?: string; tags: string[]; background?: string };
+  images?: ProductImage[];
+  mainImageId?: string;
+};
+
+export type ProductImage = {
+  id: string;
+  url: string;
+  originalUrl: string;
+  variants: { width: number; url: string }[];
+  width: number;
+  height: number;
+  size: number;
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+  hasAlpha: boolean;
+  originalName: string;
+  createdAt: string;
+};
+
+export type ImageSettings = {
+  aspectRatio: '1:1' | '3:4' | '4:5' | '4:3' | 'original';
+  fit: 'contain' | 'cover' | 'fill';
+  alignment: 'center' | 'top' | 'bottom' | 'left' | 'right';
+  background: 'white' | 'ivory' | 'neutral' | 'transparent';
+  cornerRadius: number;
+  displaySize: number;
+  thumbnailSize: number;
+  spacing: number;
+  mobile: { aspectRatio: ImageSettings['aspectRatio']; displaySize: number; spacing: number };
+  quality: { preserveOriginal: boolean; optimizedVersions: boolean; preserveTransparency: boolean };
+  layout: { mode: 'single' | 'gallery'; thumbnails: boolean; thumbnailPlacement: 'bottom' | 'left' | 'right'; zoom: boolean; cardImage: 'main' | 'hover-second' };
+};
+
+export const defaultImageSettings: ImageSettings = {
+  aspectRatio: '3:4', fit: 'contain', alignment: 'center', background: 'neutral', cornerRadius: 0, displaySize: 80, thumbnailSize: 64, spacing: 17,
+  mobile: { aspectRatio: '3:4', displaySize: 100, spacing: 11 },
+  quality: { preserveOriginal: true, optimizedVersions: true, preserveTransparency: true },
+  layout: { mode: 'gallery', thumbnails: true, thumbnailPlacement: 'bottom', zoom: true, cardImage: 'main' },
 };
 
 export type Customer = {
@@ -41,30 +78,18 @@ export type Order = {
   amount: number;
   currency: string;
   trackingNumber?: string;
-  status: 'pending_payment' | 'test_paid' | 'paid' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
-  paymentStatus?: 'pending' | 'paid' | 'test_paid' | 'failed' | 'cancelled' | 'expired' | 'refunded';
-  paymentEnvironment?: 'test' | 'live';
+  paymentMethod?: 'upi' | 'cod';
+  status: 'pending_payment' | 'confirmed' | 'paid' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
+  paymentStatus?: 'pending' | 'paid' | 'failed' | 'cancelled' | 'expired' | 'refunded';
   marketingConsent?: boolean;
   subtotalAmount?: number;
   shippingAmount?: number;
   discountAmount?: number;
   taxAmount?: number;
-  razorpayOrderId?: string;
-  razorpayQrCodeId?: string;
-  qrImageUrl?: string;
   paymentReference?: string;
-  paymentId?: string;
   paymentVerifiedAt?: string;
-  paymentReview?: { reason: string; paymentId: string; createdAt: string };
-  refund?: {
-    idempotencyKey: string;
-    receipt: string;
-    providerRefundId?: string;
-    amount: number;
-    status: 'initiating' | 'pending' | 'processed' | 'failed';
-    createdAt: string;
-    updatedAt: string;
-  };
+  manualPaymentReference?: string;
+  paymentVerificationMethod?: 'manual_bank_reconciliation';
   reservationExpiresAt?: string;
   createdAt: string;
   deliveredAt?: string;
@@ -102,14 +127,7 @@ export type PaymentReceiptReview = {
   reviewNote?: string;
 };
 
-export type PaymentAuditEvent = {
-  eventId: string;
-  type: string;
-  orderId: string | null;
-  paymentId: string | null;
-  outcome: string;
-  createdAt: string;
-};
+
 
 export type StorefrontContent = {
   announcement: string;
@@ -140,11 +158,11 @@ export type Database = {
   events: StoreEvent[];
   supportTickets: SupportTicket[];
   paymentReceiptReviews?: PaymentReceiptReview[];
-  paymentAuditEvents?: PaymentAuditEvent[];
   integrationWebhooks?: { googleAds?: string; zapier?: string };
-  processedPaymentWebhookIds?: string[];
   sitePublished?: boolean;
   content: StorefrontContent;
+  imageSettings?: ImageSettings;
+  imageLibrary?: ProductImage[];
 };
 
 const databasePath = path.resolve(process.env.DATA_FILE || '.data/ahuza-db.json');
@@ -159,7 +177,19 @@ let writeQueue: Promise<void> = Promise.resolve();
 let loaded: Database | undefined;
 
 function emptyDatabase(): Database {
-  return { products: structuredClone(seedProducts), customers: [], orders: [], events: [], supportTickets: [], paymentReceiptReviews: [], paymentAuditEvents: [], sitePublished: true, content: structuredClone(defaultStorefrontContent) };
+  return { products: structuredClone(seedProducts), customers: [], orders: [], events: [], supportTickets: [], paymentReceiptReviews: [], sitePublished: true, content: structuredClone(defaultStorefrontContent), imageSettings: structuredClone(defaultImageSettings) };
+}
+
+export function mergeImageSettings(value: unknown): ImageSettings {
+  const base = structuredClone(defaultImageSettings);
+  if (!value || typeof value !== 'object') return base;
+  const input = value as Partial<ImageSettings>;
+  return {
+    ...base, ...input,
+    mobile: { ...base.mobile, ...(input.mobile || {}) },
+    quality: { ...base.quality, ...(input.quality || {}) },
+    layout: { ...base.layout, ...(input.layout || {}) },
+  };
 }
 
 async function loadDatabase(): Promise<Database> {
@@ -174,11 +204,11 @@ async function loadDatabase(): Promise<Database> {
       events: Array.isArray(parsed.events) ? parsed.events : [],
       supportTickets: Array.isArray(parsed.supportTickets) ? parsed.supportTickets : [],
       paymentReceiptReviews: Array.isArray(parsed.paymentReceiptReviews) ? parsed.paymentReceiptReviews : [],
-      paymentAuditEvents: Array.isArray(parsed.paymentAuditEvents) ? parsed.paymentAuditEvents : [],
-      processedPaymentWebhookIds: Array.isArray(parsed.processedPaymentWebhookIds) ? parsed.processedPaymentWebhookIds.filter((id): id is string => typeof id === 'string') : [],
       sitePublished: parsed.sitePublished !== false,
       ...(parsed.integrationWebhooks && typeof parsed.integrationWebhooks === 'object' ? { integrationWebhooks: parsed.integrationWebhooks } : {}),
       content: { ...structuredClone(defaultStorefrontContent), ...(parsed.content && typeof parsed.content === 'object' ? parsed.content : {}) },
+      imageSettings: mergeImageSettings(parsed.imageSettings),
+      imageLibrary: Array.isArray(parsed.imageLibrary) ? parsed.imageLibrary : [],
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;

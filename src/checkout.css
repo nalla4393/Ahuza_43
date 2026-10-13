@@ -6,6 +6,10 @@
 .address-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .checkout-details .consent-check{margin:5px 0 1px}
 .checkout-details .dark-button{margin-top:2px}
+.payment-method-options{display:grid;gap:8px;margin:4px 0;padding:10px;border:1px solid var(--line)}
+.payment-method-options legend{padding:0 4px;font-size:10px;font-weight:600}
+.payment-method-options label{display:flex;align-items:center;gap:7px;font-size:11px}
+.payment-method-options input{accent-color:#3a493c}
 .cart-drawer{overflow-y:auto}
 .bag-lines{flex:none;max-height:27vh}
 .bag-footer{flex:none;padding-bottom:8px}
@@ -31,6 +35,8 @@
 .payment-panel p{max-width:360px;font-size:12px;line-height:1.6;color:var(--muted);overflow-wrap:anywhere}
 .payment-panel .payment-qr{width:min(230px,70vw);aspect-ratio:1;border:8px solid #fff;background:#fff;box-shadow:0 0 0 1px var(--line)}
 .payment-panel .payment-qr+p{color:#282820}
+.upi-qr-fallback{display:none;justify-items:center;gap:8px}
+.upi-qr-fallback p{margin:0}
 .payment-panel>small{max-width:380px;color:var(--muted);font-size:10px;line-height:1.5}
 .payment-pending{display:flex;align-items:center;gap:8px}
 .payment-spinner{width:14px;height:14px;border:2px solid var(--line);border-top-color:#3a493c;border-radius:50%;animation:payment-spin .8s linear infinite}
@@ -45,6 +51,10 @@
   .checkout-details input:not([type=checkbox]){height:35px}
   .customer-order{align-items:flex-start;flex-direction:column}
   .customer-order-actions{width:100%}
+}
+
+@media(min-width:761px){
+  .upi-qr-fallback{display:grid}
 }
 
 @media(prefers-reduced-motion:reduce){

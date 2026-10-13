@@ -4,13 +4,15 @@ import { rateLimit } from 'express-rate-limit';
 import PDFDocument from 'pdfkit';
 import { hashPassword, verifyPassword } from './services/auth.js';
 import { extractPaymentReceipt, generateCustomerEmailBody, generateCustomerSupportReply, generateOwnerAgentPlan, generateSocialPost, type CustomerEmailKind, type OwnerAgentIntent } from './services/ai.js';
-import { getDatabase, mutateDatabase, type Order, type PaymentReceiptReview, type Product, type ShippingAddress, type StorefrontContent, type SupportTicket } from './services/database.js';
+import { getDatabase, mergeImageSettings, mutateDatabase, type Database, type Order, type PaymentReceiptReview, type Product, type ShippingAddress, type StorefrontContent, type SupportTicket } from './services/database.js';
+import { deleteProductImageFiles, detectImageType, maxUploadBytes, sanitizeImageSettings, saveProductImage } from './services/images.js';
 import { expirePendingOrders, getMarketingWebhookUrls, notifySupportTicket, recordMarketingEvent, sendEmail, sendOrderConfirmation, sendShippingNotice, testMarketingWebhooks, triggerAutomations } from './services/integrations.js';
-import { applyCapturedQrPayment, applyRefundWebhook, createPaymentProvider, getPaymentConfiguration, type PaymentProvider } from './services/payments.js';
+import { createUpiIntent, getUpiConfiguration } from './services/upi.js';
 
 export const api = Router();
 const authLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false });
 const ownerLimit = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false });
+const uploadLimit = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false });
 const analyticsLimit = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false });
 const supportLimit = rateLimit({ windowMs: 60 * 1000, limit: 12, standardHeaders: 'draft-8', legacyHeaders: false });
 const paymentReceiptLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 3, standardHeaders: 'draft-8', legacyHeaders: false });
@@ -73,7 +75,6 @@ api.use(async (request, response, next) => {
   const path = request.path;
   const ownerApi = path.startsWith('/owner/');
   const healthOrStatus = method === 'GET' && (path === '/health' || path === '/site-status');
-  const paymentWebhook = method === 'POST' && path === '/payments/razorpay/webhook';
   const paymentReadOnly = (method === 'GET' && path === '/payments/config')
     || (method === 'GET' && /^\/payments\/orders\/[^/]+\/status$/.test(path))
     || (method === 'POST' && /^\/payments\/orders\/[^/]+\/cancel$/.test(path));
@@ -81,11 +82,14 @@ api.use(async (request, response, next) => {
     || (method === 'POST' && (path === '/auth/login' || path === '/auth/logout'));
   const existingOrders = (method === 'GET' && (path === '/orders' || /^\/orders\/[^/]+(?:\/invoice)?$/.test(path)))
     || ((method === 'POST' || method === 'PATCH') && /^\/orders\/[^/]+(?:\/returns|\/payment-receipts)?$/.test(path));
-  if (ownerApi || healthOrStatus || paymentWebhook || paymentReadOnly || customerAccount || existingOrders) { next(); return; }
+  if (ownerApi || healthOrStatus || paymentReadOnly || customerAccount || existingOrders) { next(); return; }
   response.status(503).json({ error: 'The AHUZA storefront is temporarily unavailable. Please check back soon.' });
 });
 
-api.get('/storefront', async (_request, response) => response.json({ content: (await getDatabase()).content }));
+api.get('/storefront', async (_request, response) => {
+  const database = await getDatabase();
+  response.json({ content: database.content, imageSettings: mergeImageSettings(database.imageSettings) });
+});
 
 api.get('/products', async (_request, response) => {
   const database = await getDatabase();
@@ -195,8 +199,10 @@ api.post('/auth/logout', (request, response, next) => {
 api.get('/auth/me', requireCustomer, (request, response) => response.json({ customer: { id: request.session.userId, email: request.session.email } }));
 
 async function createPaymentOrder(request: Request, response: Response): Promise<void> {
-  if (!getPaymentConfiguration().configured) { response.status(503).json({ error: 'UPI payments are not configured. Configure the approved Razorpay account credentials on the server.' }); return; }
-  const provider = createPaymentProvider();
+  const paymentMethod = request.body?.paymentMethod;
+  if (paymentMethod !== 'upi' && paymentMethod !== 'cod') { response.status(400).json({ error: 'Choose UPI or cash on delivery.' }); return; }
+  const upi = getUpiConfiguration();
+  if (paymentMethod === 'upi' && !upi.configured) { response.status(503).json({ error: 'Direct UPI is unavailable. Configure a valid UPI_VPA on the server.' }); return; }
   const items = request.body?.items;
   if (!Array.isArray(items) || items.length === 0 || items.length > 20) { response.status(400).json({ error: 'Provide one or more cart items.' }); return; }
   const address = request.body?.shippingAddress;
@@ -229,13 +235,11 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   }
   const subtotalAmount = orderItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0) * 100;
   const shippingAmount = subtotalAmount < 250000 ? 10000 : 0;
-  const discountAmount = 0;
-  const taxAmount = 0;
-  const amount = subtotalAmount + shippingAmount - discountAmount + taxAmount;
+  const amount = subtotalAmount + shippingAmount;
   if (!Number.isSafeInteger(amount) || amount < 100) { response.status(400).json({ error: 'Order total is invalid.' }); return; }
   const localOrderId = randomUUID();
   const paymentReference = `AHUZA-${randomUUID().replaceAll('-', '').slice(0, 20).toUpperCase()}`;
-  const expiresAt = new Date(Date.now() + 20 * 60 * 1000);
+  const expiresAt = paymentMethod === 'upi' ? new Date(Date.now() + 20 * 60 * 1000) : null;
   const persisted = await mutateDatabase((database) => {
     const available = orderItems.every((item) => {
       const product = database.products.find((entry) => entry.id === item.productId && entry.active);
@@ -245,224 +249,63 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     for (const item of orderItems) database.products.find((entry) => entry.id === item.productId)!.stock -= item.quantity;
     database.orders.push({
       id: localOrderId, userId: request.session.userId!, shippingAddress, items: orderItems,
-      amount, subtotalAmount, shippingAmount, discountAmount, taxAmount,
-      currency: 'INR', status: 'pending_payment', paymentStatus: 'pending',
-      paymentEnvironment: provider.environment, paymentReference,
+      amount, subtotalAmount, shippingAmount, discountAmount: 0, taxAmount: 0,
+      currency: 'INR', status: paymentMethod === 'cod' ? 'confirmed' : 'pending_payment', paymentStatus: 'pending', paymentMethod,
+      ...(paymentMethod === 'upi' ? { paymentReference, reservationExpiresAt: expiresAt!.toISOString() } : {}),
       marketingConsent: request.body?.marketingConsent === true,
-      reservationExpiresAt: expiresAt.toISOString(), createdAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
     });
     return true;
   });
   if (!persisted) { response.status(409).json({ error: 'Inventory changed while placing your order. Please refresh your bag.' }); return; }
-
-  let createdQrCodeId: string | undefined;
-  try {
-    const qr = await provider.createUpiQr({ amount, orderId: localOrderId, paymentReference, expiresAt: Math.floor(expiresAt.getTime() / 1000) });
-    createdQrCodeId = qr.qrCodeId;
-    await mutateDatabase((database) => {
-      const order = database.orders.find((entry) => entry.id === localOrderId && entry.userId === request.session.userId);
-      if (!order || order.status !== 'pending_payment') throw new Error('Local payment order disappeared before Razorpay order was linked.');
-      order.razorpayQrCodeId = qr.qrCodeId;
-      order.qrImageUrl = qr.imageUrl;
-      order.reservationExpiresAt = qr.expiresAt;
-    });
-    response.status(201).json({ orderId: localOrderId, paymentReference, qrCodeId: qr.qrCodeId, qrImageUrl: qr.imageUrl, amount, currency: 'INR', expiresAt: qr.expiresAt, environment: provider.environment });
-  } catch (error) {
-    if (createdQrCodeId) {
-      try { await provider.closeQrCode(createdQrCodeId); }
-      catch (closeError) { console.error(`Could not close failed order's Razorpay QR ${createdQrCodeId}:`, closeError); }
-    }
-    await mutateDatabase((database) => {
-      const order = database.orders.find((entry) => entry.id === localOrderId && entry.status === 'pending_payment');
-      if (!order) return;
-      for (const item of order.items) {
-        const product = database.products.find((entry) => entry.id === item.productId);
-        if (product) product.stock += item.quantity;
-      }
-      order.status = 'cancelled';
-      order.paymentStatus = 'cancelled';
-      delete order.reservationExpiresAt;
-    });
-    console.error(`Razorpay UPI QR creation failed for local order ${localOrderId}:`, error);
-    response.status(502).json({ error: 'Could not create a secure UPI payment request. The order was cancelled and inventory released.' });
+  if (paymentMethod === 'cod') {
+    response.status(201).json({ orderId: localOrderId, paymentMethod, status: 'confirmed', amount, currency: 'INR' });
+    return;
   }
+  const upiIntent = createUpiIntent({ vpa: upi.vpa!, merchantName: upi.merchantName, amountPaise: amount, orderReference: paymentReference });
+  response.status(201).json({ orderId: localOrderId, paymentMethod, paymentReference, upiIntent, merchantVpa: upi.vpa, merchantName: upi.merchantName, amount, currency: 'INR', expiresAt: expiresAt!.toISOString(), status: 'pending' });
 }
 
-api.get('/payments/config', (_request, response) => response.json(getPaymentConfiguration()));
+api.get('/payments/config', (_request, response) => {
+  const config = getUpiConfiguration();
+  response.json({ configured: config.configured, upiVpa: config.vpa, merchantName: config.merchantName, automaticVerification: false });
+});
 
 api.post('/payments/orders', requireCustomer, paymentLimit, async (request, response) => {
   await createPaymentOrder(request, response);
 });
 
-async function reconcileQrPayments(orderId: string, provider: PaymentProvider, eventId?: string): Promise<string> {
-  const order = (await getDatabase()).orders.find((entry) => entry.id === orderId);
-  if (!order) return 'missing';
-  if (order.paymentStatus === 'paid' || order.paymentStatus === 'test_paid' || order.paymentStatus === 'refunded' || order.paymentStatus === 'cancelled') return order.paymentStatus;
-  if (!order.razorpayQrCodeId) return 'pending';
-  let status = await provider.fetchQrStatus(order.razorpayQrCodeId);
-  if ((status.status === 'expired' || status.status === 'cancelled') && status.qrStatus === 'active') {
-    await provider.closeQrCode(order.razorpayQrCodeId);
-    status = await provider.fetchQrStatus(order.razorpayQrCodeId);
-  }
-  if (status.capturedPayments.length > 1) {
-    for (const [index, payment] of status.capturedPayments.entries()) {
-      await mutateDatabase((database) => applyCapturedQrPayment(database, {
-        eventId: `multiple_capture_${order.razorpayQrCodeId}_${payment.id}_${index}`,
-        qrCodeId: order.razorpayQrCodeId!,
-        paymentReference: null,
-        internalOrderId: null,
-        payment,
-      }));
-    }
-    return 'review';
-  }
-  for (const [index, payment] of status.capturedPayments.entries()) {
-    const result = await mutateDatabase((database) => applyCapturedQrPayment(database, {
-      eventId: index === 0 && eventId ? eventId : `poll_${randomUUID()}`,
-      qrCodeId: order.razorpayQrCodeId!,
-      paymentReference: status.reference,
-      internalOrderId: status.orderId,
-      payment,
-    }));
-    if (result.outcome === 'review' || result.outcome === 'unmatched') return 'review';
-    if (result.outcome === 'paid' && result.order) {
-      const customerEmail = (await getDatabase()).customers.find((customer) => customer.id === result.order!.userId)?.email;
-      if (customerEmail) void sendOrderConfirmation(result.order, customerEmail).catch((error) => console.error('Confirmation email failed:', error));
-      void triggerAutomations({ name: 'purchase', orderId: result.order.id, amount: result.order.amount / 100, currency: result.order.currency, consent: result.order.marketingConsent });
-    }
-  }
-  if (status.status === 'failed' && !status.capturedPayments.length) return 'failed';
-  if (status.status === 'expired' || status.status === 'cancelled') {
-    if (status.qrStatus === 'active') return 'pending';
-    await mutateDatabase((database) => {
-      const current = database.orders.find((entry) => entry.id === orderId);
-      if (current?.status === 'pending_payment') {
-        for (const item of current.items) {
-          const product = database.products.find((entry) => entry.id === item.productId);
-          if (product) product.stock += item.quantity;
-        }
-        current.status = 'cancelled';
-        current.paymentStatus = status.status === 'expired' ? 'expired' : 'cancelled';
-        delete current.reservationExpiresAt;
-      }
-    });
-    return status.status;
-  }
-  return (await getDatabase()).orders.find((entry) => entry.id === orderId)?.paymentStatus || status.status;
-}
-
 api.get('/payments/orders/:id/status', requireCustomer, paymentLimit, async (request, response) => {
   const order = (await getDatabase()).orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!order) { response.status(404).json({ error: 'Order not found.' }); return; }
-  if (order.paymentStatus === 'paid' || order.paymentStatus === 'test_paid' || order.paymentStatus === 'refunded' || order.paymentStatus === 'cancelled' || order.paymentStatus === 'expired') {
-    response.json({ orderId: order.id, status: order.paymentStatus, paymentReference: order.paymentReference }); return;
+  response.json({ orderId: order.id, status: order.paymentStatus || 'pending', orderStatus: order.status, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt, verification: 'manual_bank_reconciliation_required' });
+});
+
+api.post('/payments/orders/:id/failure', requireCustomer, paymentLimit, async (request, response) => {
+  if (!request.body || request.body.failed !== true || Object.keys(request.body).length !== 1) {
+    response.status(400).json({ error: 'Report only that the UPI app did not complete the attempt.' }); return;
   }
-  if (!getPaymentConfiguration().configured) { response.status(503).json({ error: 'Payment status verification is not configured.' }); return; }
-  const status = await reconcileQrPayments(order.id, createPaymentProvider());
-  response.json({ orderId: order.id, status, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt });
+  const updated = await mutateDatabase((database) => {
+    const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
+    if (!order || order.paymentMethod !== 'upi' || order.status !== 'pending_payment' || !['pending', 'failed'].includes(order.paymentStatus || 'pending')) return false;
+    order.paymentStatus = 'failed';
+    return true;
+  });
+  if (!updated) { response.status(409).json({ error: 'This UPI order is no longer pending.' }); return; }
+  response.json({ status: 'failed', note: 'Customer-reported attempt only; AHUZA bank verification is still required.' });
 });
 
 api.post('/payments/orders/:id/cancel', requireCustomer, paymentLimit, async (request, response) => {
-  const order = (await getDatabase()).orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
-  if (!order) { response.status(404).json({ error: 'Order not found.' }); return; }
-  if (order.paymentStatus === 'paid' || order.paymentStatus === 'test_paid' || order.paymentStatus === 'refunded') { response.status(409).json({ error: 'A confirmed payment cannot be cancelled.' }); return; }
-  if (order.status === 'cancelled') { response.json({ status: 'cancelled' }); return; }
-  if (!order.razorpayQrCodeId || !getPaymentConfiguration().configured) { response.status(503).json({ error: 'This payment request cannot be safely cancelled right now.' }); return; }
-  const provider = createPaymentProvider();
-  const beforeClose = await provider.fetchQrStatus(order.razorpayQrCodeId);
-  if (beforeClose.status === 'captured') { response.status(409).json({ error: 'A payment was received. Refresh payment status before cancelling.' }); return; }
-  if (beforeClose.qrStatus === 'active') await provider.closeQrCode(order.razorpayQrCodeId);
-  const afterClose = await provider.fetchQrStatus(order.razorpayQrCodeId);
-  if (afterClose.status === 'captured') { response.status(409).json({ error: 'A payment was received during cancellation. Refresh payment status.' }); return; }
-  if (afterClose.qrStatus === 'active') { response.status(503).json({ error: 'Razorpay has not confirmed the QR is closed. Inventory reservation was retained; retry cancellation shortly.' }); return; }
-  const cancellation = await mutateDatabase((database) => {
-    const current = database.orders.find((entry) => entry.id === order.id && entry.userId === request.session.userId && entry.status === 'pending_payment');
-    if (!current) return database.orders.find((entry) => entry.id === order.id)?.paymentStatus || 'missing';
-    for (const item of current.items) {
-      const product = database.products.find((entry) => entry.id === item.productId);
-      if (product) product.stock += item.quantity;
-    }
-    current.status = 'cancelled';
-    current.paymentStatus = 'cancelled';
-    delete current.reservationExpiresAt;
+  const result = await mutateDatabase((database) => {
+    const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
+    if (!order) return 'missing';
+    if (order.paymentMethod !== 'upi' || order.status !== 'pending_payment' || !['pending', 'failed', 'cancelled'].includes(order.paymentStatus || 'pending')) return 'conflict';
+    order.paymentStatus = 'cancelled';
     return 'cancelled';
   });
-  if (cancellation !== 'cancelled') {
-    response.status(409).json({ error: 'Order state changed while cancelling. Refresh and verify payment status.', status: cancellation });
-    return;
-  }
-  response.json({ status: 'cancelled' });
-});
-
-api.post('/payments/razorpay/webhook', async (request, response) => {
-  const signature = request.get('x-razorpay-signature') || '';
-  const eventId = request.get('x-razorpay-event-id') || '';
-  if (!getPaymentConfiguration().configured) { response.status(503).json({ error: 'Payment webhook is not configured.' }); return; }
-  if (!Buffer.isBuffer(request.body) || !/^[a-f\d]{64}$/i.test(signature) || !stringValue(eventId, 200)) {
-    response.status(400).json({ error: 'Webhook signature or event ID is missing.' }); return;
-  }
-  const provider = createPaymentProvider();
-  if (!provider.verifyWebhook(request.body, signature)) {
-    response.status(400).json({ error: 'Webhook signature is invalid.' }); return;
-  }
-  let event: { event?: unknown; account_id?: unknown; payload?: { qr_code?: { entity?: { id?: unknown } }; payment?: { entity?: Record<string, unknown> }; refund?: { entity?: { id?: unknown; payment_id?: unknown } } } };
-  try {
-    event = JSON.parse(request.body.toString('utf8')) as typeof event;
-  } catch {
-    response.status(400).json({ error: 'Webhook payload is invalid.' }); return;
-  }
-  if (event.account_id !== provider.accountId) { response.status(400).json({ error: 'Webhook merchant account does not match configured account.' }); return; }
-  if (event.event === 'qr_code.credited') {
-    const payment = event.payload?.payment?.entity;
-    const qrCodeId = event.payload?.qr_code?.entity?.id;
-    if (!payment || typeof payment.id !== 'string' || !Number.isSafeInteger(payment.amount) || typeof payment.currency !== 'string' || payment.status !== 'captured' || payment.method !== 'upi' || typeof qrCodeId !== 'string') {
-      response.status(400).json({ error: 'Captured UPI payment details are invalid.' }); return;
-    }
-    const providerStatus = await provider.fetchQrStatus(qrCodeId);
-    const verifiedPayment = providerStatus.capturedPayments.find((entry) => entry.id === payment.id);
-    if (!verifiedPayment) { response.status(500).json({ error: 'Payment is not yet available from Razorpay verification API.' }); return; }
-    if (providerStatus.capturedPayments.length > 1) {
-      for (const [index, captured] of providerStatus.capturedPayments.entries()) {
-        await mutateDatabase((database) => applyCapturedQrPayment(database, {
-          eventId: index === 0 ? eventId : `multiple_capture_${qrCodeId}_${captured.id}`,
-          qrCodeId, paymentReference: null, internalOrderId: null, payment: captured,
-        }));
-      }
-      response.status(200).json({ received: true, outcome: 'review' });
-      return;
-    }
-    const result = await mutateDatabase((database) => applyCapturedQrPayment(database, {
-      eventId, qrCodeId, paymentReference: providerStatus.reference, internalOrderId: providerStatus.orderId, payment: verifiedPayment,
-    }));
-    if (result.outcome === 'paid' && result.order) {
-      const customerEmail = (await getDatabase()).customers.find((customer) => customer.id === result.order!.userId)?.email;
-      if (customerEmail) void sendOrderConfirmation(result.order, customerEmail).catch((error) => console.error('Confirmation email failed:', error));
-      void triggerAutomations({ name: 'purchase', orderId: result.order.id, amount: result.order.amount / 100, currency: result.order.currency, consent: result.order.marketingConsent });
-    }
-    if (result.outcome === 'review' || result.outcome === 'unmatched') console.error(`Razorpay payment ${payment.id} needs manual reconciliation (${result.outcome}).`);
-    response.status(200).json({ received: true, outcome: result.outcome });
-    return;
-  }
-  if (event.event === 'refund.created' || event.event === 'refund.processed' || event.event === 'refund.failed') {
-    const refund = event.payload?.refund?.entity;
-    if (typeof refund?.id !== 'string' || typeof refund.payment_id !== 'string') { response.status(400).json({ error: 'Refund event details are incomplete.' }); return; }
-    const verifiedRefund = await provider.fetchRefund(refund.id, refund.payment_id);
-    const result = await mutateDatabase((database) => applyRefundWebhook(database, {
-      eventId, eventType: event.event as 'refund.created' | 'refund.processed' | 'refund.failed', refund: verifiedRefund,
-    }));
-    response.status(200).json({ received: true, outcome: result.outcome });
-    return;
-  }
-  await mutateDatabase((database) => {
-    database.processedPaymentWebhookIds ||= [];
-    if (database.processedPaymentWebhookIds.includes(eventId)) return;
-    database.processedPaymentWebhookIds.push(eventId);
-    database.paymentAuditEvents ||= [];
-    database.paymentAuditEvents.push({ eventId, type: typeof event.event === 'string' ? event.event : 'unknown', orderId: null, paymentId: null, outcome: 'ignored', createdAt: new Date().toISOString() });
-    if (database.processedPaymentWebhookIds.length > 5000) database.processedPaymentWebhookIds.splice(0, database.processedPaymentWebhookIds.length - 5000);
-    if (database.paymentAuditEvents.length > 5000) database.paymentAuditEvents.splice(0, database.paymentAuditEvents.length - 5000);
-  });
-  response.status(200).json({ received: true });
+  if (result === 'missing') { response.status(404).json({ error: 'Order not found.' }); return; }
+  if (result === 'conflict') { response.status(409).json({ error: 'This order cannot be cancelled.' }); return; }
+  response.json({ status: result });
 });
 
 api.get('/orders/:id', requireCustomer, async (request, response) => {
@@ -535,8 +378,8 @@ api.get('/orders', requireCustomer, async (request, response) => {
   const orders = database.orders
     .filter((order) => order.userId === request.session.userId)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-    .map(({ id, amount, currency, status, paymentVerifiedAt, createdAt, items, trackingNumber }) => ({
-      id, amount, currency, status, paymentVerifiedAt, createdAt, items, trackingNumber,
+    .map(({ id, amount, currency, status, paymentMethod, paymentStatus, paymentVerifiedAt, createdAt, items, trackingNumber }) => ({
+      id, amount, currency, status, paymentMethod, paymentStatus, paymentVerifiedAt, createdAt, items, trackingNumber,
       hasPendingReceiptReview: database.paymentReceiptReviews?.some((review) => review.orderId === id && review.status === 'pending_admin_review') || false,
     }));
   response.json({ orders });
@@ -546,9 +389,9 @@ api.get('/orders/:id/invoice', requireCustomer, async (request, response) => {
   const database = await getDatabase();
   const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!order) { response.status(404).json({ error: 'Order not found.' }); return; }
-  if (!['paid', 'shipped', 'delivered'].includes(order.status) || order.paymentStatus === 'refunded'
-    || order.paymentEnvironment === 'test' || !order.paymentVerifiedAt || !order.paymentId) {
-    response.status(409).json({ error: 'An invoice is available only for a live, verified, non-refunded payment.' }); return;
+  if (!['paid', 'shipped', 'delivered'].includes(order.status) || order.paymentStatus !== 'paid'
+    || (order.paymentMethod === 'upi' && !order.paymentVerifiedAt)) {
+    response.status(409).json({ error: 'An invoice is available only after payment is confirmed.' }); return;
   }
   const customerEmail = database.customers.find((customer) => customer.id === order.userId)?.email || 'Not available';
   const safePdfText = (value: string) => value.normalize('NFKD').replace(/[^\x20-\x7e]/g, '?');
@@ -612,7 +455,8 @@ api.post('/marketing/events', analyticsLimit, async (request, response) => {
 api.get('/owner/analytics', requireOwner, ownerLimit, async (_request, response) => {
   const database = await getDatabase();
   const counts = database.events.reduce<Record<string, number>>((result, event) => { result[event.name] = (result[event.name] || 0) + 1; return result; }, {});
-  const revenue = database.orders.filter((order) => ['paid', 'shipped', 'delivered'].includes(order.status) && order.paymentStatus !== 'refunded').reduce((total, order) => total + order.amount, 0);
+  const revenue = database.orders.filter((order) => ['paid', 'shipped', 'delivered'].includes(order.status)
+    && order.paymentStatus !== 'refunded' && (order.paymentMethod !== 'cod' || order.paymentStatus === 'paid')).reduce((total, order) => total + order.amount, 0);
   response.json({ eventCounts: counts, orderCount: database.orders.length, paidRevenue: revenue / 100, currency: 'INR', lowStock: database.products.filter((product) => product.stock < 5).map(({ id, name, sku, stock }) => ({ id, name, sku, stock })) });
 });
 
@@ -637,23 +481,29 @@ api.patch('/owner/site-status', requireOwner, ownerLimit, async (request, respon
 api.get('/owner/inventory', requireOwner, ownerLimit, async (_request, response) => response.json({ products: (await getDatabase()).products }));
 
 api.post('/owner/inventory', requireOwner, ownerLimit, async (request, response) => {
-  const { name, description, price, sku, stock, category, imageUrl, ghostMannequin } = request.body || {};
-  if (!stringValue(name, 120) || !stringValue(description, 1000) || !Number.isFinite(price) || price <= 0 || price > 10000000 || !stringValue(sku, 80) || !Number.isInteger(stock) || stock < 0 || stock > 100000 || !stringValue(category, 80) || !httpsUrl(imageUrl)) {
-    response.status(400).json({ error: 'Provide a title, description, positive price, SKU, stock, category, and HTTPS image URL.' }); return;
+  const { name, description, price, sku, stock, category, imageUrl, ghostMannequin, images, mainImageId, active } = request.body || {};
+  const hasImages = Array.isArray(images) && images.length > 0;
+  if (!stringValue(name, 120) || !stringValue(description, 1000) || !Number.isFinite(price) || price <= 0 || price > 10000000 || !stringValue(sku, 80) || !Number.isInteger(stock) || stock < 0 || stock > 100000 || !stringValue(category, 80) || (!hasImages && !httpsUrl(imageUrl))) {
+    response.status(400).json({ error: 'Provide a title, description, positive price, SKU, stock, category, and at least one uploaded image.' }); return;
   }
+  if (images !== undefined && !validImageIds(images, mainImageId)) { response.status(400).json({ error: 'Image list is invalid.' }); return; }
+  if (active !== undefined && typeof active !== 'boolean') { response.status(400).json({ error: 'Status must be Published or Unpublished.' }); return; }
   if (ghostMannequin !== undefined && !validGhostMannequin(ghostMannequin)) { response.status(400).json({ error: 'Ghost mannequin metadata is invalid.' }); return; }
   const product = await mutateDatabase((database) => {
     if (database.products.some((entry) => entry.sku.toLowerCase() === sku.trim().toLowerCase())) return null;
-    const created: Product = { id: randomUUID(), name: name.trim(), description: description.trim(), price, sku: sku.trim(), stock, category: category.trim(), imageUrl, active: true, ghostMannequin: { tags: [], ...(ghostMannequin as Product['ghostMannequin'] | undefined) } };
+    const created: Product = { id: randomUUID(), name: name.trim(), description: description.trim(), price, sku: sku.trim(), stock, category: category.trim(), imageUrl: imageUrl || '', active: active ?? true, ghostMannequin: { tags: [], ...(ghostMannequin as Product['ghostMannequin'] | undefined) } };
+    if (images !== undefined && !applyImages(database, created, images, mainImageId)) return 'bad-images' as const;
     database.products.push(created);
     return created;
   });
+  if (product === 'bad-images') { response.status(400).json({ error: 'One or more images were not uploaded successfully.' }); return; }
   if (!product) { response.status(409).json({ error: 'SKU is already assigned to another product.' }); return; }
   response.status(201).json({ product });
 });
 
 api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, response) => {
-  const { name, description, price, category, imageUrl, stock, sku, active, ghostMannequin } = request.body || {};
+  const { name, description, price, category, imageUrl, stock, sku, active, ghostMannequin, images, mainImageId } = request.body || {};
+  if (images !== undefined && !validImageIds(images, mainImageId)) { response.status(400).json({ error: 'Image list is invalid.' }); return; }
   if (name !== undefined && !stringValue(name, 120)) { response.status(400).json({ error: 'Title must be 1 to 120 characters.' }); return; }
   if (description !== undefined && !stringValue(description, 1000)) { response.status(400).json({ error: 'Description must be 1 to 1,000 characters.' }); return; }
   if (price !== undefined && (!Number.isFinite(price) || price <= 0 || price > 10000000)) { response.status(400).json({ error: 'Price must be greater than zero.' }); return; }
@@ -663,9 +513,11 @@ api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, resp
   if (sku !== undefined && !stringValue(sku, 80)) { response.status(400).json({ error: 'SKU must be 1 to 80 characters.' }); return; }
   if (active !== undefined && typeof active !== 'boolean') { response.status(400).json({ error: 'Active must be a boolean.' }); return; }
   if (ghostMannequin !== undefined && !validGhostMannequin(ghostMannequin)) { response.status(400).json({ error: 'Ghost mannequin metadata is invalid.' }); return; }
+  const removedImageIds: string[] = [];
   const result = await mutateDatabase<{ product: Product } | { error: string; status: number }>((database) => {
     const product = database.products.find((entry) => entry.id === request.params.id);
     if (!product) return { error: 'Product not found.', status: 404 };
+    const previousIds = (product.images || []).map((image) => image.id);
     if (sku && database.products.some((entry) => entry.id !== product.id && entry.sku.toLowerCase() === sku.toLowerCase())) return { error: 'SKU is already assigned to another product.', status: 409 };
     if (name !== undefined) product.name = name.trim();
     if (description !== undefined) product.description = description.trim();
@@ -676,10 +528,73 @@ api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, resp
     if (sku !== undefined) product.sku = sku.trim();
     if (active !== undefined) product.active = active;
     if (ghostMannequin !== undefined) product.ghostMannequin = { ...product.ghostMannequin, ...ghostMannequin } as Product['ghostMannequin'];
+    if (images !== undefined) {
+      if (!applyImages(database, product, images, mainImageId)) return { error: 'One or more images were not uploaded successfully.', status: 400 };
+      for (const id of previousIds) if (!database.products.some((entry) => entry.images?.some((image) => image.id === id))) removedImageIds.push(id);
+      database.imageLibrary = (database.imageLibrary || []).filter((image) => !removedImageIds.includes(image.id));
+    }
     return { product };
   });
   if ('error' in result) { response.status(result.status).json({ error: result.error }); return; }
+  await Promise.all(removedImageIds.map((id) => deleteProductImageFiles(id).catch((error) => console.error('Image cleanup failed:', error))));
   response.json(result);
+});
+
+function validImageIds(images: unknown, mainImageId: unknown): images is string[] {
+  return Array.isArray(images) && images.length <= 12 && images.every((id) => typeof id === 'string' && /^[0-9a-f-]{36}$/.test(id))
+    && new Set(images).size === images.length && (mainImageId === undefined || (typeof mainImageId === 'string' && images.includes(mainImageId)));
+}
+
+// Resolves ids against server-created uploads only; the main image is stored first and mirrored to imageUrl.
+function applyImages(database: Database, product: Product, ids: string[], mainImageId: unknown): boolean {
+  const library = database.imageLibrary || [];
+  const resolved = ids.map((id) => library.find((image) => image.id === id) || database.products.flatMap((entry) => entry.images || []).find((image) => image.id === id));
+  if (resolved.some((image) => !image)) return false;
+  const list = resolved as NonNullable<(typeof resolved)[number]>[];
+  const mainIndex = typeof mainImageId === 'string' ? list.findIndex((image) => image.id === mainImageId) : 0;
+  const ordered = mainIndex > 0 ? [list[mainIndex]!, ...list.filter((_, index) => index !== mainIndex)] : list;
+  product.images = ordered;
+  product.mainImageId = ordered[0]?.id;
+  if (ordered[0]) product.imageUrl = ordered[0].url;
+  return true;
+}
+
+api.post('/owner/images', requireOwner, uploadLimit, express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: maxUploadBytes }), async (request, response) => {
+  if (!Buffer.isBuffer(request.body) || request.body.length === 0) { response.status(415).json({ error: 'Upload a JPG, PNG, or WebP image.' }); return; }
+  const detected = detectImageType(request.body);
+  if (!detected || detected !== request.get('content-type')?.split(';')[0]?.trim().toLowerCase()) { response.status(415).json({ error: 'The file is not a valid JPG, PNG, or WebP image.' }); return; }
+  const name = decodeURIComponent(request.get('x-file-name') || 'image').replace(/[^\w .()-]/g, '_');
+  try {
+    const database = await getDatabase();
+    const image = await saveProductImage(request.body, detected, name, mergeImageSettings(database.imageSettings));
+    await mutateDatabase((db) => { (db.imageLibrary ||= []).push(image); });
+    response.status(201).json({ image });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'INVALID_IMAGE') { response.status(415).json({ error: 'The image could not be read.' }); return; }
+    console.error('Image upload failed:', error);
+    response.status(500).json({ error: 'The image could not be saved. Please retry.' });
+  }
+});
+
+api.delete('/owner/images/:id', requireOwner, ownerLimit, async (request, response) => {
+  const id = String(request.params.id);
+  const removed = await mutateDatabase((database) => {
+    if (database.products.some((product) => product.images?.some((image) => image.id === id))) return false;
+    database.imageLibrary = (database.imageLibrary || []).filter((image) => image.id !== id);
+    return true;
+  });
+  if (!removed) { response.status(409).json({ error: 'Image is used by a product. Remove it from the product first.' }); return; }
+  await deleteProductImageFiles(id);
+  response.json({ ok: true });
+});
+
+api.get('/owner/image-settings', requireOwner, ownerLimit, async (_request, response) => response.json({ imageSettings: mergeImageSettings((await getDatabase()).imageSettings), maxUploadMb: Math.round(maxUploadBytes / 1024 / 1024) }));
+
+api.put('/owner/image-settings', requireOwner, ownerLimit, async (request, response) => {
+  if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)) { response.status(400).json({ error: 'Provide image settings.' }); return; }
+  const imageSettings = sanitizeImageSettings(request.body);
+  await mutateDatabase((database) => { database.imageSettings = imageSettings; });
+  response.json({ imageSettings });
 });
 
 api.patch('/owner/content', requireOwner, ownerLimit, async (request, response) => {
@@ -779,7 +694,8 @@ api.patch('/owner/orders/:id/status', requireOwner, ownerLimit, async (request, 
   const result = await mutateDatabase((database) => {
     const order = database.orders.find((entry) => entry.id === request.params.id);
     if (!order) return null;
-    if (!['paid', 'shipped', 'delivered'].includes(order.status) || order.refund || order.paymentStatus === 'refunded' || (order.status === 'delivered' && status === 'shipped')) return null;
+    const validCurrentStatuses = order.paymentMethod === 'cod' ? ['confirmed', 'shipped', 'delivered'] : ['paid', 'shipped', 'delivered'];
+    if (!validCurrentStatuses.includes(order.status) || (order.status === 'delivered' && status === 'shipped')) return null;
     const changed = order.status !== status;
     order.status = status;
     if (typeof trackingNumber === 'string' && trackingNumber.trim()) order.trackingNumber = trackingNumber.trim();
@@ -793,6 +709,66 @@ api.patch('/owner/orders/:id/status', requireOwner, ownerLimit, async (request, 
   response.json({ order: result.order });
 });
 
+api.patch('/owner/orders/:id/cod-payment', requireOwner, ownerLimit, async (request, response) => {
+  if (request.body?.status !== 'paid' || Object.keys(request.body || {}).some((key) => key !== 'status')) {
+    response.status(400).json({ error: 'Cash-on-delivery payment status must be set to paid.' }); return;
+  }
+  const result = await mutateDatabase((database) => {
+    const order = database.orders.find((entry) => entry.id === request.params.id);
+    if (!order || order.paymentMethod !== 'cod' || order.status !== 'delivered' || order.paymentStatus !== 'pending') return null;
+    order.paymentStatus = 'paid';
+      order.paymentVerifiedAt = new Date().toISOString();
+      return { order, changed: true };
+  });
+  if (!result) { response.status(409).json({ error: 'Only a delivered, unpaid cash-on-delivery order can be marked paid.' }); return; }
+  if (result.order.marketingConsent) {
+    void triggerAutomations({ name: 'purchase', orderId: result.order.id, amount: result.order.amount / 100, currency: result.order.currency, consent: true });
+  }
+  response.json({ order: result.order });
+});
+
+api.patch('/owner/orders/:id/upi-payment', requireOwner, ownerLimit, async (request, response) => {
+  const bankReference = request.body?.bankReference;
+  if (request.body?.status !== 'paid' || Object.keys(request.body || {}).some((key) => !['status', 'bankReference'].includes(key))
+    || typeof bankReference !== 'string' || !/^[A-Za-z0-9-]{6,80}$/.test(bankReference.trim())) {
+    response.status(400).json({ error: 'Confirm only after checking the settled payment in your bank account, and provide its bank reference.' }); return;
+  }
+  const order = await mutateDatabase((database) => {
+    const current = database.orders.find((entry) => entry.id === request.params.id);
+    if (!current || current.paymentMethod !== 'upi') return null;
+    const activeReservation = current.status === 'pending_payment'
+      && ['pending', 'failed', 'cancelled'].includes(current.paymentStatus || 'pending')
+      && Boolean(current.reservationExpiresAt && Date.parse(current.reservationExpiresAt) > Date.now());
+    const expiredReservation = current.paymentStatus === 'expired'
+      && (current.status === 'cancelled' || (current.status === 'pending_payment' && current.reservationExpiresAt && Date.parse(current.reservationExpiresAt) <= Date.now()));
+    if (!activeReservation && !expiredReservation) return null;
+    const normalizedReference = bankReference.trim().toLowerCase();
+    if (database.orders.some((entry) => entry.id !== current.id && entry.manualPaymentReference?.toLowerCase() === normalizedReference)) return 'duplicate' as const;
+    if (expiredReservation) {
+      const available = current.items.every((item) => {
+        const product = database.products.find((entry) => entry.id === item.productId);
+        return product && product.stock >= item.quantity;
+      });
+      if (!available) return 'stock_unavailable' as const;
+      for (const item of current.items) database.products.find((entry) => entry.id === item.productId)!.stock -= item.quantity;
+    }
+    current.status = 'paid';
+    current.paymentStatus = 'paid';
+    current.manualPaymentReference = bankReference.trim();
+    current.paymentVerificationMethod = 'manual_bank_reconciliation';
+    current.paymentVerifiedAt = new Date().toISOString();
+    delete current.reservationExpiresAt;
+    return structuredClone(current);
+  });
+  if (order === 'duplicate') { response.status(409).json({ error: 'This bank reference has already been recorded for another order.' }); return; }
+  if (order === 'stock_unavailable') { response.status(409).json({ error: 'The payment must be manually reconciled, but the original items are no longer in stock. Contact the customer before fulfillment.' }); return; }
+  if (!order) { response.status(409).json({ error: 'Only an unpaid, pending UPI order can be confirmed. Check the order and bank settlement.' }); return; }
+  const email = (await getDatabase()).customers.find((entry) => entry.id === order.userId)?.email;
+  if (email) void sendOrderConfirmation(order, email).catch((error) => console.error('Confirmation email failed:', error));
+  if (order.marketingConsent) void triggerAutomations({ name: 'purchase', orderId: order.id, amount: order.amount / 100, currency: order.currency, consent: true });
+  response.json({ order });
+});
+
 api.patch('/owner/orders/:id/return', requireOwner, ownerLimit, async (request, response) => {
   const status = request.body?.status;
   if (!['approved', 'rejected'].includes(status)) { response.status(400).json({ error: 'Status must be approved or rejected.' }); return; }
@@ -804,76 +780,6 @@ api.patch('/owner/orders/:id/return', requireOwner, ownerLimit, async (request, 
   });
   if (!order) { response.status(404).json({ error: 'Return request not found.' }); return; }
   response.json({ order });
-});
-
-api.post('/owner/orders/:id/refund', requireOwner, ownerLimit, async (request, response) => {
-  const initial = (await getDatabase()).orders.find((entry) => entry.id === request.params.id);
-  if (!initial) { response.status(404).json({ error: 'Order not found.' }); return; }
-  if (initial.paymentEnvironment !== 'live' || !initial.paymentId || !initial.paymentVerifiedAt
-    || !['paid', 'shipped', 'delivered'].includes(initial.status) || !getPaymentConfiguration().configured) {
-    response.status(409).json({ error: 'Only a live, verified Razorpay payment can be refunded.' }); return;
-  }
-  if (initial.refund?.status === 'processed') { response.json({ status: 'processed', refundId: initial.refund.providerRefundId }); return; }
-  if (initial.refund?.status === 'failed') { response.status(409).json({ error: 'The provider reported this refund failed. Review the payment in Razorpay before starting another refund.' }); return; }
-
-  const provider = createPaymentProvider();
-  let refund = initial.refund;
-  if (!refund) {
-    const payment = await provider.fetchPayment(initial.paymentId);
-    if (payment.status !== 'captured' || !payment.captured || payment.method !== 'upi'
-      || payment.amount !== initial.amount || payment.currency !== initial.currency || payment.amount_refunded !== 0) {
-      response.status(409).json({ error: 'The provider payment does not match the full order amount or is already refunded.' }); return;
-    }
-    refund = await mutateDatabase((database) => {
-      const order = database.orders.find((entry) => entry.id === initial.id);
-      if (!order || order.refund || order.paymentId !== payment.id || order.paymentEnvironment !== 'live'
-        || !['paid', 'shipped', 'delivered'].includes(order.status)) return order?.refund || null;
-      const now = new Date().toISOString();
-      order.refund = {
-        idempotencyKey: randomUUID(),
-        receipt: `ahuza_${order.id.replaceAll('-', '').slice(0, 32)}`,
-        amount: order.amount,
-        status: 'initiating',
-        createdAt: now,
-        updatedAt: now,
-      };
-      return structuredClone(order.refund);
-    }) || undefined;
-  }
-  if (!refund) { response.status(409).json({ error: 'Order status changed. Refresh and verify it before refunding.' }); return; }
-  if (refund.providerRefundId) {
-    const verified = await provider.fetchRefund(refund.providerRefundId, initial.paymentId);
-    await mutateDatabase((database) => applyRefundWebhook(database, {
-      eventId: `refund_poll_${randomUUID()}`,
-      eventType: verified.status === 'processed' ? 'refund.processed' : verified.status === 'failed' ? 'refund.failed' : 'refund.created',
-      refund: verified,
-    }));
-    response.json({ status: verified.status, refundId: verified.id });
-    return;
-  }
-  try {
-    const created = await provider.createFullRefund(initial.paymentId, refund.amount, initial.id, refund.idempotencyKey, refund.receipt);
-    await mutateDatabase((database) => {
-      const order = database.orders.find((entry) => entry.id === initial.id);
-      if (!order?.refund || order.refund.idempotencyKey !== refund!.idempotencyKey) return;
-      order.refund.providerRefundId = created.id;
-      if (order.refund.status !== 'processed' && order.refund.status !== 'failed') order.refund.status = created.status;
-      order.refund.updatedAt = new Date().toISOString();
-      if (order.refund.status === 'processed') {
-        order.paymentStatus = 'refunded';
-        order.status = 'refunded';
-      }
-      database.paymentAuditEvents ||= [];
-      if (!database.paymentAuditEvents.some((event) => event.eventId === `refund_request_${created.id}`)) {
-        database.paymentAuditEvents.push({ eventId: `refund_request_${created.id}`, type: 'refund.requested', orderId: order.id, paymentId: initial.paymentId!, outcome: order.refund.status, createdAt: new Date().toISOString() });
-      }
-      if (database.paymentAuditEvents.length > 5000) database.paymentAuditEvents.splice(0, database.paymentAuditEvents.length - 5000);
-    });
-    response.status(202).json({ status: created.status, refundId: created.id });
-  } catch (error) {
-    console.error(`Razorpay refund request failed for order ${initial.id}; idempotent retry is safe:`, error);
-    response.status(502).json({ error: 'The refund result could not be confirmed. Refresh the order and retry; the same provider idempotency key will be reused.' });
-  }
 });
 
 type OwnerAgentAction =
@@ -914,7 +820,8 @@ api.post('/owner/chat', requireOwner, ownerLimit, async (request, response) => {
     const summary = JSON.stringify({
       analytics: {
         orderCount: database.orders.length,
-        paidRevenue: database.orders.filter((order) => ['paid', 'shipped', 'delivered'].includes(order.status) && order.paymentStatus !== 'refunded').reduce((total, order) => total + order.amount, 0) / 100,
+        paidRevenue: database.orders.filter((order) => ['paid', 'shipped', 'delivered'].includes(order.status)
+          && order.paymentStatus !== 'refunded' && (order.paymentMethod !== 'cod' || order.paymentStatus === 'paid')).reduce((total, order) => total + order.amount, 0) / 100,
         eventCounts: database.events.reduce<Record<string, number>>((counts, event) => { counts[event.name] = (counts[event.name] || 0) + 1; return counts; }, {}),
       },
       products: database.products.slice(0, 100).map(({ id, name, sku, stock, price, active }) => ({ id, name, sku, stock, price, active })),
