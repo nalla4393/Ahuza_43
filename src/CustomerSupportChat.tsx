@@ -277,7 +277,7 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
       } else {
         const response = await fetch('/api/customer-support/chat', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: task === 'product' ? `Product question (${menuPath.at(-1) || 'catalogue'}): ${message}` : message }),
+          body: JSON.stringify({ message: task === 'product' ? `Product question (${menuPath.at(-1) || 'catalogue'}): ${message}` : message, history: messages.slice(-8) }),
         });
         const result = await readJsonResponse<{ reply?: string; error?: string; requiresHumanSupport?: boolean }>(response, 'Support chat');
         if (!response.ok || !result.reply) throw new Error(result.error || 'Support chat is temporarily unavailable. Email Info@ahuzawear.com for help.');

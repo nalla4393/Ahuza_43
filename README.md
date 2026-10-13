@@ -26,6 +26,10 @@ Open **Owner Studio** from the storefront footer and enter the configured owner 
 
 Owner Studio has a **Publish site / Unpublish site** control in its header. Unpublishing displays a maintenance page to visitors and blocks public storefront APIs and new checkouts; the owner can still access Owner Studio, existing customer orders and direct UPI status. The storefront publication setting is persisted with the database and defaults to published for existing installations.
 
+## Customer support chatbot
+
+The chat menus, preloaded options and messages are unchanged. Typed questions are answered by the AI agent. Set `OPENAI_API_KEY` (server-side only; optional `OPENAI_MODEL`, default `gpt-4o-mini`) and replies are written in a natural, human tone using the last few messages of the conversation. Without it, the bot falls back to `GEMINI_API_KEY`, then to the existing "contact support" message. Delivery problems and complaints are still routed to a human support ticket, and the bot only uses store details it is given.
+
 The AI owner agent reads current store data and can propose inventory updates, order-status changes, and customer-email drafts. Write actions require owner approval; email drafts must still be reviewed before sending. Exact inventory commands such as `set stock AH-SFS-001 to 20` work without Gemini and produce an approval proposal. Set `GEMINI_API_KEY` for natural-language planning and email drafting. Configure `RESEND_API_KEY`, `ZAPIER_WEBHOOK_URL`, and `GOOGLE_ADS_WEBHOOK_URL` in `.env` to enable those integrations.
 
 ## Direct UPI payments

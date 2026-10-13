@@ -117,7 +117,13 @@ api.post('/customer-support/chat', supportLimit, async (request, response) => {
       returns: 'Returns and replacements may be requested within 7 days after delivery.',
       products: database.products.filter((product) => product.active).map(({ name, description, price, stock, category }) => ({ name, description, price, stock, category })),
     });
-    response.json({ reply: await generateCustomerSupportReply(message, storeContext), requiresHumanSupport: false });
+    const history = Array.isArray(request.body?.history)
+      ? request.body.history.slice(-8).filter((turn: unknown): turn is { role: 'assistant' | 'customer'; text: string } => {
+        const entry = turn as { role?: unknown; text?: unknown };
+        return (entry?.role === 'assistant' || entry?.role === 'customer') && typeof entry.text === 'string';
+      })
+      : [];
+    response.json({ reply: await generateCustomerSupportReply(message, storeContext, history), requiresHumanSupport: false });
   } catch (error) {
     if (error instanceof Error && error.message === 'AI_NOT_CONFIGURED') {
       response.json({ reply: 'I’m sorry, I can’t answer that just now. Customer support is available from 10:00 AM to 9:00 PM IST. You can create a support ticket or email Info@ahuzawear.com for help.', requiresHumanSupport: false });
