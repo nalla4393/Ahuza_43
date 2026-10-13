@@ -29,7 +29,7 @@ async function completeWithOpenAi(prompt: string, json: boolean): Promise<string
 }
 
 async function completeWithGemini(prompt: string): Promise<string> {
-  const models = [process.env.GEMINI_MODEL?.trim(), 'gemini-3.7-flash', 'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.6-flash'].filter((model, index, all): model is string => Boolean(model) && all.indexOf(model) === index);
+  const models = [process.env.GEMINI_MODEL?.trim(), 'gemini-3.7-flash', 'gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.6-flash'].filter((model, index, all): model is string => Boolean(model) && all.indexOf(model) === index);
   let lastError: unknown;
   for (const model of models) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
