@@ -45,6 +45,7 @@ function stringValue(value: unknown, maxLength = 500): value is string {
 
 function httpsUrl(value: unknown): value is string {
   if (!stringValue(value, 2000)) return false;
+  if (/^\/uploads\/[0-9a-f-]{36}\/[\w.-]+$/i.test(value)) return true;
   try { return new URL(value).protocol === 'https:'; } catch { return false; }
 }
 

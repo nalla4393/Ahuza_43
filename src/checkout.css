@@ -75,3 +75,6 @@
 .automation-rule>div{flex:1 1 220px;display:grid;gap:2px}
 .automation-preview{padding:12px;border:1px solid var(--line)}
 .automation-run{margin:0;font-size:13px}
+
+.content-upload{display:grid;gap:6px}
+.upload-trigger{display:inline-flex;justify-content:center;cursor:pointer;width:fit-content}
