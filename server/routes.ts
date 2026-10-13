@@ -3,7 +3,7 @@ import express, { Router, type Request, type Response, type NextFunction } from 
 import { rateLimit } from 'express-rate-limit';
 import PDFDocument from 'pdfkit';
 import { hashPassword, verifyPassword } from './services/auth.js';
-import { extractPaymentReceipt, generateCustomerEmailBody, generateCustomerSupportReply, generateOwnerAgentPlan, generateSocialPost, type CustomerEmailKind, type OwnerAgentIntent } from './services/ai.js';
+import { extractPaymentReceipt, generateCustomerEmailBody, generateCustomerSupportReply, generateOwnerAgentPlan, generateSocialPost, isTextAiConfigured, type CustomerEmailKind, type OwnerAgentIntent } from './services/ai.js';
 import { getDatabase, mergeImageSettings, mutateDatabase, type Database, type Order, type PaymentReceiptReview, type Product, type ShippingAddress, type StorefrontContent, type SupportTicket } from './services/database.js';
 import { deleteProductImageFiles, detectImageType, maxUploadBytes, sanitizeImageSettings, saveProductImage } from './services/images.js';
 import { expirePendingOrders, getMarketingWebhookUrls, notifySupportTicket, recordMarketingEvent, sendEmail, sendOrderConfirmation, sendShippingNotice, testMarketingWebhooks, triggerAutomations } from './services/integrations.js';
@@ -32,7 +32,7 @@ function requireOwner(request: Request, response: Response, next: NextFunction):
 }
 
 function asyncError(response: Response, error: unknown): void {
-  if (error instanceof Error && error.message === 'AI_NOT_CONFIGURED') { response.status(503).json({ error: 'AI integration is not configured. Set GEMINI_API_KEY in the server environment.' }); return; }
+  if (error instanceof Error && error.message === 'AI_NOT_CONFIGURED') { response.status(503).json({ error: 'AI integration is not configured. Set OPENAI_API_KEY (or GEMINI_API_KEY) in the server environment.' }); return; }
   console.error(error);
   response.status(502).json({ error: 'The requested integration is temporarily unavailable.' });
 }
@@ -651,7 +651,7 @@ api.get('/owner/integrations', requireOwner, ownerLimit, async (_request, respon
     zapier: Boolean(urls.zapier),
     email: Boolean(process.env.RESEND_API_KEY),
     followUps: Boolean(process.env.RESEND_API_KEY),
-    ai: Boolean(process.env.GEMINI_API_KEY),
+    ai: isTextAiConfigured(),
   } });
 });
 
