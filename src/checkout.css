@@ -60,3 +60,9 @@
 @media(prefers-reduced-motion:reduce){
   .overlay,.cart-drawer,.account-dialog{animation:none}
 }
+.wishlist-toggle{position:absolute;top:10px;right:10px;z-index:2;width:36px;height:36px;display:grid;place-items:center;border:0;border-radius:50%;background:var(--paper);color:#222822;cursor:pointer;transition:background .2s,color .2s}
+.wishlist-toggle.saved{color:#a23b3b}
+.customer-wishlist{margin:16px 0;display:grid;gap:10px}
+.customer-wishlist h3{margin:0;font-size:12px;letter-spacing:.12em;text-transform:uppercase}
+.wishlist-item{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.wishlist-item span{flex:1 1 160px;min-width:0}

@@ -204,6 +204,38 @@ api.post('/auth/logout', (request, response, next) => {
 
 api.get('/auth/me', requireCustomer, (request, response) => response.json({ customer: { id: request.session.userId, email: request.session.email } }));
 
+api.get('/wishlist', requireCustomer, async (request, response) => {
+  const database = await getDatabase();
+  const saved = database.customers.find((entry) => entry.id === request.session.userId)?.wishlist || [];
+  response.json({ productIds: saved.filter((id) => database.products.some((product) => product.id === id && product.active)) });
+});
+
+api.put('/wishlist/:productId', requireCustomer, async (request, response) => {
+  const productId = String(request.params.productId);
+  const result = await mutateDatabase((database) => {
+    const customer = database.customers.find((entry) => entry.id === request.session.userId);
+    if (!customer || !database.products.some((product) => product.id === productId && product.active)) return null;
+    const list = customer.wishlist || [];
+    if (!list.includes(productId)) list.push(productId);
+    customer.wishlist = list.slice(-200);
+    return customer.wishlist;
+  });
+  if (!result) { response.status(404).json({ error: 'Product not found.' }); return; }
+  response.json({ productIds: result });
+});
+
+api.delete('/wishlist/:productId', requireCustomer, async (request, response) => {
+  const productId = String(request.params.productId);
+  const result = await mutateDatabase((database) => {
+    const customer = database.customers.find((entry) => entry.id === request.session.userId);
+    if (!customer) return null;
+    customer.wishlist = (customer.wishlist || []).filter((id) => id !== productId);
+    return customer.wishlist;
+  });
+  if (!result) { response.status(404).json({ error: 'Account not found.' }); return; }
+  response.json({ productIds: result });
+});
+
 async function createPaymentOrder(request: Request, response: Response): Promise<void> {
   const paymentMethod = request.body?.paymentMethod;
   if (paymentMethod !== 'upi' && paymentMethod !== 'cod') { response.status(400).json({ error: 'Choose UPI or cash on delivery.' }); return; }

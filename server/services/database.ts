@@ -57,6 +57,7 @@ export type Customer = {
   email: string;
   passwordHash: string;
   createdAt: string;
+  wishlist?: string[];
 };
 
 export type ShippingAddress = {

@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
-import { ArrowDown, ArrowRight, ArrowUpRight, Mail, MapPin, Menu, Minus, Phone, Plus, ShoppingBag, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUpRight, Mail, Heart, MapPin, Menu, Minus, Phone, Plus, ShoppingBag, X } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import OwnerStudio from './OwnerStudio';
 import CustomerSupportChat from './CustomerSupportChat';
@@ -63,6 +63,7 @@ export default function App() {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [notice, setNotice] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
+  const [wishlist, setWishlist] = useState<string[]>([]);
   const [accountOpen, setAccountOpen] = useState(false);
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -201,6 +202,30 @@ export default function App() {
       .finally(() => { if (!controller.signal.aborted) setOrdersLoading(false); });
     return () => controller.abort();
   }, [accountOpen, customer]);
+
+  useEffect(() => {
+    if (!customer) { setWishlist([]); return; }
+    fetch('/api/wishlist').then(async (response) => {
+      if (response.ok) setWishlist(((await response.json()) as { productIds: string[] }).productIds);
+    }).catch(() => undefined);
+  }, [customer]);
+
+  async function toggleWishlist(product: Product) {
+    if (!customer) {
+      setAuthMode('signup');
+      setAccountOpen(true);
+      setNotice('Create an account or log in to save your wishlist.');
+      window.setTimeout(() => setNotice(''), 3000);
+      return;
+    }
+    const saved = wishlist.includes(product.id);
+    const response = await fetch(`/api/wishlist/${encodeURIComponent(product.id)}`, { method: saved ? 'DELETE' : 'PUT' }).catch(() => null);
+    if (response?.ok) {
+      setWishlist(((await response.json()) as { productIds: string[] }).productIds);
+      setNotice(saved ? `${product.name} removed from your wishlist` : `${product.name} saved to your wishlist`);
+    } else setNotice('Could not update your wishlist. Please try again.');
+    window.setTimeout(() => setNotice(''), 2400);
+  }
 
   function addToBag(product: Product) {
     if (product.stock < 1) return;
@@ -449,6 +474,7 @@ export default function App() {
                     {hoverImage && <img src={hoverImage.url} srcSet={hoverImage.srcSet} sizes="(max-width: 760px) 50vw, 25vw" alt="" loading="lazy" className="upload-product-image hover-image" />}
                   </button>
                   <span className="product-number">0{index + 1}</span>
+                  <button className={`wishlist-toggle ${wishlist.includes(product.id) ? 'saved' : ''}`} type="button" onClick={() => void toggleWishlist(product)} aria-pressed={wishlist.includes(product.id)} aria-label={wishlist.includes(product.id) ? `Remove ${product.name} from wishlist` : `Save ${product.name} to wishlist`}><Heart size={17} fill={wishlist.includes(product.id) ? 'currentColor' : 'none'} /></button>
                   <button className="quick-add" type="button" onClick={() => addToBag(product)} disabled={product.stock < 1 || quantityInBag >= quantityLimit} aria-label={quantityInBag >= quantityLimit ? `${product.name} quantity limit reached` : `Add ${product.name} to bag`}>
                     {product.stock > 0 ? <ShoppingBag size={18} /> : 'Sold out'}
                   </button>
@@ -546,7 +572,7 @@ export default function App() {
       {accountOpen && <div className="overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setAccountOpen(false); }}>
         <section className="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-title">
           <button className="icon-button dialog-close" aria-label="Close account" onClick={() => setAccountOpen(false)}><X size={20} /></button>
-          {customer ? <><p className="eyebrow dark-eyebrow">Your AHUZA account</p><h2 id="account-title">Welcome back.</h2><p className="account-email">{customer.email}</p><section className="customer-order-history" aria-labelledby="order-history-title"><h3 id="order-history-title">Order history</h3>{ordersLoading && <p>Loading your orders…</p>}{ordersError && <p className="order-history-error" role="alert">{ordersError}</p>}{!ordersLoading && !ordersError && orders.length === 0 && <p>Your orders will appear here.</p>}{orders.map((order) => <article className="customer-order" key={order.id}><div><strong>{order.id.slice(0, 8)}</strong><span>{new Date(order.createdAt).toLocaleDateString('en-IN')} · {order.status.replaceAll('_', ' ')} · payment {order.paymentStatus || 'pending'}</span><span>{order.items.map((item) => `${item.name} × ${item.quantity}`).join(', ')}</span></div><div className="customer-order-actions"><button className="invoice-button" type="button" onClick={() => void downloadInvoice(order)} disabled={!order.paymentVerifiedAt || !['paid', 'shipped', 'delivered'].includes(order.status)}>{order.paymentVerifiedAt && ['paid', 'shipped', 'delivered'].includes(order.status) ? 'Download invoice' : 'Invoice after payment'}</button>{['pending_payment', 'cancelled'].includes(order.status) && (order.hasPendingReceiptReview ? <small>Receipt waiting for owner review. This does not confirm payment.</small> : <form className="receipt-upload-form" onSubmit={(event) => { event.preventDefault(); void uploadPaymentReceipt(order.id, new FormData(event.currentTarget).get('receipt')); }}><label htmlFor={`receipt-${order.id}`}>If an owner requested payment proof<input id={`receipt-${order.id}`} type="file" name="receipt" accept="image/jpeg,image/png,image/webp" required /></label><button className="invoice-button" type="submit" disabled={receiptUploadOrder === order.id}>{receiptUploadOrder === order.id ? 'Sending…' : 'Submit for review'}</button><small>Gemini extracts receipt details for owner review only. The image is not stored, and AI cannot confirm payment.</small>{receiptMessages[order.id] && <small role="status">{receiptMessages[order.id]}</small>}</form>)}</div></article>)}</section><button className="dark-button" onClick={() => void logout()}>Sign out</button></> : <>
+          {customer ? <><p className="eyebrow dark-eyebrow">Your AHUZA account</p><h2 id="account-title">Welcome back.</h2><p className="account-email">{customer.email}</p><section className="customer-wishlist" aria-labelledby="wishlist-title"><h3 id="wishlist-title">Wishlist ({wishlist.length})</h3>{wishlist.length === 0 && <p>Tap the heart on any piece to save it here.</p>}{wishlist.map((id) => products.find((product) => product.id === id)).filter((product): product is Product => Boolean(product)).map((product) => <div className="wishlist-item" key={product.id}><span>{product.name} · {formatPrice(product.price)}</span><button type="button" className="dark-button" onClick={() => addToBag(product)} disabled={product.stock < 1}>{product.stock < 1 ? 'Sold out' : 'Add to bag'}</button><button type="button" className="icon-button" aria-label={`Remove ${product.name} from wishlist`} onClick={() => void toggleWishlist(product)}><X size={16} /></button></div>)}</section><section className="customer-order-history" aria-labelledby="order-history-title"><h3 id="order-history-title">Order history</h3>{ordersLoading && <p>Loading your orders…</p>}{ordersError && <p className="order-history-error" role="alert">{ordersError}</p>}{!ordersLoading && !ordersError && orders.length === 0 && <p>Your orders will appear here.</p>}{orders.map((order) => <article className="customer-order" key={order.id}><div><strong>{order.id.slice(0, 8)}</strong><span>{new Date(order.createdAt).toLocaleDateString('en-IN')} · {order.status.replaceAll('_', ' ')} · payment {order.paymentStatus || 'pending'}</span><span>{order.items.map((item) => `${item.name} × ${item.quantity}`).join(', ')}</span></div><div className="customer-order-actions"><button className="invoice-button" type="button" onClick={() => void downloadInvoice(order)} disabled={!order.paymentVerifiedAt || !['paid', 'shipped', 'delivered'].includes(order.status)}>{order.paymentVerifiedAt && ['paid', 'shipped', 'delivered'].includes(order.status) ? 'Download invoice' : 'Invoice after payment'}</button>{['pending_payment', 'cancelled'].includes(order.status) && (order.hasPendingReceiptReview ? <small>Receipt waiting for owner review. This does not confirm payment.</small> : <form className="receipt-upload-form" onSubmit={(event) => { event.preventDefault(); void uploadPaymentReceipt(order.id, new FormData(event.currentTarget).get('receipt')); }}><label htmlFor={`receipt-${order.id}`}>If an owner requested payment proof<input id={`receipt-${order.id}`} type="file" name="receipt" accept="image/jpeg,image/png,image/webp" required /></label><button className="invoice-button" type="submit" disabled={receiptUploadOrder === order.id}>{receiptUploadOrder === order.id ? 'Sending…' : 'Submit for review'}</button><small>Gemini extracts receipt details for owner review only. The image is not stored, and AI cannot confirm payment.</small>{receiptMessages[order.id] && <small role="status">{receiptMessages[order.id]}</small>}</form>)}</div></article>)}</section><button className="dark-button" onClick={() => void logout()}>Sign out</button></> : <>
             <p className="eyebrow dark-eyebrow">Your AHUZA account</p><h2 id="account-title">{authMode === 'login' ? 'A good thing to come back to.' : 'Make yourself at home.'}</h2>
             <form className="auth-form" onSubmit={(event) => void handleAuth(event)}><label>Email address<input name="email" type="email" autoComplete="email" required /></label><label>Password<input name="password" type="password" minLength={authMode === 'signup' ? 12 : 1} autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'} required />{authMode === 'signup' && <small>Use at least 12 characters.</small>}</label><button className="dark-button" disabled={busy}>{busy ? 'One moment…' : authMode === 'login' ? 'Sign in' : 'Create account'} <ArrowRight size={16} /></button></form>
             <button className="mode-switch" onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}>{authMode === 'login' ? 'New here? Create an account' : 'Already with us? Sign in'}</button>
