@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
-import { ArrowDown, ArrowRight, ArrowUpRight, Mail, Heart, MapPin, Menu, Minus, Phone, Plus, ShoppingBag, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUpRight, ChevronDown, Heart, Mail, MapPin, Menu, Minus, Phone, Plus, Search, ShoppingBag, SlidersHorizontal, X } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import OwnerStudio from './OwnerStudio';
 import CustomerSupportChat from './CustomerSupportChat';
@@ -92,10 +92,26 @@ export default function App() {
   const [selectedSize, setSelectedSize] = useState('');
   const [zoomed, setZoomed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [selectedSizeFilter, setSelectedSizeFilter] = useState('All');
+  const [sortOrder, setSortOrder] = useState<'recommended' | 'newest' | 'price-low' | 'price-high'>('recommended');
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const cartCount = cart.reduce((count, item) => count + item.quantity, 0);
   const cartLines = cart.map((line) => ({ ...line, product: products.find((product) => product.id === line.productId) })).filter((line): line is CartLine & { product: Product } => Boolean(line.product));
   const cartTotal = cartLines.reduce((total, line) => total + line.product.price * line.quantity, 0);
   const estimatedShipping = cartTotal < 2500 ? 100 : 0;
+  const categories = ['All', ...Array.from(new Set(products.map((product) => product.category)))];
+  const sizes = ['All', ...Array.from(new Set(products.flatMap((product) => product.sizes || [])))];
+  const matchingProducts = products.filter((product) => {
+    const term = searchTerm.trim().toLowerCase();
+    const searchable = `${product.name} ${product.category} ${product.description} ${product.ghostMannequin?.tags?.join(' ') || ''}`.toLowerCase();
+    return (!term || searchable.includes(term))
+      && (selectedCategory === 'All' || product.category === selectedCategory)
+      && (selectedSizeFilter === 'All' || product.sizes?.includes(selectedSizeFilter));
+  }).sort((a, b) => sortOrder === 'price-low' ? a.price - b.price : sortOrder === 'price-high' ? b.price - a.price : sortOrder === 'newest' ? b.id.localeCompare(a.id) : 0);
+  const newArrivals = products.slice().sort((a, b) => b.id.localeCompare(a.id)).slice(0, 4);
 
   useEffect(() => {
     fetch('/api/site-status')
@@ -507,6 +523,32 @@ export default function App() {
     }
   }
 
+  function renderProductCard(product: Product, index: number) {
+    const gallery = galleryImages(product);
+    const displayImage = gallery[0]!;
+    const hoverImage = imageSettings.layout.cardImage === 'hover-second' ? gallery[1] : undefined;
+    const displayBackground = product.ghostMannequin?.background || `var(--tone-${index % 4})`;
+    const quantityInBag = cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0);
+    const quantityLimit = Math.min(product.stock, 10);
+    return <article className="product" key={product.id}>
+      <div className={`product-image image-tone-${index % 4} ${product.images?.length ? 'has-upload' : ''}`} style={product.images?.length ? undefined : { background: displayBackground }}>
+        <button type="button" className="product-open" onClick={() => openProduct(product)} aria-label={`View ${product.name}`}>
+          <img src={displayImage.url} srcSet={displayImage.srcSet} sizes="(max-width: 760px) 50vw, 25vw" alt={product.name} loading="lazy" className={product.images?.length ? 'upload-product-image' : 'ghost-product-image'} />
+          {hoverImage && <img src={hoverImage.url} srcSet={hoverImage.srcSet} sizes="(max-width: 760px) 50vw, 25vw" alt="" loading="lazy" className="upload-product-image hover-image" />}
+        </button>
+        <span className="product-number">{String(index + 1).padStart(2, '0')}</span>
+        <button className={`wishlist-toggle ${wishlist.includes(product.id) ? 'saved' : ''}`} type="button" onClick={() => void toggleWishlist(product)} aria-pressed={wishlist.includes(product.id)} aria-label={wishlist.includes(product.id) ? `Remove ${product.name} from wishlist` : `Save ${product.name} to wishlist`}><Heart size={17} fill={wishlist.includes(product.id) ? 'currentColor' : 'none'} /></button>
+        <button className={`quick-add ${product.stock < 1 ? 'notify-stock-button' : ''}`} type="button" onClick={() => product.stock < 1 ? void requestRestockAlert(product) : product.sizes?.length ? openProduct(product) : addToBag(product)} disabled={product.stock > 0 && quantityInBag >= quantityLimit} aria-label={product.stock < 1 ? `Notify me when ${product.name} is back in stock` : quantityInBag >= quantityLimit ? `${product.name} quantity limit reached` : product.sizes?.length ? `Choose a size for ${product.name}` : `Add ${product.name} to cart`}>
+          {product.stock > 0 ? <ShoppingBag size={18} /> : 'Notify me'}
+        </button>
+      </div>
+      <button className="product-meta" type="button" onClick={() => openProduct(product)} aria-label={`View details for ${product.name}`}>
+        <span><strong>{product.name}</strong><small>{product.description}</small></span>
+        <b>{formatPrice(product.price)}</b>
+      </button>
+    </article>;
+  }
+
   return (
     <main>
       {sitePublished === null ? <section className="store-maintenance"><p className="eyebrow">AHUZA APPAREL</p><h1>Checking storefront status</h1><p>Please wait a moment.</p></section> : sitePublished ? <>
@@ -514,58 +556,56 @@ export default function App() {
       <header className="site-header">
         <button className="icon-button mobile-menu" type="button" aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'} aria-expanded={mobileMenuOpen} aria-controls="main-navigation" onClick={() => setMobileMenuOpen((open) => !open)}>{mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}</button>
         <nav className={`main-nav${mobileMenuOpen ? ' is-open' : ''}`} id="main-navigation" aria-label="Main navigation">
-          <a href="#home" onClick={() => setMobileMenuOpen(false)}>Home</a><a href="#about" onClick={() => setMobileMenuOpen(false)}>About</a><a href="#why-ahuza" onClick={() => setMobileMenuOpen(false)}>Why AHUZA</a><a href="#contact" onClick={() => setMobileMenuOpen(false)}>Contact</a>
+          <a href="#home" onClick={() => { setCatalogOpen(false); setMobileMenuOpen(false); }}>Home</a>
+          {categories.slice(1).map((category) => <button key={category} type="button" onClick={() => { setSelectedCategory(category); setCatalogOpen(true); setMobileMenuOpen(false); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>{category}</button>)}
+          <a href="#about" onClick={() => setMobileMenuOpen(false)}>About</a>
+          <a href="#contact" onClick={() => setMobileMenuOpen(false)}>Contact</a>
         </nav>
         <a className="wordmark" href="#home" aria-label="AHUZA home">AHUZA<span>.</span></a>
-        <div className="header-actions"><button className="account-link" onClick={() => setAccountOpen(true)}>{customer ? 'My account' : 'Account'}</button><button className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
+        <div className="header-actions"><button className="header-icon" type="button" aria-label="Search" onClick={() => { setCatalogOpen(true); window.setTimeout(() => document.querySelector<HTMLInputElement>('#catalog-search')?.focus(), 0); }}><Search size={18} /></button><button className="account-link" onClick={() => setAccountOpen(true)}>{customer ? 'My account' : 'Account'}</button><button className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
       </header>
+      <nav className="category-strip" aria-label="Shop categories"><button type="button" className={selectedCategory === 'All' && !catalogOpen ? 'active' : ''} onClick={() => { setSelectedCategory('All'); setCatalogOpen(true); }}>Shop all</button>{categories.slice(1).map((category) => <button key={category} type="button" className={selectedCategory === category && catalogOpen ? 'active' : ''} onClick={() => { setSelectedCategory(category); setCatalogOpen(true); }}>{category}</button>)}<button type="button" onClick={() => setCatalogOpen(true)}>New arrivals</button></nav>
 
       <section className="hero" id="home">
-         <img className="hero-image" src={storeContent.heroImageUrl} alt="AHUZA's featured collection" />
+        <img className="hero-image" src={storeContent.heroImageUrl} alt="AHUZA's featured collection" fetchPriority="high" />
         <div className="hero-shade" />
         <div className="hero-copy">
           <p className="eyebrow">{storeContent.heroEyebrow}</p>
           <h1>{storeContent.heroTitle}</h1>
           <p>{storeContent.heroDescription}</p>
-          <a className="light-link" href="#collection">Explore the collection <ArrowRight size={16} /></a>
+          <button className="light-link" type="button" onClick={() => { setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>Shop the collection <ArrowRight size={16} /></button>
         </div>
-        <span className="hero-index">01 — 04</span>
-        <a className="scroll-cue" href="#collection" aria-label="Scroll to collection"><ArrowDown size={17} /></a>
+        <span className="hero-index">AHUZA / 01</span>
+        <a className="scroll-cue" href="#shop" aria-label="Scroll to collection"><ArrowDown size={17} /></a>
       </section>
 
-      <section className="collection section-wrap" id="collection">
-        <div className="section-heading">
-          <div><p className="eyebrow dark-eyebrow">Made for repeat wear</p><h2>Good things, on rotation.</h2></div>
-          <a className="text-link" href="#collection">Shop all <ArrowUpRight size={15} /></a>
+      <section className="category-feature section-wrap" aria-labelledby="category-title">
+        <div className="section-heading"><div><p className="eyebrow dark-eyebrow">Curated for your wardrobe</p><h2 id="category-title">Find your everyday edit.</h2></div><span className="section-note">Real pieces from the AHUZA collection</span></div>
+        <div className="category-cards">{categories.slice(1, 4).map((category, index) => {
+          const product = products.find((entry) => entry.category === category);
+          return <button type="button" className="category-card" key={category} onClick={() => { setSelectedCategory(category); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>
+            {product && <img src={galleryImages(product)[0]?.url || product.imageUrl} alt="" loading="lazy" />}
+            <span><small>0{index + 1}</small><strong>{category}</strong><ChevronDown size={16} /></span>
+          </button>;
+        })}</div>
+      </section>
+
+      <section className={`collection section-wrap${catalogOpen ? ' catalog-view' : ''}`} id="shop">
+        <div className="section-heading catalog-heading">
+          <div><p className="eyebrow dark-eyebrow">{catalogOpen ? 'Shop AHUZA' : 'Made for repeat wear'}</p><h2>{catalogOpen ? (searchTerm ? `Results for “${searchTerm}”` : selectedCategory === 'All' ? 'The complete collection.' : selectedCategory) : 'Good things, on rotation.'}</h2></div>
+          {!catalogOpen && <button className="text-link" type="button" onClick={() => setCatalogOpen(true)}>Shop all <ArrowUpRight size={15} /></button>}
         </div>
+        {catalogOpen && <div className="catalog-toolbar">
+          <label className="catalog-search"><Search size={17} /><span className="sr-only">Search products</span><input id="catalog-search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search by name, category or fabric" /><button type="button" aria-label="Clear search" onClick={() => setSearchTerm('')}><X size={15} /></button></label>
+          <button className="filter-toggle" type="button" onClick={() => setFiltersOpen((open) => !open)}><SlidersHorizontal size={16} /> Filters</button>
+          <label className="sort-control">Sort by <select value={sortOrder} onChange={(event) => setSortOrder(event.target.value as typeof sortOrder)}><option value="recommended">Recommended</option><option value="newest">Newest</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option></select></label>
+        </div>}
+        {catalogOpen && <div className={`catalog-filters${filtersOpen ? ' is-open' : ''}`}><label>Category<select value={selectedCategory} onChange={(event) => setSelectedCategory(event.target.value)}>{categories.map((category) => <option key={category}>{category}</option>)}</select></label><label>Size<select value={selectedSizeFilter} onChange={(event) => setSelectedSizeFilter(event.target.value)}>{sizes.map((size) => <option key={size}>{size}</option>)}</select></label><button type="button" onClick={() => { setSelectedCategory('All'); setSelectedSizeFilter('All'); setSearchTerm(''); }}>Clear filters</button></div>}
         {notice && <p className="notice" role="status">{notice}</p>}
         {products.length === 0 && !notice ? <p className="loading">Gathering the collection…</p> : null}
+        {catalogOpen && matchingProducts.length === 0 && <div className="empty-catalog"><Search size={24} /><h3>Nothing matched that search.</h3><p>Try another category, size or search term.</p><button className="dark-button" type="button" onClick={() => { setSelectedCategory('All'); setSelectedSizeFilter('All'); setSearchTerm(''); }}>View all products</button></div>}
         <div className="product-grid" style={imageSettingsVars(imageSettings) as CSSProperties}>
-          {products.map((product, index) => {
-            const gallery = galleryImages(product);
-            const displayImage = gallery[0]!;
-            const hoverImage = imageSettings.layout.cardImage === 'hover-second' ? gallery[1] : undefined;
-            const displayBackground = product.ghostMannequin?.background || `var(--tone-${index % 4})`;
-            const quantityInBag = cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0);
-            const quantityLimit = Math.min(product.stock, 10);
-
-            return (
-              <article className="product" key={product.id}>
-                <div className={`product-image image-tone-${index % 4} ${product.images?.length ? 'has-upload' : ''}`} style={product.images?.length ? undefined : { background: displayBackground }}>
-                  <button type="button" className="product-open" onClick={() => openProduct(product)} aria-label={`View ${product.name}`}>
-                    <img src={displayImage.url} srcSet={displayImage.srcSet} sizes="(max-width: 760px) 50vw, 25vw" alt={product.name} loading="lazy" className={product.images?.length ? 'upload-product-image' : 'ghost-product-image'} />
-                    {hoverImage && <img src={hoverImage.url} srcSet={hoverImage.srcSet} sizes="(max-width: 760px) 50vw, 25vw" alt="" loading="lazy" className="upload-product-image hover-image" />}
-                  </button>
-                  <span className="product-number">0{index + 1}</span>
-                  <button className={`wishlist-toggle ${wishlist.includes(product.id) ? 'saved' : ''}`} type="button" onClick={() => void toggleWishlist(product)} aria-pressed={wishlist.includes(product.id)} aria-label={wishlist.includes(product.id) ? `Remove ${product.name} from wishlist` : `Save ${product.name} to wishlist`}><Heart size={17} fill={wishlist.includes(product.id) ? 'currentColor' : 'none'} /></button>
-                  <button className={`quick-add ${product.stock < 1 ? 'notify-stock-button' : ''}`} type="button" onClick={() => product.stock < 1 ? void requestRestockAlert(product) : product.sizes?.length ? openProduct(product) : addToBag(product)} disabled={product.stock > 0 && quantityInBag >= quantityLimit} aria-label={product.stock < 1 ? `Notify me when ${product.name} is back in stock` : quantityInBag >= quantityLimit ? `${product.name} quantity limit reached` : product.sizes?.length ? `Choose a size for ${product.name}` : `Add ${product.name} to cart`}>
-                    {product.stock > 0 ? <ShoppingBag size={18} /> : 'Notify me'}
-                  </button>
-                </div>
-                <div className="product-meta"><div><h3>{product.name}</h3><p>{product.description}</p></div><span>{formatPrice(product.price)}</span></div>
-              </article>
-            );
-          })}
+          {(catalogOpen ? matchingProducts : newArrivals).map((product, index) => renderProductCard(product, index))}
         </div>
       </section>
 
@@ -576,6 +616,7 @@ export default function App() {
           <h2>{storeContent.storyHeading}</h2>
           <p>{storeContent.storyBody}</p>
           <p>AHUZA creates elevated everyday essentials for women and modern wardrobes—pieces designed to move fluidly from work to weekends, with comfort, confidence, and silhouette-driven ease at the centre of every collection.</p>
+          <p className="brand-tagline">Where Fashion Meets Passion.</p>
           <a className="text-link" href="#why-ahuza">Why AHUZA <ArrowUpRight size={15} /></a>
         </div>
       </section>
@@ -603,6 +644,12 @@ export default function App() {
         </div>
       </section>
 
+      <section className="trust-strip" aria-label="AHUZA service promises">
+        <div><strong>Thoughtful delivery</strong><span>Shipping details are shown clearly at checkout.</span></div>
+        <div><strong>Secure checkout</strong><span>Your payment is handled through the existing AHUZA flow.</span></div>
+        <div><strong>Here to help</strong><span>Contact us for support with your order or fit.</span></div>
+      </section>
+
       <section className="contact-section" id="contact">
         <div className="contact-copy">
           <p className="eyebrow">Contact us</p>
@@ -626,7 +673,7 @@ export default function App() {
       </section>
 
       <section className="newsletter" id="journal"><div><p className="eyebrow">Ahuza updates</p><h2>Stay in style.</h2><p className="newsletter-copy">New collections, thoughtful notes and offers from AHUZA.</p></div><form onSubmit={(event) => void subscribeToNewsletter(event)}><label className="sr-only" htmlFor="newsletter-email">Email address</label><input id="newsletter-email" name="email" type="email" autoComplete="email" placeholder="Your email address" maxLength={254} required disabled={newsletterBusy} /><label className="newsletter-consent"><input name="consent" type="checkbox" required disabled={newsletterBusy} /> I agree to receive AHUZA news and offers by email.</label><button type="submit" disabled={newsletterBusy}>{newsletterBusy ? 'Subscribing…' : 'Subscribe'} <ArrowRight size={16} /></button>{newsletterMessage && <p className="newsletter-message" role="status">{newsletterMessage}</p>}</form></section>
-      <footer className="site-footer"><a className="wordmark" href="#home">AHUZA<span>.</span></a><p>Considered essentials for everyday living.</p><span>© AHUZA Apparel 2026</span><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></footer>
+      <footer className="site-footer"><a className="wordmark" href="#home">AHUZA<span>.</span></a><div className="footer-links"><a href="#about">About</a><a href="#contact">Contact</a><a href="#journal">Updates</a></div><p>Where Fashion Meets Passion.</p><span>© AHUZA Apparel 2026</span><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></footer>
 
       {cartOpen && <div className="overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setCartOpen(false); }}>
         <aside className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="bag-title">
@@ -640,7 +687,7 @@ export default function App() {
             {paymentStatus === 'failed' && <p>The failure status is customer-reported only. If money was debited, contact AHUZA with the bank reference before retrying.</p>}
             {(paymentOrder.paymentMethod === 'cod' || paymentStatus === 'paid' || paymentStatus === 'cancelled' || paymentStatus === 'expired') && <button className="dark-button" type="button" onClick={() => { setPaymentOrder(null); setPaymentStatus('pending'); setCartOpen(false); }}>{paymentStatus === 'cancelled' ? 'Return to bag' : 'Done'}</button>}
             {paymentOrder.paymentMethod === 'upi' && <small>No gateway or bank verification API is connected. A UPI callback, screenshot, receipt or customer claim is never treated as proof. An authorized AHUZA owner must match the settled transaction in the bank account before confirming the order. The payment link expires after 20 minutes.</small>}
-          </section> : cartLines.length === 0 ? <div className="empty-bag"><ShoppingBag size={25} /><p>Your bag is taking a quiet moment.</p><button className="dark-button" onClick={() => { setCartOpen(false); document.querySelector('#collection')?.scrollIntoView({ behavior: 'smooth' }); }}>Explore the collection</button></div> : <>
+          </section> : cartLines.length === 0 ? <div className="empty-bag"><ShoppingBag size={25} /><p>Your bag is taking a quiet moment.</p><button className="dark-button" onClick={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>Explore the collection</button></div> : <>
             <div className="bag-lines">{cartLines.map(({ product, quantity, size }) => <div className="bag-line" key={`${product.id}-${size || 'standard'}`}><img src={mainImage(product)?.variants[0]?.url || product.imageUrl} alt="" /><div className="bag-line-copy"><h3>{product.name}</h3><p>{formatPrice(product.price)}{size ? ` · Size ${size}` : ''}</p><div className="quantity-control"><button type="button" aria-label={`Remove one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, -1)}><Minus size={13} /></button><span>{quantity}</span><button type="button" aria-label={`Add one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, 1)} disabled={cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0) >= Math.min(product.stock, 10)}><Plus size={13} /></button></div></div><span className="line-total">{formatPrice(product.price * quantity)}</span></div>)}</div>
             <div className="bag-footer"><div className="subtotal"><span>Subtotal</span><strong>{formatPrice(cartTotal)}</strong></div><div className="subtotal"><span>Shipping</span><strong>{estimatedShipping ? formatPrice(estimatedShipping) : 'Complimentary'}</strong></div><div className="subtotal"><span>Total</span><strong>{formatPrice(cartTotal + estimatedShipping)}</strong></div><p>₹100 shipping below ₹2,500. Complimentary shipping at or above ₹2,500. No discounts or additional taxes are currently applied.</p><form className="checkout-details" onSubmit={(event) => { event.preventDefault(); void checkout(new FormData(event.currentTarget)); }}>
               <p className="address-title">Delivery address · India</p><label>Full name<input name="name" autoComplete="name" maxLength={100} required /></label><label>Address line 1<input name="addressLine1" autoComplete="address-line1" maxLength={180} required /></label><label>Address line 2 <span>Optional</span><input name="addressLine2" autoComplete="address-line2" maxLength={180} /></label><div className="address-row"><label>City<input name="city" autoComplete="address-level2" maxLength={80} required /></label><label>State<input name="state" autoComplete="address-level1" maxLength={80} required /></label></div><div className="address-row"><label>PIN code<input name="postalCode" inputMode="numeric" autoComplete="postal-code" pattern="[1-9][0-9]{5}" maxLength={6} required /></label><label>Phone<input name="phone" type="tel" inputMode="tel" autoComplete="tel" pattern="\+?[0-9][0-9\s-]{8,16}" maxLength={18} required /></label></div>
