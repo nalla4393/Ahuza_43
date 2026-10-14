@@ -15,6 +15,7 @@ export type Product = {
   ghostMannequin: { imageUrl?: string; tags: string[]; background?: string };
   images?: ProductImage[];
   mainImageId?: string;
+  sizes?: string[];
 };
 
 export type ProductImage = {
@@ -75,7 +76,7 @@ export type Order = {
   id: string;
   userId: string;
   shippingAddress: ShippingAddress;
-  items: { productId: string; name: string; sku: string; quantity: number; unitPrice: number }[];
+  items: { productId: string; name: string; sku: string; quantity: number; unitPrice: number; size?: string }[];
   amount: number;
   currency: string;
   trackingNumber?: string;

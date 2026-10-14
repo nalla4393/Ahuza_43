@@ -17,6 +17,7 @@ type Product = {
   ghostMannequin?: { imageUrl?: string; tags?: string[]; background?: string };
   images?: ProductImage[];
   mainImageId?: string;
+  sizes?: string[];
 };
 
 const galleryImages = (product: Product): { id: string; url: string; srcSet?: string; thumb: string }[] => {
@@ -33,9 +34,9 @@ const formatPrice = (price: number) => new Intl.NumberFormat('en-IN', {
 }).format(price);
 
 type Customer = { id: string; email: string };
-type CustomerOrder = { id: string; amount: number; currency: string; status: string; paymentMethod?: 'upi' | 'cod'; paymentStatus?: string; paymentVerifiedAt?: string; hasPendingReceiptReview?: boolean; createdAt: string; items: { name: string; quantity: number }[] };
+type CustomerOrder = { id: string; amount: number; currency: string; status: string; paymentMethod?: 'upi' | 'cod'; paymentStatus?: string; paymentVerifiedAt?: string; hasPendingReceiptReview?: boolean; createdAt: string; items: { name: string; quantity: number; size?: string }[] };
 type StorefrontContent = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string };
-type CartLine = { productId: string; quantity: number };
+type CartLine = { productId: string; quantity: number; size?: string };
 type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; paymentReference?: string; upiIntent?: string; merchantVpa?: string; merchantName?: string; amount: number; currency: string; expiresAt?: string; status?: string };
 type PaymentConfiguration = { configured: boolean; upiVpa: string | null; merchantName: string; automaticVerification: false };
 
@@ -84,6 +85,7 @@ export default function App() {
   const [imageSettings, setImageSettings] = useState<ImageSettings>(defaultImageSettings);
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
   const [detailIndex, setDetailIndex] = useState(0);
+  const [selectedSize, setSelectedSize] = useState('');
   const [zoomed, setZoomed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const cartCount = cart.reduce((count, item) => count + item.quantity, 0);
@@ -227,7 +229,20 @@ export default function App() {
     window.setTimeout(() => setNotice(''), 2400);
   }
 
-  function addToBag(product: Product) {
+  function openProduct(product: Product) {
+    setDetailProduct(product);
+    setDetailIndex(0);
+    setSelectedSize('');
+    setZoomed(false);
+  }
+
+  function addToBag(product: Product, size?: string) {
+    if (product.sizes?.length && !size) {
+      openProduct(product);
+      setNotice('Choose an available size before adding this item to your bag.');
+      window.setTimeout(() => setNotice(''), 3000);
+      return;
+    }
     if (product.stock < 1) return;
     const maxQuantity = Math.min(product.stock, 10);
     const currentQuantity = cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0);
@@ -236,16 +251,16 @@ export default function App() {
       return;
     }
     setCart((current) => {
-      const existing = current.find((line) => line.productId === product.id);
+      const existing = current.find((line) => line.productId === product.id && line.size === size);
       return existing
-        ? current.map((line) => line.productId === product.id ? { ...line, quantity: Math.min(line.quantity + 1, maxQuantity) } : line)
-        : [...current, { productId: product.id, quantity: 1 }];
+        ? current.map((line) => line.productId === product.id && line.size === size ? { ...line, quantity: Math.min(line.quantity + 1, maxQuantity) } : line)
+        : [...current, { productId: product.id, quantity: 1, ...(size ? { size } : {}) }];
     });
     setNotice(`${product.name} added to your bag`);
     window.setTimeout(() => setNotice(''), 2400);
   }
 
-  function changeQuantity(productId: string, change: number) {
+  function changeQuantity(productId: string, size: string | undefined, change: number) {
     const product = products.find((entry) => entry.id === productId);
     if (!product) return;
     const currentQuantity = cart.reduce((total, line) => line.productId === productId ? total + line.quantity : total, 0);
@@ -255,7 +270,7 @@ export default function App() {
       return;
     }
     setCart((current) => current.flatMap((line) => {
-      if (line.productId !== productId) return [line];
+      if (line.productId !== productId || line.size !== size) return [line];
       const quantity = Math.min(line.quantity + change, maxQuantity);
       return quantity > 0 ? [{ ...line, quantity }] : [];
     }));
@@ -293,7 +308,7 @@ export default function App() {
       const response = await fetch('/api/payments/orders', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          items: cart.map(({ productId, quantity }) => ({ productId, quantity })),
+          items: cart.map(({ productId, quantity, size }) => ({ productId, quantity, ...(size ? { size } : {}) })),
           paymentMethod,
           marketingConsent,
           shippingAddress: Object.fromEntries(formData.entries()),
@@ -469,13 +484,13 @@ export default function App() {
             return (
               <article className="product" key={product.id}>
                 <div className={`product-image image-tone-${index % 4} ${product.images?.length ? 'has-upload' : ''}`} style={product.images?.length ? undefined : { background: displayBackground }}>
-                  <button type="button" className="product-open" onClick={() => { setDetailProduct(product); setDetailIndex(0); setZoomed(false); }} aria-label={`View ${product.name}`}>
+                  <button type="button" className="product-open" onClick={() => openProduct(product)} aria-label={`View ${product.name}`}>
                     <img src={displayImage.url} srcSet={displayImage.srcSet} sizes="(max-width: 760px) 50vw, 25vw" alt={product.name} loading="lazy" className={product.images?.length ? 'upload-product-image' : 'ghost-product-image'} />
                     {hoverImage && <img src={hoverImage.url} srcSet={hoverImage.srcSet} sizes="(max-width: 760px) 50vw, 25vw" alt="" loading="lazy" className="upload-product-image hover-image" />}
                   </button>
                   <span className="product-number">0{index + 1}</span>
                   <button className={`wishlist-toggle ${wishlist.includes(product.id) ? 'saved' : ''}`} type="button" onClick={() => void toggleWishlist(product)} aria-pressed={wishlist.includes(product.id)} aria-label={wishlist.includes(product.id) ? `Remove ${product.name} from wishlist` : `Save ${product.name} to wishlist`}><Heart size={17} fill={wishlist.includes(product.id) ? 'currentColor' : 'none'} /></button>
-                  <button className="quick-add" type="button" onClick={() => addToBag(product)} disabled={product.stock < 1 || quantityInBag >= quantityLimit} aria-label={quantityInBag >= quantityLimit ? `${product.name} quantity limit reached` : `Add ${product.name} to bag`}>
+                  <button className="quick-add" type="button" onClick={() => product.sizes?.length ? openProduct(product) : addToBag(product)} disabled={product.stock < 1 || quantityInBag >= quantityLimit} aria-label={quantityInBag >= quantityLimit ? `${product.name} quantity limit reached` : product.sizes?.length ? `Choose a size for ${product.name}` : `Add ${product.name} to bag`}>
                     {product.stock > 0 ? <ShoppingBag size={18} /> : 'Sold out'}
                   </button>
                 </div>
@@ -558,7 +573,7 @@ export default function App() {
             {(paymentOrder.paymentMethod === 'cod' || paymentStatus === 'paid' || paymentStatus === 'cancelled' || paymentStatus === 'expired') && <button className="dark-button" type="button" onClick={() => { setPaymentOrder(null); setPaymentStatus('pending'); setCartOpen(false); }}>{paymentStatus === 'cancelled' ? 'Return to bag' : 'Done'}</button>}
             {paymentOrder.paymentMethod === 'upi' && <small>No gateway or bank verification API is connected. A UPI callback, screenshot, receipt or customer claim is never treated as proof. An authorized AHUZA owner must match the settled transaction in the bank account before confirming the order. The payment link expires after 20 minutes.</small>}
           </section> : cartLines.length === 0 ? <div className="empty-bag"><ShoppingBag size={25} /><p>Your bag is taking a quiet moment.</p><button className="dark-button" onClick={() => { setCartOpen(false); document.querySelector('#collection')?.scrollIntoView({ behavior: 'smooth' }); }}>Explore the collection</button></div> : <>
-            <div className="bag-lines">{cartLines.map(({ product, quantity }) => <div className="bag-line" key={product.id}><img src={mainImage(product)?.variants[0]?.url || product.imageUrl} alt="" /><div className="bag-line-copy"><h3>{product.name}</h3><p>{formatPrice(product.price)}</p><div className="quantity-control"><button type="button" aria-label={`Remove one ${product.name}`} onClick={() => changeQuantity(product.id, -1)}><Minus size={13} /></button><span>{quantity}</span><button type="button" aria-label={`Add one ${product.name}`} onClick={() => changeQuantity(product.id, 1)} disabled={quantity >= Math.min(product.stock, 10)}><Plus size={13} /></button></div></div><span className="line-total">{formatPrice(product.price * quantity)}</span></div>)}</div>
+            <div className="bag-lines">{cartLines.map(({ product, quantity, size }) => <div className="bag-line" key={`${product.id}-${size || 'standard'}`}><img src={mainImage(product)?.variants[0]?.url || product.imageUrl} alt="" /><div className="bag-line-copy"><h3>{product.name}</h3><p>{formatPrice(product.price)}{size ? ` · Size ${size}` : ''}</p><div className="quantity-control"><button type="button" aria-label={`Remove one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, -1)}><Minus size={13} /></button><span>{quantity}</span><button type="button" aria-label={`Add one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, 1)} disabled={cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0) >= Math.min(product.stock, 10)}><Plus size={13} /></button></div></div><span className="line-total">{formatPrice(product.price * quantity)}</span></div>)}</div>
             <div className="bag-footer"><div className="subtotal"><span>Subtotal</span><strong>{formatPrice(cartTotal)}</strong></div><div className="subtotal"><span>Shipping</span><strong>{estimatedShipping ? formatPrice(estimatedShipping) : 'Complimentary'}</strong></div><div className="subtotal"><span>Total</span><strong>{formatPrice(cartTotal + estimatedShipping)}</strong></div><p>₹100 shipping below ₹2,500. Complimentary shipping at or above ₹2,500. No discounts or additional taxes are currently applied.</p><form className="checkout-details" onSubmit={(event) => { event.preventDefault(); void checkout(new FormData(event.currentTarget)); }}>
               <p className="address-title">Delivery address · India</p><label>Full name<input name="name" autoComplete="name" maxLength={100} required /></label><label>Address line 1<input name="addressLine1" autoComplete="address-line1" maxLength={180} required /></label><label>Address line 2 <span>Optional</span><input name="addressLine2" autoComplete="address-line2" maxLength={180} /></label><div className="address-row"><label>City<input name="city" autoComplete="address-level2" maxLength={80} required /></label><label>State<input name="state" autoComplete="address-level1" maxLength={80} required /></label></div><div className="address-row"><label>PIN code<input name="postalCode" inputMode="numeric" autoComplete="postal-code" pattern="[1-9][0-9]{5}" maxLength={6} required /></label><label>Phone<input name="phone" type="tel" inputMode="tel" autoComplete="tel" pattern="\+?[0-9][0-9\s-]{8,16}" maxLength={18} required /></label></div>
               <fieldset className="payment-method-options"><legend>Payment method</legend><label><input type="radio" name="paymentMethod" value="upi" checked={paymentMethod === 'upi'} onChange={() => setPaymentMethod('upi')} disabled={!paymentConfiguration?.configured} /> Pay via UPI</label><label><input type="radio" name="paymentMethod" value="cod" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} /> Cash on delivery</label></fieldset>
@@ -572,7 +587,7 @@ export default function App() {
       {accountOpen && <div className="overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setAccountOpen(false); }}>
         <section className="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-title">
           <button className="icon-button dialog-close" aria-label="Close account" onClick={() => setAccountOpen(false)}><X size={20} /></button>
-          {customer ? <><p className="eyebrow dark-eyebrow">Your AHUZA account</p><h2 id="account-title">Welcome back.</h2><p className="account-email">{customer.email}</p><section className="customer-wishlist" aria-labelledby="wishlist-title"><h3 id="wishlist-title">Wishlist ({wishlist.length})</h3>{wishlist.length === 0 && <p>Tap the heart on any piece to save it here.</p>}{wishlist.map((id) => products.find((product) => product.id === id)).filter((product): product is Product => Boolean(product)).map((product) => <div className="wishlist-item" key={product.id}><span>{product.name} · {formatPrice(product.price)}</span><button type="button" className="dark-button" onClick={() => addToBag(product)} disabled={product.stock < 1}>{product.stock < 1 ? 'Sold out' : 'Add to bag'}</button><button type="button" className="icon-button" aria-label={`Remove ${product.name} from wishlist`} onClick={() => void toggleWishlist(product)}><X size={16} /></button></div>)}</section><section className="customer-order-history" aria-labelledby="order-history-title"><h3 id="order-history-title">Order history</h3>{ordersLoading && <p>Loading your orders…</p>}{ordersError && <p className="order-history-error" role="alert">{ordersError}</p>}{!ordersLoading && !ordersError && orders.length === 0 && <p>Your orders will appear here.</p>}{orders.map((order) => <article className="customer-order" key={order.id}><div><strong>{order.id.slice(0, 8)}</strong><span>{new Date(order.createdAt).toLocaleDateString('en-IN')} · {order.status.replaceAll('_', ' ')} · payment {order.paymentStatus || 'pending'}</span><span>{order.items.map((item) => `${item.name} × ${item.quantity}`).join(', ')}</span></div><div className="customer-order-actions"><button className="invoice-button" type="button" onClick={() => void downloadInvoice(order)} disabled={!order.paymentVerifiedAt || !['paid', 'shipped', 'delivered'].includes(order.status)}>{order.paymentVerifiedAt && ['paid', 'shipped', 'delivered'].includes(order.status) ? 'Download invoice' : 'Invoice after payment'}</button>{['pending_payment', 'cancelled'].includes(order.status) && (order.hasPendingReceiptReview ? <small>Receipt waiting for owner review. This does not confirm payment.</small> : <form className="receipt-upload-form" onSubmit={(event) => { event.preventDefault(); void uploadPaymentReceipt(order.id, new FormData(event.currentTarget).get('receipt')); }}><label htmlFor={`receipt-${order.id}`}>If an owner requested payment proof<input id={`receipt-${order.id}`} type="file" name="receipt" accept="image/jpeg,image/png,image/webp" required /></label><button className="invoice-button" type="submit" disabled={receiptUploadOrder === order.id}>{receiptUploadOrder === order.id ? 'Sending…' : 'Submit for review'}</button><small>Gemini extracts receipt details for owner review only. The image is not stored, and AI cannot confirm payment.</small>{receiptMessages[order.id] && <small role="status">{receiptMessages[order.id]}</small>}</form>)}</div></article>)}</section><button className="dark-button" onClick={() => void logout()}>Sign out</button></> : <>
+          {customer ? <><p className="eyebrow dark-eyebrow">Your AHUZA account</p><h2 id="account-title">Welcome back.</h2><p className="account-email">{customer.email}</p><section className="customer-wishlist" aria-labelledby="wishlist-title"><h3 id="wishlist-title">Wishlist ({wishlist.length})</h3>{wishlist.length === 0 && <p>Tap the heart on any piece to save it here.</p>}{wishlist.map((id) => products.find((product) => product.id === id)).filter((product): product is Product => Boolean(product)).map((product) => <div className="wishlist-item" key={product.id}><span>{product.name} · {formatPrice(product.price)}</span><button type="button" className="dark-button" onClick={() => addToBag(product)} disabled={product.stock < 1}>{product.stock < 1 ? 'Sold out' : 'Add to bag'}</button><button type="button" className="icon-button" aria-label={`Remove ${product.name} from wishlist`} onClick={() => void toggleWishlist(product)}><X size={16} /></button></div>)}</section><section className="customer-order-history" aria-labelledby="order-history-title"><h3 id="order-history-title">Order history</h3>{ordersLoading && <p>Loading your orders…</p>}{ordersError && <p className="order-history-error" role="alert">{ordersError}</p>}{!ordersLoading && !ordersError && orders.length === 0 && <p>Your orders will appear here.</p>}{orders.map((order) => <article className="customer-order" key={order.id}><div><strong>{order.id.slice(0, 8)}</strong><span>{new Date(order.createdAt).toLocaleDateString('en-IN')} · {order.status.replaceAll('_', ' ')} · payment {order.paymentStatus || 'pending'}</span><span>{order.items.map((item) => `${item.name}${item.size ? ` (Size ${item.size})` : ''} × ${item.quantity}`).join(', ')}</span></div><div className="customer-order-actions"><button className="invoice-button" type="button" onClick={() => void downloadInvoice(order)} disabled={!order.paymentVerifiedAt || !['paid', 'shipped', 'delivered'].includes(order.status)}>{order.paymentVerifiedAt && ['paid', 'shipped', 'delivered'].includes(order.status) ? 'Download invoice' : 'Invoice after payment'}</button>{['pending_payment', 'cancelled'].includes(order.status) && (order.hasPendingReceiptReview ? <small>Receipt waiting for owner review. This does not confirm payment.</small> : <form className="receipt-upload-form" onSubmit={(event) => { event.preventDefault(); void uploadPaymentReceipt(order.id, new FormData(event.currentTarget).get('receipt')); }}><label htmlFor={`receipt-${order.id}`}>If an owner requested payment proof<input id={`receipt-${order.id}`} type="file" name="receipt" accept="image/jpeg,image/png,image/webp" required /></label><button className="invoice-button" type="submit" disabled={receiptUploadOrder === order.id}>{receiptUploadOrder === order.id ? 'Sending…' : 'Submit for review'}</button><small>Gemini extracts receipt details for owner review only. The image is not stored, and AI cannot confirm payment.</small>{receiptMessages[order.id] && <small role="status">{receiptMessages[order.id]}</small>}</form>)}</div></article>)}</section><button className="dark-button" onClick={() => void logout()}>Sign out</button></> : <>
             <p className="eyebrow dark-eyebrow">Your AHUZA account</p><h2 id="account-title">{authMode === 'login' ? 'A good thing to come back to.' : 'Make yourself at home.'}</h2>
             <form className="auth-form" onSubmit={(event) => void handleAuth(event)}><label>Email address<input name="email" type="email" autoComplete="email" required /></label><label>Password<input name="password" type="password" minLength={authMode === 'signup' ? 12 : 1} autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'} required />{authMode === 'signup' && <small>Use at least 12 characters.</small>}</label><button className="dark-button" disabled={busy}>{busy ? 'One moment…' : authMode === 'login' ? 'Sign in' : 'Create account'} <ArrowRight size={16} /></button></form>
             <button className="mode-switch" onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}>{authMode === 'login' ? 'New here? Create an account' : 'Already with us? Sign in'}</button>
@@ -600,7 +615,8 @@ export default function App() {
               {showAll && layout.thumbnails && <div className="pd-thumbs">{gallery.map((image, position) => <button key={image.id} type="button" className={position === detailIndex ? 'active' : ''} onClick={() => { setDetailIndex(position); setZoomed(false); }} aria-label={`Show image ${position + 1}`}><img src={image.thumb} alt="" /></button>)}</div>}
             </div>
             <div className="pd-copy"><p className="eyebrow dark-eyebrow">{detailProduct.category} · {detailProduct.sku}</p><h2>{detailProduct.name}</h2><p>{detailProduct.description}</p><strong>{formatPrice(detailProduct.price)}</strong>
-              <button className="dark-button" type="button" disabled={detailProduct.stock < 1} onClick={() => { addToBag(detailProduct); setDetailProduct(null); }}>{detailProduct.stock > 0 ? 'Add to bag' : 'Sold out'}</button></div>
+              {detailProduct.sizes?.length ? <fieldset className="customer-size-picker"><legend>Choose your size</legend><div className="size-options">{detailProduct.sizes.map((size) => <button key={size} type="button" className={`size-option size-choice ${selectedSize === size ? 'selected' : ''}`} aria-pressed={selectedSize === size} onClick={() => setSelectedSize(size)}>{size}</button>)}</div></fieldset> : null}
+              <button className="dark-button" type="button" disabled={detailProduct.stock < 1 || Boolean(detailProduct.sizes?.length && !selectedSize)} onClick={() => { addToBag(detailProduct, selectedSize || undefined); setDetailProduct(null); }}>{detailProduct.stock < 1 ? 'Sold out' : detailProduct.sizes?.length && !selectedSize ? 'Choose a size' : 'Add to bag'}</button></div>
           </section>
         </div>;
       })()}

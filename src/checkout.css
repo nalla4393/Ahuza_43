@@ -76,5 +76,19 @@
 .automation-preview{padding:12px;border:1px solid var(--line)}
 .automation-run{margin:0;font-size:13px}
 
+.available-sizes,.customer-size-picker{border:0;padding:0;margin:0;min-width:0}
+.available-sizes legend,.customer-size-picker legend{font-size:13px;font-weight:600;margin-bottom:8px}
+.available-sizes legend small{display:block;color:var(--muted);font-weight:400;margin-top:4px}
+.size-options{display:flex;gap:8px;flex-wrap:wrap}
+.size-option{position:relative;display:inline-flex;cursor:pointer}
+.size-option input{position:absolute;opacity:0;pointer-events:none}
+.size-option span,.size-choice{min-width:42px;min-height:40px;padding:8px 12px;display:grid;place-items:center;border:1px solid var(--line);background:var(--paper);font-size:13px;text-align:center}
+.size-option.selected span,.size-choice.selected{border-color:var(--ink);background:var(--ink);color:#fff}
+.size-option input:focus-visible+span{outline:2px solid var(--olive);outline-offset:2px}
+.custom-size-entry{display:flex;gap:8px;margin-top:10px;max-width:420px}
+.custom-size-entry input{min-width:0;flex:1}
+.customer-size-picker{margin:18px 0}
+.size-choice{cursor:pointer}
+
 .content-upload{display:grid;gap:6px}
 .upload-trigger{display:inline-flex;justify-content:center;cursor:pointer;width:fit-content}

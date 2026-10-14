@@ -260,19 +260,28 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   if (!stringValue(shippingAddress.name, 100) || !stringValue(shippingAddress.addressLine1, 180) || (shippingAddress.addressLine2 && shippingAddress.addressLine2.length > 180) || !stringValue(shippingAddress.city, 80) || !stringValue(shippingAddress.state, 80) || !/^[1-9][0-9]{5}$/.test(shippingAddress.postalCode) || !/^\+?[0-9][0-9\s-]{8,16}$/.test(shippingAddress.phone)) {
     response.status(400).json({ error: 'Enter a valid name, Indian delivery address, six-digit PIN code, and phone number.' }); return;
   }
-  const requested = new Map<string, number>();
+  const requested = new Map<string, { productId: string; size?: string; quantity: number }>();
   for (const item of items) {
-    if (!stringValue(item?.productId, 100) || !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 10) { response.status(400).json({ error: 'Each item needs a product ID and quantity from 1 to 10.' }); return; }
-    const quantity = (requested.get(item.productId) || 0) + item.quantity;
+    if (!stringValue(item?.productId, 100) || !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 10
+      || (item.size !== undefined && !stringValue(item.size, 20))) { response.status(400).json({ error: 'Each item needs a product ID, valid size (when required), and quantity from 1 to 10.' }); return; }
+    const key = `${item.productId}:${typeof item.size === 'string' ? item.size.trim().toLowerCase() : ''}`;
+    const existing = requested.get(key);
+    const quantity = (existing?.quantity || 0) + item.quantity;
     if (quantity > 10) { response.status(400).json({ error: 'Each product is limited to 10 items per order.' }); return; }
-    requested.set(item.productId, quantity);
+    requested.set(key, { productId: item.productId, ...(typeof item.size === 'string' ? { size: item.size.trim() } : {}), quantity });
   }
   const products = (await getDatabase()).products;
   const orderItems: Order['items'] = [];
-  for (const [productId, quantity] of requested) {
+  for (const { productId, size, quantity } of requested.values()) {
     const product = products.find((entry) => entry.id === productId && entry.active);
     if (!product || product.stock < quantity) { response.status(409).json({ error: `Product ${productId} is unavailable in the requested quantity.` }); return; }
-    orderItems.push({ productId, name: product.name, sku: product.sku, quantity, unitPrice: product.price });
+    if (product.sizes?.length && (!size || !product.sizes.some((available) => available.toLowerCase() === size.toLowerCase()))) {
+      response.status(400).json({ error: `Choose an available size for ${product.name}.` }); return;
+    }
+    if (size && !product.sizes?.some((available) => available.toLowerCase() === size.toLowerCase())) {
+      response.status(400).json({ error: `Size ${size} is not available for ${product.name}.` }); return;
+    }
+    orderItems.push({ productId, name: product.name, sku: product.sku, quantity, unitPrice: product.price, ...(size ? { size: product.sizes!.find((available) => available.toLowerCase() === size.toLowerCase()) } : {}) });
   }
   const subtotalAmount = orderItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0) * 100;
   const shippingAmount = subtotalAmount < 250000 ? 10000 : 0;
@@ -462,7 +471,7 @@ api.get('/orders/:id/invoice', requireCustomer, async (request, response) => {
   document.moveDown(0.4);
   for (const item of order.items) {
     const lineTotal = item.unitPrice * item.quantity;
-    document.font('Helvetica-Bold').text(safePdfText(item.name));
+    document.font('Helvetica-Bold').text(safePdfText(`${item.name}${item.size ? ` · Size ${item.size}` : ''}`));
     document.font('Helvetica').fontSize(9).text(`SKU: ${safePdfText(item.sku)}  |  Quantity: ${item.quantity}  |  Unit price: INR ${item.unitPrice.toFixed(2)}  |  Line total: INR ${lineTotal.toFixed(2)}`);
     document.moveDown(0.6);
   }
@@ -525,17 +534,18 @@ api.patch('/owner/site-status', requireOwner, ownerLimit, async (request, respon
 api.get('/owner/inventory', requireOwner, ownerLimit, async (_request, response) => response.json({ products: (await getDatabase()).products }));
 
 api.post('/owner/inventory', requireOwner, ownerLimit, async (request, response) => {
-  const { name, description, price, sku, stock, category, imageUrl, ghostMannequin, images, mainImageId, active } = request.body || {};
+  const { name, description, price, sku, stock, category, imageUrl, ghostMannequin, images, mainImageId, active, sizes } = request.body || {};
   const hasImages = Array.isArray(images) && images.length > 0;
   if (!stringValue(name, 120) || !stringValue(description, 1000) || !Number.isFinite(price) || price <= 0 || price > 10000000 || !stringValue(sku, 80) || !Number.isInteger(stock) || stock < 0 || stock > 100000 || !stringValue(category, 80) || (!hasImages && !httpsUrl(imageUrl))) {
     response.status(400).json({ error: 'Provide a title, description, positive price, SKU, stock, category, and at least one uploaded image.' }); return;
   }
   if (images !== undefined && !validImageIds(images, mainImageId)) { response.status(400).json({ error: 'Image list is invalid.' }); return; }
+  if (sizes !== undefined && !validProductSizes(sizes)) { response.status(400).json({ error: 'Sizes must be a list of up to 20 unique labels, each 1 to 20 characters.' }); return; }
   if (active !== undefined && typeof active !== 'boolean') { response.status(400).json({ error: 'Status must be Published or Unpublished.' }); return; }
   if (ghostMannequin !== undefined && !validGhostMannequin(ghostMannequin)) { response.status(400).json({ error: 'Ghost mannequin metadata is invalid.' }); return; }
   const product = await mutateDatabase((database) => {
     if (database.products.some((entry) => entry.sku.toLowerCase() === sku.trim().toLowerCase())) return null;
-    const created: Product = { id: randomUUID(), name: name.trim(), description: description.trim(), price, sku: sku.trim(), stock, category: category.trim(), imageUrl: imageUrl || '', active: active ?? true, ghostMannequin: { tags: [], ...(ghostMannequin as Product['ghostMannequin'] | undefined) } };
+    const created: Product = { id: randomUUID(), name: name.trim(), description: description.trim(), price, sku: sku.trim(), stock, category: category.trim(), imageUrl: imageUrl || '', active: active ?? true, ghostMannequin: { tags: [], ...(ghostMannequin as Product['ghostMannequin'] | undefined) }, ...(sizes?.length ? { sizes } : {}) };
     if (images !== undefined && !applyImages(database, created, images, mainImageId)) return 'bad-images' as const;
     database.products.push(created);
     return created;
@@ -546,8 +556,9 @@ api.post('/owner/inventory', requireOwner, ownerLimit, async (request, response)
 });
 
 api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, response) => {
-  const { name, description, price, category, imageUrl, stock, sku, active, ghostMannequin, images, mainImageId } = request.body || {};
+  const { name, description, price, category, imageUrl, stock, sku, active, ghostMannequin, images, mainImageId, sizes } = request.body || {};
   if (images !== undefined && !validImageIds(images, mainImageId)) { response.status(400).json({ error: 'Image list is invalid.' }); return; }
+  if (sizes !== undefined && !validProductSizes(sizes)) { response.status(400).json({ error: 'Sizes must be a list of up to 20 unique labels, each 1 to 20 characters.' }); return; }
   if (name !== undefined && !stringValue(name, 120)) { response.status(400).json({ error: 'Title must be 1 to 120 characters.' }); return; }
   if (description !== undefined && !stringValue(description, 1000)) { response.status(400).json({ error: 'Description must be 1 to 1,000 characters.' }); return; }
   if (price !== undefined && (!Number.isFinite(price) || price <= 0 || price > 10000000)) { response.status(400).json({ error: 'Price must be greater than zero.' }); return; }
@@ -571,6 +582,7 @@ api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, resp
     if (stock !== undefined) product.stock = stock;
     if (sku !== undefined) product.sku = sku.trim();
     if (active !== undefined) product.active = active;
+    if (sizes !== undefined) product.sizes = sizes;
     if (ghostMannequin !== undefined) product.ghostMannequin = { ...product.ghostMannequin, ...ghostMannequin } as Product['ghostMannequin'];
     if (images !== undefined) {
       if (!applyImages(database, product, images, mainImageId)) return { error: 'One or more images were not uploaded successfully.', status: 400 };
@@ -583,6 +595,12 @@ api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, resp
   await Promise.all(removedImageIds.map((id) => deleteProductImageFiles(id).catch((error) => console.error('Image cleanup failed:', error))));
   response.json(result);
 });
+
+function validProductSizes(sizes: unknown): sizes is string[] {
+  return Array.isArray(sizes) && sizes.length <= 20
+    && sizes.every((size) => typeof size === 'string' && size.trim().length > 0 && size.trim().length <= 20)
+    && new Set(sizes.map((size) => size.trim().toLowerCase())).size === sizes.length;
+}
 
 function validImageIds(images: unknown, mainImageId: unknown): images is string[] {
   return Array.isArray(images) && images.length <= 12 && images.every((id) => typeof id === 'string' && /^[0-9a-f-]{36}$/.test(id))
@@ -952,7 +970,7 @@ api.post('/owner/email-agent/draft', requireOwner, ownerLimit, async (request, r
   const orderDetails = JSON.stringify({
     orderReference: order.id,
     status: order.status,
-    items: order.items.map(({ name, quantity }) => ({ name, quantity })),
+    items: order.items.map(({ name, quantity, size }) => ({ name, quantity, ...(size ? { size } : {}) })),
     total: `${order.currency} ${(order.amount / 100).toFixed(2)}`,
     trackingNumber: order.trackingNumber || 'Not provided',
     deliveredAt: order.deliveredAt || 'Not recorded',

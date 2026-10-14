@@ -115,7 +115,7 @@ export async function sendOrderEmail(kind: OrderEmailKind, order: Order, email: 
     paymentMethod: order.paymentMethod,
     paymentStatus: order.paymentStatus,
     status: order.status,
-    items: order.items.map(({ name, quantity }) => ({ name, quantity })),
+    items: order.items.map(({ name, quantity, size }) => ({ name, quantity, ...(size ? { size } : {}) })),
     total: `${order.currency} ${(order.amount / 100).toFixed(2)}`,
     trackingNumber: order.trackingNumber || 'Not provided',
   });
