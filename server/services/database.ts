@@ -90,7 +90,7 @@ export type Order = {
   trackingNumber?: string;
   trackingUrl?: string;
   paymentMethod?: 'upi' | 'cod';
-  status: 'pending_payment' | 'confirmed' | 'paid' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
+  status: 'pending_payment' | 'confirmed' | 'paid' | 'shipped' | 'out_for_delivery' | 'delivered' | 'cancelled' | 'refunded';
   paymentStatus?: 'pending' | 'paid' | 'failed' | 'cancelled' | 'expired' | 'refunded';
   marketingConsent?: boolean;
   subtotalAmount?: number;
@@ -106,6 +106,20 @@ export type Order = {
   deliveredAt?: string;
   followUpSentAt?: string;
   returnRequest?: { action: 'return' | 'replacement'; reason: string; status: 'requested' | 'approved' | 'rejected'; createdAt: string };
+  review?: { rating: number; comment?: string; createdAt: string };
+};
+
+export type OrderEmailKind = 'order_placed' | 'payment_confirmed' | 'shipped' | 'out_for_delivery' | 'delivered' | 'follow_up';
+export type OrderEmailNotification = {
+  id: string;
+  orderId: string;
+  kind: OrderEmailKind;
+  status: 'pending' | 'sent' | 'failed';
+  attempts: number;
+  dueAt: string;
+  nextAttemptAt: string;
+  sentAt?: string;
+  lastError?: string;
 };
 
 export type StoreEvent = { id: string; name: string; page?: string; campaign?: string; createdAt: string };
@@ -117,6 +131,14 @@ export type SupportTicket = {
   category: 'delivery' | 'complaint' | 'general';
   status: 'open' | 'resolved';
   createdAt: string;
+};
+
+export type NewsletterSubscriber = {
+  id: string;
+  email: string;
+  consentedAt: string;
+  consentText: string;
+  source: 'storefront';
 };
 
 export type PaymentReceiptReview = {
@@ -180,6 +202,7 @@ export type Database = {
   orders: Order[];
   events: StoreEvent[];
   supportTickets: SupportTicket[];
+  newsletterSubscribers?: NewsletterSubscriber[];
   paymentReceiptReviews?: PaymentReceiptReview[];
   integrationWebhooks?: { googleAds?: string; zapier?: string };
   sitePublished?: boolean;
@@ -189,6 +212,7 @@ export type Database = {
   automations?: AutomationRule[];
   automationRuns?: AutomationRun[];
   stockAlerts?: StockAlert[];
+  orderEmailNotifications?: OrderEmailNotification[];
 };
 
 const databasePath = path.resolve(process.env.DATA_FILE || '.data/ahuza-db.json');
@@ -229,6 +253,7 @@ async function loadDatabase(): Promise<Database> {
       orders: Array.isArray(parsed.orders) ? parsed.orders : [],
       events: Array.isArray(parsed.events) ? parsed.events : [],
       supportTickets: Array.isArray(parsed.supportTickets) ? parsed.supportTickets : [],
+      newsletterSubscribers: Array.isArray(parsed.newsletterSubscribers) ? parsed.newsletterSubscribers : [],
       paymentReceiptReviews: Array.isArray(parsed.paymentReceiptReviews) ? parsed.paymentReceiptReviews : [],
       sitePublished: parsed.sitePublished !== false,
       ...(parsed.integrationWebhooks && typeof parsed.integrationWebhooks === 'object' ? { integrationWebhooks: parsed.integrationWebhooks } : {}),
@@ -238,6 +263,7 @@ async function loadDatabase(): Promise<Database> {
       automations: Array.isArray(parsed.automations) ? parsed.automations : [],
       automationRuns: Array.isArray(parsed.automationRuns) ? parsed.automationRuns : [],
       stockAlerts: Array.isArray(parsed.stockAlerts) ? parsed.stockAlerts : [],
+      orderEmailNotifications: Array.isArray(parsed.orderEmailNotifications) ? parsed.orderEmailNotifications : [],
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;

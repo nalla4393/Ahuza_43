@@ -9,7 +9,7 @@ import { sendRestockAlerts } from './services/stock-alerts.js';
 import { deleteProductImageFiles, detectImageType, maxUploadBytes, sanitizeImageSettings, saveProductImage } from './services/images.js';
 import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
 import { generateMarketingEmail } from './services/ai.js';
-import { expirePendingOrders, getMarketingWebhookUrls, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail, sendOrderEmail, sendOrderConfirmation, sendShippingNotice, testMarketingWebhooks, triggerAutomations } from './services/integrations.js';
+import { enqueueOrderEmail, expirePendingOrders, getMarketingWebhookUrls, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail, testMarketingWebhooks, triggerAutomations } from './services/integrations.js';
 import { createUpiIntent, getUpiConfiguration } from './services/upi.js';
 
 export const api = Router();
@@ -18,6 +18,7 @@ const ownerLimit = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: 
 const uploadLimit = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false });
 const analyticsLimit = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false });
 const supportLimit = rateLimit({ windowMs: 60 * 1000, limit: 12, standardHeaders: 'draft-8', legacyHeaders: false });
+const newsletterLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: 'draft-8', legacyHeaders: false });
 const paymentReceiptLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 3, standardHeaders: 'draft-8', legacyHeaders: false });
 const paymentLimit = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false });
 
@@ -121,6 +122,31 @@ api.post('/products/:id/stock-alert', requireCustomer, async (request, response)
   });
   if ('error' in result) { response.status(result.status).json({ error: result.error }); return; }
   response.status(result.alreadySubscribed ? 200 : 201).json({ ...result, emailConfigured: isEmailConfigured() });
+});
+
+api.post('/newsletter/subscribe', newsletterLimit, async (request, response) => {
+  const email = typeof request.body?.email === 'string' ? request.body.email.trim().toLowerCase() : '';
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254 || request.body?.consent !== true) {
+    response.status(400).json({ error: 'Enter a valid email and agree to receive AHUZA newsletter updates.' }); return;
+  }
+  const result = await mutateDatabase((database) => {
+    database.newsletterSubscribers ||= [];
+    const existing = database.newsletterSubscribers.find((subscriber) => subscriber.email === email);
+    if (existing) return { subscribed: true as const, alreadySubscribed: true };
+    database.newsletterSubscribers.push({
+      id: randomUUID(),
+      email,
+      consentedAt: new Date().toISOString(),
+      consentText: 'I agree to receive AHUZA news, new collection updates and offers by email.',
+      source: 'storefront',
+    });
+    return { subscribed: true as const, alreadySubscribed: false };
+  });
+  if (!result.alreadySubscribed) {
+    void recordMarketingEvent({ name: 'newsletter_signup', page: 'newsletter' }).catch((error) => console.error('Newsletter event recording failed:', error));
+    void triggerAutomations({ name: 'newsletter_signup', email, consent: true }).catch((error) => console.error('Newsletter Zapier event failed:', error));
+  }
+  response.status(result.alreadySubscribed ? 200 : 201).json(result);
 });
 
 api.post('/customer-support/chat', supportLimit, async (request, response) => {
@@ -328,7 +354,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   if (!persisted) { response.status(409).json({ error: 'Inventory changed while placing your order. Please refresh your bag.' }); return; }
   const placed = (await getDatabase()).orders.find((entry) => entry.id === localOrderId);
   const customerEmail = (await getDatabase()).customers.find((entry) => entry.id === request.session.userId)?.email;
-  if (placed && customerEmail) void sendOrderEmail('order_placed', placed, customerEmail).catch((error) => console.error('Order received email failed:', error));
+  if (placed && customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
   if (paymentMethod === 'cod') {
     response.status(201).json({ orderId: localOrderId, paymentMethod, status: 'confirmed', amount, currency: 'INR' });
     return;
@@ -449,18 +475,37 @@ api.get('/orders', requireCustomer, async (request, response) => {
   const orders = database.orders
     .filter((order) => order.userId === request.session.userId)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-    .map(({ id, amount, currency, status, paymentMethod, paymentStatus, paymentVerifiedAt, createdAt, items, trackingNumber, trackingUrl }) => ({
-      id, amount, currency, status, paymentMethod, paymentStatus, paymentVerifiedAt, createdAt, items, trackingNumber, trackingUrl,
+    .map(({ id, amount, currency, status, paymentMethod, paymentStatus, paymentVerifiedAt, createdAt, items, trackingNumber, trackingUrl, review }) => ({
+      id, amount, currency, status, paymentMethod, paymentStatus, paymentVerifiedAt, createdAt, items, trackingNumber, trackingUrl, review,
       hasPendingReceiptReview: database.paymentReceiptReviews?.some((review) => review.orderId === id && review.status === 'pending_admin_review') || false,
     }));
   response.json({ orders });
+});
+
+api.post('/orders/:id/review', requireCustomer, async (request, response) => {
+  const rating: unknown = request.body?.rating;
+  const comment: unknown = request.body?.comment;
+  if (typeof rating !== 'number' || !Number.isInteger(rating) || rating < 1 || rating > 5
+    || (comment !== undefined && (typeof comment !== 'string' || comment.length > 1000))) {
+    response.status(400).json({ error: 'Choose a rating from 1 to 5 stars and an optional comment up to 1,000 characters.' }); return;
+  }
+  const result = await mutateDatabase<{ error: string; status: number } | { review: NonNullable<Order['review']> }>((database) => {
+    const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
+    if (!order) return { error: 'Order not found.', status: 404 };
+    if (order.status !== 'delivered') return { error: 'You can review an order after it is marked delivered.', status: 409 };
+    if (order.review) return { error: 'You have already reviewed this order.', status: 409 };
+    order.review = { rating, ...(typeof comment === 'string' && comment.trim() ? { comment: comment.trim() } : {}), createdAt: new Date().toISOString() };
+    return { review: order.review };
+  });
+  if ('error' in result) { response.status(result.status).json({ error: result.error }); return; }
+  response.status(201).json(result);
 });
 
 api.get('/orders/:id/invoice', requireCustomer, async (request, response) => {
   const database = await getDatabase();
   const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!order) { response.status(404).json({ error: 'Order not found.' }); return; }
-  if (!['paid', 'shipped', 'delivered'].includes(order.status) || order.paymentStatus !== 'paid'
+  if (!['paid', 'shipped', 'out_for_delivery', 'delivered'].includes(order.status) || order.paymentStatus !== 'paid'
     || (order.paymentMethod === 'upi' && !order.paymentVerifiedAt)) {
     response.status(409).json({ error: 'An invoice is available only after payment is confirmed.' }); return;
   }
@@ -779,14 +824,20 @@ api.patch('/owner/orders/:id/status', requireOwner, ownerLimit, async (request, 
   const status = request.body?.status;
   const trackingNumber = request.body?.trackingNumber;
   const trackingUrl = request.body?.trackingUrl;
-  if (!['shipped', 'delivered'].includes(status)) { response.status(400).json({ error: 'Status must be shipped or delivered.' }); return; }
+  if (!['shipped', 'out_for_delivery', 'delivered'].includes(status)) { response.status(400).json({ error: 'Status must be shipped, out for delivery, or delivered.' }); return; }
   if (trackingNumber !== undefined && (typeof trackingNumber !== 'string' || trackingNumber.length > 100)) { response.status(400).json({ error: 'Tracking reference must be at most 100 characters.' }); return; }
   if (trackingUrl !== undefined && trackingUrl !== '' && !validTrackingUrl(trackingUrl)) { response.status(400).json({ error: 'Tracking link must be a valid HTTPS URL.' }); return; }
   const result = await mutateDatabase((database) => {
     const order = database.orders.find((entry) => entry.id === request.params.id);
     if (!order) return null;
-    const validCurrentStatuses = order.paymentMethod === 'cod' ? ['confirmed', 'shipped', 'delivered'] : ['paid', 'shipped', 'delivered'];
-    if (!validCurrentStatuses.includes(order.status) || (order.status === 'delivered' && status === 'shipped')) return null;
+    const validTransitions: Record<string, string[]> = {
+      confirmed: ['shipped'],
+      paid: ['shipped'],
+      shipped: ['out_for_delivery'],
+      out_for_delivery: ['delivered'],
+      delivered: [],
+    };
+    if (!(validTransitions[order.status] || []).includes(status) && order.status !== status) return null;
     const changed = order.status !== status;
     order.status = status;
     if (typeof trackingNumber === 'string' && trackingNumber.trim()) order.trackingNumber = trackingNumber.trim();
@@ -800,7 +851,8 @@ api.patch('/owner/orders/:id/status', requireOwner, ownerLimit, async (request, 
 
   if (!result) { response.status(404).json({ error: 'Paid order not found or status transition is invalid.' }); return; }
   const email = (await getDatabase()).customers.find((entry) => entry.id === result.order.userId)?.email;
-  if (result.changed && email && status === 'shipped') void sendShippingNotice(result.order, email).catch((error) => console.error('Shipping email failed:', error));
+  const notificationKind = status === 'shipped' || status === 'out_for_delivery' || status === 'delivered' ? status : null;
+  if (result.changed && email && notificationKind) void enqueueOrderEmail(result.order.id, notificationKind).catch((error) => console.error(`${status} email queue failed:`, error));
   if (result.changed) void triggerAutomations({ name: `order_${status}`, orderId: result.order.id, amount: result.order.amount / 100, currency: result.order.currency });
   response.json({ order: result.order });
 });
@@ -859,8 +911,7 @@ api.patch('/owner/orders/:id/upi-payment', requireOwner, ownerLimit, async (requ
   if (order === 'duplicate') { response.status(409).json({ error: 'This bank reference has already been recorded for another order.' }); return; }
   if (order === 'stock_unavailable') { response.status(409).json({ error: 'The payment must be manually reconciled, but the original items are no longer in stock. Contact the customer before fulfillment.' }); return; }
   if (!order) { response.status(409).json({ error: 'Only an unpaid, pending UPI order can be confirmed. Check the order and bank settlement.' }); return; }
-  const email = (await getDatabase()).customers.find((entry) => entry.id === order.userId)?.email;
-  if (email) void sendOrderConfirmation(order, email).catch((error) => console.error('Confirmation email failed:', error));
+  void enqueueOrderEmail(order.id, 'payment_confirmed').catch((error) => console.error('Payment confirmation email queue failed:', error));
   if (order.marketingConsent) void triggerAutomations({ name: 'purchase', orderId: order.id, amount: order.amount / 100, currency: order.currency, consent: true });
   response.json({ order });
 });
@@ -955,15 +1006,16 @@ api.post('/owner/agent/execute', requireOwner, ownerLimit, async (request, respo
     }
     const result = await mutateDatabase((database) => {
       const order = database.orders.find((entry) => entry.id === action.orderId);
-      if (!order || order.status !== action.previousStatus || !['paid', 'shipped'].includes(order.status) || (order.status === 'delivered' && action.status === 'shipped')) return null;
+      if (!order || order.status !== action.previousStatus
+        || (action.status === 'shipped' && !['paid', 'confirmed'].includes(order.status))
+        || (action.status === 'delivered' && order.status !== 'out_for_delivery')) return null;
       const changed = order.status !== action.status;
       order.status = action.status;
       if (action.status === 'delivered' && !order.deliveredAt) order.deliveredAt = new Date().toISOString();
       return { order, changed };
     });
     if (!result) { response.status(409).json({ error: 'Order status changed or this transition is not allowed. Refresh and ask the agent again.' }); return; }
-    const email = (await getDatabase()).customers.find((entry) => entry.id === result.order.userId)?.email;
-    if (result.changed && email && action.status === 'shipped') void sendShippingNotice(result.order, email).catch((error) => console.error('Shipping email failed:', error));
+    if (result.changed) void enqueueOrderEmail(result.order.id, action.status === 'shipped' ? 'shipped' : 'delivered').catch((error) => console.error(`${action.status} email queue failed:`, error));
     if (result.changed) void triggerAutomations({ name: `order_${action.status}`, orderId: result.order.id, amount: result.order.amount / 100, currency: result.order.currency });
     response.json({ completed: true, message: `Marked order ${result.order.id} ${action.status}.` });
     return;

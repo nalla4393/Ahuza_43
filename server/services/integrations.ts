@@ -1,10 +1,10 @@
-import { getDatabase, mutateDatabase, type Order, type StoreEvent, type SupportTicket } from './database.js';
+import { getDatabase, mutateDatabase, type Order, type OrderEmailKind, type StoreEvent, type SupportTicket } from './database.js';
 import { randomUUID } from 'node:crypto';
 import nodemailer from 'nodemailer';
 import { runAutomations } from './automations.js';
-import { generateOrderEmailBody, type OrderEmailKind } from './ai.js';
+import { generateOrderEmailBody } from './ai.js';
 
-type IntegrationEvent = { name: string; orderId?: string; amount?: number; currency?: string; page?: string; campaign?: string; consent?: boolean };
+type IntegrationEvent = { name: string; orderId?: string; amount?: number; currency?: string; page?: string; campaign?: string; email?: string; consent?: boolean };
 
 async function postJson(url: string, body: unknown, headers: Record<string, string> = {}): Promise<void> {
   const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) });
@@ -94,24 +94,29 @@ const orderEmailSubjects: Record<OrderEmailKind, (id: string) => string> = {
   order_placed: (id) => `We've received your Ahuza order ${id}`,
   payment_confirmed: (id) => `Payment confirmed for your Ahuza order ${id}`,
   shipped: (id) => `Your Ahuza order ${id} is on its way`,
-  follow_up: () => 'How are you enjoying your Ahuza pieces?',
+  out_for_delivery: (id) => `Your Ahuza order ${id} is out for delivery`,
+  delivered: (id) => `Your Ahuza order ${id} has been delivered`,
+  follow_up: (id) => `How are you enjoying your Ahuza order ${id}?`,
 };
 
 function fallbackOrderEmail(kind: OrderEmailKind, order: Order): string {
   const total = `${order.currency} ${(order.amount / 100).toFixed(2)}`;
   if (kind === 'order_placed') return order.paymentMethod === 'cod'
-    ? `Hi ${order.shippingAddress.name}, your order ${order.id} (${total}) has been placed successfully and is confirmed.\n\nAHUZA Customer Care`
-    : `Hi ${order.shippingAddress.name}, we've received your order ${order.id} (${total}). Your payment is not confirmed yet; we will email you once it is verified.\n\nAHUZA Customer Care`;
+    ? `Hi ${order.shippingAddress.name}, your order ${order.id} (${total}) has been placed successfully and is confirmed. Order reference: ${order.id}. Track progress after signing into your AHUZA account and opening Order history.\n\nAHUZA Customer Care`
+    : `Hi ${order.shippingAddress.name}, we've received your order ${order.id} (${total}). Reference: ${order.paymentReference || order.id}. Your payment is not confirmed yet; we will email you once it is verified. Track progress in your AHUZA account under Order history.\n\nAHUZA Customer Care`;
   if (kind === 'payment_confirmed') return `Hi ${order.shippingAddress.name}, your payment for order ${order.id} (${total}) is verified and your order is confirmed.\n\nAHUZA Customer Care`;
   if (kind === 'shipped') return `Hi ${order.shippingAddress.name}, your order ${order.id} has shipped.${order.trackingNumber ? ` Tracking number: ${order.trackingNumber}.` : ''}${order.trackingUrl ? ` Track your delivery: ${order.trackingUrl}` : ''}\n\nAHUZA Customer Care`;
+  if (kind === 'out_for_delivery') return `Hi ${order.shippingAddress.name}, your order ${order.id} is out for delivery.${order.trackingNumber ? ` Tracking number: ${order.trackingNumber}.` : ''}${order.trackingUrl ? ` Track your delivery: ${order.trackingUrl}` : ''}\n\nAHUZA Customer Care`;
+  if (kind === 'delivered') return `Hi ${order.shippingAddress.name}, your order ${order.id} has been marked delivered. We hope you love it. Please sign in to your AHUZA account and open Account > Order history to rate and review your purchase.\n\nAHUZA Customer Care`;
   return `Hi ${order.shippingAddress.name}, we hope your order ${order.id} feels right at home. You can request a return or replacement within 7 days of delivery.\n\nAHUZA Customer Care`;
 }
 
-export async function sendOrderEmail(kind: OrderEmailKind, order: Order, email: string): Promise<void> {
+export async function sendOrderEmail(kind: OrderEmailKind | 'follow_up', order: Order, email: string): Promise<void> {
   if (!isEmailConfigured()) return;
   const details = JSON.stringify({
     customerName: order.shippingAddress.name,
     orderReference: order.id,
+    paymentReference: order.paymentReference || order.id,
     paymentMethod: order.paymentMethod,
     paymentStatus: order.paymentStatus,
     status: order.status,
@@ -123,15 +128,69 @@ export async function sendOrderEmail(kind: OrderEmailKind, order: Order, email: 
   let body: string;
   try { body = await generateOrderEmailBody(kind, details); }
   catch (error) { console.error('AI email draft failed; using template:', error instanceof Error ? error.message : error); body = fallbackOrderEmail(kind, order); }
+  body = appendOrderEmailDetails(kind, order, body);
   await sendEmail(email, orderEmailSubjects[kind](order.id), body);
 }
 
-export async function sendOrderConfirmation(order: Order, email: string): Promise<void> {
-  await sendOrderEmail('payment_confirmed', order, email);
+export function appendOrderEmailDetails(kind: OrderEmailKind, order: Order, body: string): string {
+  const tracking = [
+    order.trackingNumber ? `Tracking number: ${order.trackingNumber}` : '',
+    order.trackingUrl ? `Track shipment: ${order.trackingUrl}` : '',
+  ].filter(Boolean).join('\n');
+  const details = kind === 'order_placed'
+    ? `Order reference: ${order.id}\nPayment reference: ${order.paymentReference || order.id}\nTrack progress by signing in at www.ahuzawear.com and opening Account > Order history.`
+    : `Order reference: ${order.id}${tracking ? `\n${tracking}` : ''}${kind === 'delivered' ? '\nPlease sign in at www.ahuzawear.com and open Account > Order history to rate and review your order.' : ''}`;
+  return `${body.trim()}\n\n${details}`;
 }
 
-export async function sendShippingNotice(order: Order, email: string): Promise<void> {
-  await sendOrderEmail('shipped', order, email);
+export async function enqueueOrderEmail(orderId: string, kind: OrderEmailKind): Promise<void> {
+  await mutateDatabase((database) => {
+    database.orderEmailNotifications ||= [];
+    const existing = database.orderEmailNotifications.find((notification) => notification.orderId === orderId && notification.kind === kind);
+    if (!existing) {
+      const now = new Date().toISOString();
+      database.orderEmailNotifications.push({
+        id: randomUUID(), orderId, kind, status: 'pending', attempts: 0, dueAt: now, nextAttemptAt: now,
+      });
+    }
+  });
+  void processOrderEmailQueue().catch((error) => console.error('Order email queue failed:', error));
+}
+
+export async function processOrderEmailQueue(): Promise<void> {
+  if (!isEmailConfigured()) return;
+  const now = Date.now();
+  const due = (await getDatabase()).orderEmailNotifications
+    ?.filter((entry) => entry.status === 'pending' && Date.parse(entry.nextAttemptAt) <= now && entry.attempts < 10)
+    .slice(0, 20) || [];
+  for (const candidate of due) {
+    const claimed = await mutateDatabase((database) => {
+      const notification = database.orderEmailNotifications?.find((entry) => entry.id === candidate.id && entry.status === 'pending' && Date.parse(entry.nextAttemptAt) <= Date.now());
+      if (!notification) return null;
+      notification.attempts += 1;
+      notification.nextAttemptAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+      const order = database.orders.find((entry) => entry.id === notification.orderId);
+      const customer = order && database.customers.find((entry) => entry.id === order.userId);
+      return order && customer ? { notificationId: notification.id, kind: notification.kind, order: structuredClone(order), email: customer.email } : null;
+    });
+    if (!claimed) continue;
+    try {
+      await sendOrderEmail(claimed.kind, claimed.order, claimed.email);
+      await mutateDatabase((database) => {
+        const notification = database.orderEmailNotifications?.find((entry) => entry.id === claimed.notificationId);
+        if (notification) { notification.status = 'sent'; notification.sentAt = new Date().toISOString(); delete notification.lastError; }
+      });
+    } catch (error) {
+      await mutateDatabase((database) => {
+        const notification = database.orderEmailNotifications?.find((entry) => entry.id === claimed.notificationId);
+        if (notification) {
+          notification.lastError = error instanceof Error ? error.message.slice(0, 300) : 'Email send failed.';
+          if (notification.attempts >= 10) notification.status = 'failed';
+        }
+      });
+      console.error(`Order ${claimed.kind} email failed for ${claimed.order.id}; will retry:`, error);
+    }
+  }
 }
 
 export async function sendSevenDayFollowUps(): Promise<void> {
@@ -153,11 +212,14 @@ export async function sendSevenDayFollowUps(): Promise<void> {
 }
 
 export function startFollowUpScheduler(): void {
+  void processOrderEmailQueue().catch((error) => console.error('Order email queue failed:', error));
   void sendSevenDayFollowUps().catch((error) => console.error('Follow-up scan failed:', error));
   void runAutomations().catch((error) => console.error('Automation scan failed:', error));
   setInterval(() => void runAutomations().catch((error) => console.error('Automation scan failed:', error)), 15 * 60 * 1000).unref();
   const timer = setInterval(() => void sendSevenDayFollowUps().catch((error) => console.error('Follow-up scan failed:', error)), 60 * 60 * 1000);
   timer.unref();
+  const orderEmailTimer = setInterval(() => void processOrderEmailQueue().catch((error) => console.error('Order email queue failed:', error)), 60 * 1000);
+  orderEmailTimer.unref();
 }
 
 export async function expirePendingOrders(): Promise<void> {

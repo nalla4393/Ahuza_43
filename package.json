@@ -11,7 +11,7 @@
     "build": "tsc --noEmit && vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=server-dist/server.js",
     "start": "NODE_ENV=production node server-dist/server.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test server/services/upi.test.ts"
+    "test": "tsx --test server/services/*.test.ts"
   },
   "dependencies": {
     "@google/genai": "^1.11.0",

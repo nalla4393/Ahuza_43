@@ -92,3 +92,11 @@
 
 .content-upload{display:grid;gap:6px}
 .upload-trigger{display:inline-flex;justify-content:center;cursor:pointer;width:fit-content}
+.order-review-form{display:grid;gap:8px;min-width:min(280px,100%);margin:10px 0}
+.order-review-form label{display:grid;gap:4px}
+.order-review-form textarea{resize:vertical}
+.order-review-result{margin:6px 0;color:#8a6820}
+.delivery-update{color:#3a493c;font-size:13px}
+.owner-order-review{margin-top:10px;padding:10px;border-top:1px solid var(--line)}
+.owner-order-review strong{color:#8a6820}
+.owner-order-review p{overflow-wrap:anywhere}

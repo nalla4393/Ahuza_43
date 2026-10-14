@@ -117,7 +117,7 @@ export type OwnerAgentIntent =
   | { type: 'draft_email'; orderId: string; kind: CustomerEmailKind };
 
 export async function generateOwnerAgentPlan(message: string, storeSummary: string): Promise<{ reply: string; action?: OwnerAgentIntent }> {
-  const text = await completeText(`You are AHUZA Apparel's owner agent. Use the store snapshot to answer the owner and propose at most one supported action. Never claim an action has been completed. Every action is only a proposal that the owner must approve. Do not invent IDs or details. If the request is informational or ambiguous, return action:null and ask a concise clarification if needed. Supported actions: update_stock (exact productIdOrSku and integer stock 0-100000), update_order_status (exact orderId and status shipped or delivered), draft_email (exact orderId and kind alert, thank_you, or follow_up; this only prepares a draft and never sends it). For unsupported or unsafe requests, return action:null.
+  const text = await completeText(`You are AHUZA Apparel's owner agent. Use the store snapshot to answer the owner and propose at most one supported action. Never claim an action has been completed. Every action is only a proposal that the owner must approve. Do not invent IDs or details. If the request is informational or ambiguous, return action:null and ask a concise clarification if needed. Supported actions: update_stock (exact productIdOrSku and integer stock 0-100000), update_order_status (exact orderId and status shipped or delivered; delivery status is only allowed after the order is out for delivery), draft_email (exact orderId and kind alert, thank_you, or follow_up; this only prepares a draft and never sends it). For unsupported or unsafe requests, return action:null.
 
 Return only a JSON object: {"reply":"short response","action":null} or {"reply":"short response","action":{"type":"update_stock","productIdOrSku":"...","stock":1}} or the matching update_order_status/draft_email action shape.
 
@@ -202,13 +202,15 @@ Verified order details:
 ${orderDetails.slice(0, 3000)}`);
   return text || 'I could not prepare an email draft. Please try again.';
 }
-export type OrderEmailKind = 'order_placed' | 'payment_confirmed' | 'shipped' | 'follow_up';
+export type OrderEmailKind = 'order_placed' | 'payment_confirmed' | 'shipped' | 'out_for_delivery' | 'delivered' | 'follow_up';
 
 export async function generateOrderEmailBody(kind: OrderEmailKind, orderDetails: string): Promise<string> {
   const purpose = {
-    order_placed: 'Tell the customer their order request has been received and placed successfully. If payment is pending verification, say clearly that payment is not yet confirmed and that they will get another email once it is verified. If it is cash on delivery, say the order is confirmed.',
+    order_placed: 'Tell the customer their order has been received. Include the exact order reference and payment reference from the verified details. If payment is pending verification, say clearly that it is not confirmed and that a separate confirmation will follow after verification. For cash on delivery, say the order is confirmed. Tell them to sign in and open Account > Order history on www.ahuzawear.com to track progress. Do not invent a carrier tracking number before shipment.',
     payment_confirmed: 'Tell the customer their payment has been verified and the order is confirmed.',
     shipped: 'Tell the customer the order has shipped and include the tracking number only if one is provided.',
+    out_for_delivery: 'Tell the customer the owner has marked the parcel out for delivery. Include the tracking number and tracking URL only when provided. Do not promise an exact arrival time.',
+    delivered: 'Tell the customer the carrier/order is marked delivered. Invite them to rate and review their purchase by signing in and opening Account > Order history on the AHUZA website. Do not claim delivery was independently confirmed by the carrier.',
     follow_up: 'Write a friendly post-delivery follow-up asking how the order worked out and mention the existing 7-day return/replacement window.',
   }[kind];
   const text = await completeText(`Write the body of a concise, warm, human-sounding customer email for AHUZA Apparel. ${purpose} Use only the supplied order details. Do not invent delivery dates, policies, discounts or product claims. Do not request sensitive information. Keep it under 120 words, greet the customer by name if given, and sign off as AHUZA Customer Care. Output only the email body.\n\nVerified order details:\n${orderDetails.slice(0, 3000)}`);
