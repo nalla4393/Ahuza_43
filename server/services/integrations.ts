@@ -103,7 +103,7 @@ function fallbackOrderEmail(kind: OrderEmailKind, order: Order): string {
     ? `Hi ${order.shippingAddress.name}, your order ${order.id} (${total}) has been placed successfully and is confirmed.\n\nAHUZA Customer Care`
     : `Hi ${order.shippingAddress.name}, we've received your order ${order.id} (${total}). Your payment is not confirmed yet; we will email you once it is verified.\n\nAHUZA Customer Care`;
   if (kind === 'payment_confirmed') return `Hi ${order.shippingAddress.name}, your payment for order ${order.id} (${total}) is verified and your order is confirmed.\n\nAHUZA Customer Care`;
-  if (kind === 'shipped') return `Hi ${order.shippingAddress.name}, your order ${order.id} has shipped.${order.trackingNumber ? ` Tracking number: ${order.trackingNumber}.` : ''}\n\nAHUZA Customer Care`;
+  if (kind === 'shipped') return `Hi ${order.shippingAddress.name}, your order ${order.id} has shipped.${order.trackingNumber ? ` Tracking number: ${order.trackingNumber}.` : ''}${order.trackingUrl ? ` Track your delivery: ${order.trackingUrl}` : ''}\n\nAHUZA Customer Care`;
   return `Hi ${order.shippingAddress.name}, we hope your order ${order.id} feels right at home. You can request a return or replacement within 7 days of delivery.\n\nAHUZA Customer Care`;
 }
 
@@ -118,6 +118,7 @@ export async function sendOrderEmail(kind: OrderEmailKind, order: Order, email: 
     items: order.items.map(({ name, quantity, size }) => ({ name, quantity, ...(size ? { size } : {}) })),
     total: `${order.currency} ${(order.amount / 100).toFixed(2)}`,
     trackingNumber: order.trackingNumber || 'Not provided',
+    trackingUrl: order.trackingUrl || 'Not provided',
   });
   let body: string;
   try { body = await generateOrderEmailBody(kind, details); }

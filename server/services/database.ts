@@ -61,6 +61,14 @@ export type Customer = {
   wishlist?: string[];
 };
 
+export type StockAlert = {
+  id: string;
+  productId: string;
+  customerId: string;
+  createdAt: string;
+  notifiedAt?: string;
+};
+
 export type ShippingAddress = {
   name: string;
   addressLine1: string;
@@ -80,6 +88,7 @@ export type Order = {
   amount: number;
   currency: string;
   trackingNumber?: string;
+  trackingUrl?: string;
   paymentMethod?: 'upi' | 'cod';
   status: 'pending_payment' | 'confirmed' | 'paid' | 'shipped' | 'delivered' | 'cancelled' | 'refunded';
   paymentStatus?: 'pending' | 'paid' | 'failed' | 'cancelled' | 'expired' | 'refunded';
@@ -179,6 +188,7 @@ export type Database = {
   imageLibrary?: ProductImage[];
   automations?: AutomationRule[];
   automationRuns?: AutomationRun[];
+  stockAlerts?: StockAlert[];
 };
 
 const databasePath = path.resolve(process.env.DATA_FILE || '.data/ahuza-db.json');
@@ -227,6 +237,7 @@ async function loadDatabase(): Promise<Database> {
       imageLibrary: Array.isArray(parsed.imageLibrary) ? parsed.imageLibrary : [],
       automations: Array.isArray(parsed.automations) ? parsed.automations : [],
       automationRuns: Array.isArray(parsed.automationRuns) ? parsed.automationRuns : [],
+      stockAlerts: Array.isArray(parsed.stockAlerts) ? parsed.stockAlerts : [],
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;

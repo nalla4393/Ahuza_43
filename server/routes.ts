@@ -5,6 +5,7 @@ import PDFDocument from 'pdfkit';
 import { hashPassword, verifyPassword } from './services/auth.js';
 import { extractPaymentReceipt, generateCustomerEmailBody, generateCustomerSupportReply, generateOwnerAgentPlan, generateSocialPost, isTextAiConfigured, type CustomerEmailKind, type OwnerAgentIntent } from './services/ai.js';
 import { getDatabase, mergeImageSettings, mutateDatabase, type Database, type Order, type PaymentReceiptReview, type Product, type ShippingAddress, type StorefrontContent, type SupportTicket } from './services/database.js';
+import { sendRestockAlerts } from './services/stock-alerts.js';
 import { deleteProductImageFiles, detectImageType, maxUploadBytes, sanitizeImageSettings, saveProductImage } from './services/images.js';
 import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
 import { generateMarketingEmail } from './services/ai.js';
@@ -103,6 +104,23 @@ api.get('/products/:id', async (request, response) => {
   const product = (await getDatabase()).products.find((entry) => entry.id === request.params.id && entry.active);
   if (!product) { response.status(404).json({ error: 'Product not found.' }); return; }
   response.json({ product });
+});
+
+api.post('/products/:id/stock-alert', requireCustomer, async (request, response) => {
+  const result = await mutateDatabase<{ error: string; status: number } | { subscribed: true; alreadySubscribed: boolean }>((database) => {
+    const product = database.products.find((entry) => entry.id === request.params.id && entry.active);
+    if (!product) return { error: 'Product not found.', status: 404 };
+    if (product.stock > 0) return { error: 'This item is available now.', status: 409 };
+    const customer = database.customers.find((entry) => entry.id === request.session.userId);
+    if (!customer) return { error: 'Sign in to receive a restock alert.', status: 401 };
+    database.stockAlerts ||= [];
+    const existing = database.stockAlerts.find((alert) => alert.productId === product.id && alert.customerId === customer.id && !alert.notifiedAt);
+    if (existing) return { subscribed: true, alreadySubscribed: true };
+    database.stockAlerts.push({ id: randomUUID(), productId: product.id, customerId: customer.id, createdAt: new Date().toISOString() });
+    return { subscribed: true, alreadySubscribed: false };
+  });
+  if ('error' in result) { response.status(result.status).json({ error: result.error }); return; }
+  response.status(result.alreadySubscribed ? 200 : 201).json({ ...result, emailConfigured: isEmailConfigured() });
 });
 
 api.post('/customer-support/chat', supportLimit, async (request, response) => {
@@ -431,8 +449,8 @@ api.get('/orders', requireCustomer, async (request, response) => {
   const orders = database.orders
     .filter((order) => order.userId === request.session.userId)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-    .map(({ id, amount, currency, status, paymentMethod, paymentStatus, paymentVerifiedAt, createdAt, items, trackingNumber }) => ({
-      id, amount, currency, status, paymentMethod, paymentStatus, paymentVerifiedAt, createdAt, items, trackingNumber,
+    .map(({ id, amount, currency, status, paymentMethod, paymentStatus, paymentVerifiedAt, createdAt, items, trackingNumber, trackingUrl }) => ({
+      id, amount, currency, status, paymentMethod, paymentStatus, paymentVerifiedAt, createdAt, items, trackingNumber, trackingUrl,
       hasPendingReceiptReview: database.paymentReceiptReviews?.some((review) => review.orderId === id && review.status === 'pending_admin_review') || false,
     }));
   response.json({ orders });
@@ -593,6 +611,7 @@ api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, resp
   });
   if ('error' in result) { response.status(result.status).json({ error: result.error }); return; }
   await Promise.all(removedImageIds.map((id) => deleteProductImageFiles(id).catch((error) => console.error('Image cleanup failed:', error))));
+  if (result.product.stock > 0) void sendRestockAlerts().catch((error) => console.error('Restock alert scan failed:', error));
   response.json(result);
 });
 
@@ -748,11 +767,21 @@ api.patch('/owner/support-tickets/:id', requireOwner, ownerLimit, async (request
   response.json({ ticket });
 });
 
+function validTrackingUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > 2000) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' && !parsed.username && !parsed.password;
+  } catch { return false; }
+}
+
 api.patch('/owner/orders/:id/status', requireOwner, ownerLimit, async (request, response) => {
   const status = request.body?.status;
   const trackingNumber = request.body?.trackingNumber;
+  const trackingUrl = request.body?.trackingUrl;
   if (!['shipped', 'delivered'].includes(status)) { response.status(400).json({ error: 'Status must be shipped or delivered.' }); return; }
   if (trackingNumber !== undefined && (typeof trackingNumber !== 'string' || trackingNumber.length > 100)) { response.status(400).json({ error: 'Tracking reference must be at most 100 characters.' }); return; }
+  if (trackingUrl !== undefined && trackingUrl !== '' && !validTrackingUrl(trackingUrl)) { response.status(400).json({ error: 'Tracking link must be a valid HTTPS URL.' }); return; }
   const result = await mutateDatabase((database) => {
     const order = database.orders.find((entry) => entry.id === request.params.id);
     if (!order) return null;
@@ -761,9 +790,14 @@ api.patch('/owner/orders/:id/status', requireOwner, ownerLimit, async (request, 
     const changed = order.status !== status;
     order.status = status;
     if (typeof trackingNumber === 'string' && trackingNumber.trim()) order.trackingNumber = trackingNumber.trim();
+    if (typeof trackingUrl === 'string') {
+      if (trackingUrl.trim()) order.trackingUrl = trackingUrl.trim();
+      else delete order.trackingUrl;
+    }
     if (status === 'delivered' && !order.deliveredAt) order.deliveredAt = new Date().toISOString();
     return { order, changed };
   });
+
   if (!result) { response.status(404).json({ error: 'Paid order not found or status transition is invalid.' }); return; }
   const email = (await getDatabase()).customers.find((entry) => entry.id === result.order.userId)?.email;
   if (result.changed && email && status === 'shipped') void sendShippingNotice(result.order, email).catch((error) => console.error('Shipping email failed:', error));
@@ -910,6 +944,7 @@ api.post('/owner/agent/execute', requireOwner, ownerLimit, async (request, respo
       return { id: current.id, name: current.name, sku: current.sku, stock: current.stock };
     });
     if (!product) { response.status(409).json({ error: 'Inventory changed since this proposal. Refresh and ask the agent again.' }); return; }
+    if (product.stock > 0) void sendRestockAlerts().catch((error) => console.error('Restock alert scan failed:', error));
     void triggerAutomations({ name: 'inventory_updated', orderId: product.id });
     response.json({ completed: true, message: `Updated ${product.name} (${product.sku}) stock to ${product.stock}.` });
     return;
