@@ -89,6 +89,7 @@ export default function App() {
   const [imageSettings, setImageSettings] = useState<ImageSettings>(defaultImageSettings);
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
   const [detailIndex, setDetailIndex] = useState(0);
+  const [cardView, setCardView] = useState<Record<string, number>>({});
   const [selectedSize, setSelectedSize] = useState('');
   const [zoomed, setZoomed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -542,7 +543,7 @@ export default function App() {
 
   function renderProductCard(product: Product, index: number) {
     const gallery = galleryImages(product);
-    const displayImage = gallery[0]!;
+    const displayImage = gallery[Math.min(cardView[product.id] ?? 0, gallery.length - 1)]!;
     const hoverImage = imageSettings.layout.cardImage === 'hover-second' ? gallery[1] : undefined;
     const displayBackground = product.ghostMannequin?.background || `var(--tone-${index % 4})`;
     const quantityInBag = cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0);
@@ -559,6 +560,7 @@ export default function App() {
           {product.stock > 0 ? <ShoppingBag size={18} /> : 'Notify me'}
         </button>
       </div>
+      {gallery.length > 1 && <div className="card-swatches" role="group" aria-label={`${product.name} views`}>{gallery.slice(0, 6).map((image, position) => <button key={image.id} type="button" className={position === (cardView[product.id] ?? 0) ? 'active' : ''} aria-label={`Show view ${position + 1} of ${product.name}`} aria-pressed={position === (cardView[product.id] ?? 0)} onClick={() => setCardView((views) => ({ ...views, [product.id]: position }))}><img src={image.thumb} alt="" loading="lazy" /></button>)}{gallery.length > 6 && <small>+{gallery.length - 6}</small>}</div>}
       <button className="product-meta" type="button" onClick={() => openProduct(product)} aria-label={`View details for ${product.name}`}>
         <span><strong>{product.name}</strong><small>{product.description}</small></span>
         <b>{formatPrice(product.price)}</b>
