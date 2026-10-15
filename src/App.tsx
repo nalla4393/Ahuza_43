@@ -98,6 +98,11 @@ export default function App() {
   const [selectedSizeFilter, setSelectedSizeFilter] = useState('All');
   const [sortOrder, setSortOrder] = useState<'recommended' | 'newest' | 'price-low' | 'price-high'>('recommended');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [inStockOnly, setInStockOnly] = useState(false);
+  const [savedOnly, setSavedOnly] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(12);
   const cartCount = cart.reduce((count, item) => count + item.quantity, 0);
   const cartLines = cart.map((line) => ({ ...line, product: products.find((product) => product.id === line.productId) })).filter((line): line is CartLine & { product: Product } => Boolean(line.product));
   const cartTotal = cartLines.reduce((total, line) => total + line.product.price * line.quantity, 0);
@@ -109,9 +114,21 @@ export default function App() {
     const searchable = `${product.name} ${product.category} ${product.description} ${product.ghostMannequin?.tags?.join(' ') || ''}`.toLowerCase();
     return (!term || searchable.includes(term))
       && (selectedCategory === 'All' || product.category === selectedCategory)
-      && (selectedSizeFilter === 'All' || product.sizes?.includes(selectedSizeFilter));
+      && (selectedSizeFilter === 'All' || product.sizes?.includes(selectedSizeFilter))
+      && (!minPrice || product.price >= Number(minPrice))
+      && (!maxPrice || product.price <= Number(maxPrice))
+      && (!inStockOnly || product.stock > 0)
+      && (!savedOnly || wishlist.includes(product.id));
   }).sort((a, b) => sortOrder === 'price-low' ? a.price - b.price : sortOrder === 'price-high' ? b.price - a.price : sortOrder === 'newest' ? b.id.localeCompare(a.id) : 0);
+  const resetFilters = () => { setSelectedCategory('All'); setSelectedSizeFilter('All'); setSearchTerm(''); setMinPrice(''); setMaxPrice(''); setInStockOnly(false); setSavedOnly(false); };
+  const openCollection = (category: string, size: string) => {
+    setSelectedCategory(category); setSelectedSizeFilter(size); setSearchTerm(''); setMobileMenuOpen(false); setCatalogOpen(true);
+    window.setTimeout(() => document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }), 0);
+  };
+  const shownProducts = matchingProducts.slice(0, visibleCount);
   const newArrivals = products.slice().sort((a, b) => b.id.localeCompare(a.id)).slice(0, 4);
+
+  useEffect(() => { setVisibleCount(12); }, [searchTerm, selectedCategory, selectedSizeFilter, sortOrder, minPrice, maxPrice, inStockOnly, savedOnly]);
 
   useEffect(() => {
     fetch('/api/site-status')
@@ -545,6 +562,8 @@ export default function App() {
       <button className="product-meta" type="button" onClick={() => openProduct(product)} aria-label={`View details for ${product.name}`}>
         <span><strong>{product.name}</strong><small>{product.description}</small></span>
         <b>{formatPrice(product.price)}</b>
+        {product.sizes?.length ? <em className="card-sizes">Sizes: {product.sizes.join(' · ')}</em> : null}
+        {product.stock < 1 ? <em className="card-stock out">Out of stock</em> : product.stock <= 3 ? <em className="card-stock low">Only {product.stock} left</em> : null}
       </button>
     </article>;
   }
@@ -554,17 +573,53 @@ export default function App() {
       {sitePublished === null ? <section className="store-maintenance"><p className="eyebrow">AHUZA APPAREL</p><h1>Checking storefront status</h1><p>Please wait a moment.</p></section> : sitePublished ? <>
       <div className="announcement">{storeContent.announcement}</div>
       <header className="site-header">
-        <button className="icon-button mobile-menu" type="button" aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'} aria-expanded={mobileMenuOpen} aria-controls="main-navigation" onClick={() => setMobileMenuOpen((open) => !open)}>{mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}</button>
-        <nav className={`main-nav${mobileMenuOpen ? ' is-open' : ''}`} id="main-navigation" aria-label="Main navigation">
+        <button className="icon-button mobile-menu" type="button" aria-label="Open women's collection menu" aria-expanded={mobileMenuOpen} aria-controls="collection-drawer" onClick={() => setMobileMenuOpen(true)}><Menu size={22} /></button>
+        <nav className="main-nav" id="main-navigation" aria-label="Main navigation">
           <a href="#home" onClick={() => { setCatalogOpen(false); setMobileMenuOpen(false); }}>Home</a>
           {categories.slice(1).map((category) => <button key={category} type="button" onClick={() => { setSelectedCategory(category); setCatalogOpen(true); setMobileMenuOpen(false); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>{category}</button>)}
+          <button type="button" onClick={() => { setSortOrder('newest'); setCatalogOpen(true); setMobileMenuOpen(false); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>New Arrivals</button>
+          <button type="button" onClick={() => { setSelectedCategory('All'); setCatalogOpen(true); setMobileMenuOpen(false); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>Shop All</button>
           <a href="#about" onClick={() => setMobileMenuOpen(false)}>About</a>
           <a href="#contact" onClick={() => setMobileMenuOpen(false)}>Contact</a>
         </nav>
         <a className="wordmark" href="#home" aria-label="AHUZA home">AHUZA</a>
-        <div className="header-actions"><button className="header-icon" type="button" aria-label="Search" onClick={() => { setCatalogOpen(true); window.setTimeout(() => document.querySelector<HTMLInputElement>('#catalog-search')?.focus(), 0); }}><Search size={18} /></button><button className="account-link" onClick={() => setAccountOpen(true)}>{customer ? 'My account' : 'Account'}</button><button className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
+        <form className="header-search" role="search" onSubmit={(event) => { event.preventDefault(); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>
+          <label className="sr-only" htmlFor="header-search-input">Search AHUZA</label>
+          <input id="header-search-input" type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); if (event.target.value) setCatalogOpen(true); }} placeholder="Search for products, categories or fabrics" autoComplete="off" />
+          {searchTerm && <button type="button" className="header-search-clear" aria-label="Clear search" onClick={() => setSearchTerm('')}><X size={16} /></button>}
+          <button type="submit" className="header-search-submit" aria-label="Search"><Search size={18} /></button>
+        </form>
+        <div className="header-actions"><button className={`header-icon wishlist-link${savedOnly ? ' active' : ''}`} type="button" aria-label={`Wishlist, ${wishlist.length} saved`} aria-pressed={savedOnly} onClick={() => { if (!customer) { setAuthMode('login'); setAccountOpen(true); return; } setSavedOnly(true); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}><Heart size={18} fill={wishlist.length ? 'currentColor' : 'none'} />{wishlist.length > 0 && <span className="count-badge">{wishlist.length}</span>}</button><button className="account-link" onClick={() => setAccountOpen(true)}>{customer ? 'My account' : 'Account'}</button><button className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
       </header>
-      <nav className="category-strip" aria-label="Shop categories"><button type="button" className={selectedCategory === 'All' && !catalogOpen ? 'active' : ''} onClick={() => { setSelectedCategory('All'); setCatalogOpen(true); }}>Shop all</button>{categories.slice(1).map((category) => <button key={category} type="button" className={selectedCategory === category && catalogOpen ? 'active' : ''} onClick={() => { setSelectedCategory(category); setCatalogOpen(true); }}>{category}</button>)}<button type="button" onClick={() => setCatalogOpen(true)}>New arrivals</button></nav>
+      {mobileMenuOpen && <div className="menu-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setMobileMenuOpen(false); }}>
+        <aside className="menu-drawer" id="collection-drawer" role="dialog" aria-modal="true" aria-labelledby="menu-title">
+          <div className="menu-drawer-head"><h2 id="menu-title">Women’s Collection</h2><button type="button" className="icon-button" aria-label="Close menu" onClick={() => setMobileMenuOpen(false)}><X size={22} /></button></div>
+          <div className="menu-section">
+            <h3>Shop by clothing type</h3>
+            <ul>
+              <li><button type="button" onClick={() => openCollection('All', 'All')}>All women’s wear <span>{products.length}</span></button></li>
+              {categories.slice(1).map((category) => <li key={category}><button type="button" onClick={() => openCollection(category, 'All')}>{category} <span>{products.filter((product) => product.category === category).length}</span></button></li>)}
+            </ul>
+          </div>
+          {sizes.length > 1 && <div className="menu-section">
+            <h3>Shop by size</h3>
+            <div className="menu-sizes">{sizes.slice(1).map((size) => <button key={size} type="button" onClick={() => openCollection('All', size)}>{size}</button>)}</div>
+          </div>}
+          {categories.length > 1 && sizes.length > 1 && <div className="menu-section">
+            <h3>Type &amp; size</h3>
+            {categories.slice(1).map((category) => {
+              const available = Array.from(new Set(products.filter((product) => product.category === category).flatMap((product) => product.sizes || [])));
+              return available.length ? <div className="menu-type-sizes" key={category}><strong>{category}</strong><div className="menu-sizes">{available.map((size) => <button key={size} type="button" onClick={() => openCollection(category, size)}>{size}</button>)}</div></div> : null;
+            })}
+          </div>}
+          <div className="menu-section menu-links">
+            <button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}>New Arrivals</button>
+            <a href="#about" onClick={() => setMobileMenuOpen(false)}>About AHUZA</a>
+            <a href="#contact" onClick={() => setMobileMenuOpen(false)}>Contact</a>
+          </div>
+        </aside>
+      </div>}
+      <nav className="category-strip" aria-label="Shop categories"><button type="button" className={selectedCategory === 'All' && !catalogOpen ? 'active' : ''} onClick={() => { setSelectedCategory('All'); setCatalogOpen(true); }}>Shop all</button>{categories.slice(1).map((category) => <button key={category} type="button" className={selectedCategory === category && catalogOpen ? 'active' : ''} onClick={() => { setSelectedCategory(category); setCatalogOpen(true); }}>{category}</button>)}<button type="button" onClick={() => { setSortOrder('newest'); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>New arrivals</button></nav>
 
       <section className="hero" id="home">
         <img className="hero-image" src={storeContent.heroImageUrl} alt="AHUZA's featured collection" fetchPriority="high" />
@@ -577,6 +632,12 @@ export default function App() {
         </div>
         <span className="hero-index">AHUZA / 01</span>
         <a className="scroll-cue" href="#shop" aria-label="Scroll to collection"><ArrowDown size={17} /></a>
+      </section>
+
+      <section className="promo-tiles" aria-label="Featured">
+        <button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}><span>Just in</span><strong>New arrivals</strong><em>Shop now <ArrowRight size={14} /></em></button>
+        <button type="button" onClick={() => openCollection('All', 'All')}><span>The full edit</span><strong>Shop all women’s wear</strong><em>Browse <ArrowRight size={14} /></em></button>
+        <a href="#about"><span>Our story</span><strong>Where Fashion Meets Passion</strong><em>Discover AHUZA <ArrowRight size={14} /></em></a>
       </section>
 
       <section className="category-feature section-wrap" aria-labelledby="category-title">
@@ -592,7 +653,7 @@ export default function App() {
 
       <section className={`collection section-wrap${catalogOpen ? ' catalog-view' : ''}`} id="shop">
         <div className="section-heading catalog-heading">
-          <div><p className="eyebrow dark-eyebrow">{catalogOpen ? 'Shop AHUZA' : 'Made for repeat wear'}</p><h2>{catalogOpen ? (searchTerm ? `Results for “${searchTerm}”` : selectedCategory === 'All' ? 'The complete collection.' : selectedCategory) : 'Good things, on rotation.'}</h2></div>
+          <div><p className="eyebrow dark-eyebrow">{catalogOpen ? 'Shop AHUZA' : 'Just in'}</p><h2>{catalogOpen ? (searchTerm ? `Results for “${searchTerm}”` : selectedCategory === 'All' ? 'The complete collection.' : selectedCategory) : 'New arrivals'}</h2></div>
           {!catalogOpen && <button className="text-link" type="button" onClick={() => setCatalogOpen(true)}>Shop all <ArrowUpRight size={15} /></button>}
         </div>
         {catalogOpen && <div className="catalog-toolbar">
@@ -600,13 +661,15 @@ export default function App() {
           <button className="filter-toggle" type="button" onClick={() => setFiltersOpen((open) => !open)}><SlidersHorizontal size={16} /> Filters</button>
           <label className="sort-control">Sort by <select value={sortOrder} onChange={(event) => setSortOrder(event.target.value as typeof sortOrder)}><option value="recommended">Recommended</option><option value="newest">Newest</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option></select></label>
         </div>}
-        {catalogOpen && <div className={`catalog-filters${filtersOpen ? ' is-open' : ''}`}><label>Category<select value={selectedCategory} onChange={(event) => setSelectedCategory(event.target.value)}>{categories.map((category) => <option key={category}>{category}</option>)}</select></label><label>Size<select value={selectedSizeFilter} onChange={(event) => setSelectedSizeFilter(event.target.value)}>{sizes.map((size) => <option key={size}>{size}</option>)}</select></label><button type="button" onClick={() => { setSelectedCategory('All'); setSelectedSizeFilter('All'); setSearchTerm(''); }}>Clear filters</button></div>}
+        {catalogOpen && <div className={`catalog-filters${filtersOpen ? ' is-open' : ''}`}><label>Category<select value={selectedCategory} onChange={(event) => setSelectedCategory(event.target.value)}>{categories.map((category) => <option key={category}>{category}</option>)}</select></label><label>Size<select value={selectedSizeFilter} onChange={(event) => setSelectedSizeFilter(event.target.value)}>{sizes.map((size) => <option key={size}>{size}</option>)}</select></label><label>Min price (₹)<input type="number" inputMode="numeric" min="0" value={minPrice} onChange={(event) => setMinPrice(event.target.value)} placeholder="0" /></label><label>Max price (₹)<input type="number" inputMode="numeric" min="0" value={maxPrice} onChange={(event) => setMaxPrice(event.target.value)} placeholder="Any" /></label><label className="check-filter"><input type="checkbox" checked={inStockOnly} onChange={(event) => setInStockOnly(event.target.checked)} /> In stock only</label><label className="check-filter"><input type="checkbox" checked={savedOnly} onChange={(event) => setSavedOnly(event.target.checked)} /> Saved to wishlist</label><button type="button" onClick={resetFilters}>Clear filters</button></div>}
         {notice && <p className="notice" role="status">{notice}</p>}
         {products.length === 0 && !notice ? <p className="loading">Gathering the collection…</p> : null}
-        {catalogOpen && matchingProducts.length === 0 && <div className="empty-catalog"><Search size={24} /><h3>Nothing matched that search.</h3><p>Try another category, size or search term.</p><button className="dark-button" type="button" onClick={() => { setSelectedCategory('All'); setSelectedSizeFilter('All'); setSearchTerm(''); }}>View all products</button></div>}
+        {catalogOpen && products.length > 0 && <p className="result-count" role="status" aria-live="polite">{matchingProducts.length} {matchingProducts.length === 1 ? 'product' : 'products'}</p>}
+        {catalogOpen && matchingProducts.length === 0 && <div className="empty-catalog"><Search size={24} /><h3>{savedOnly ? 'No saved pieces match.' : 'Nothing matched that search.'}</h3><p>{savedOnly ? 'Tap the heart on any product to save it here.' : 'Try another category, size, price or search term.'}</p><button className="dark-button" type="button" onClick={resetFilters}>View all products</button></div>}
         <div className="product-grid" style={imageSettingsVars(imageSettings) as CSSProperties}>
-          {(catalogOpen ? matchingProducts : newArrivals).map((product, index) => renderProductCard(product, index))}
+          {(catalogOpen ? shownProducts : newArrivals).map((product, index) => renderProductCard(product, index))}
         </div>
+        {catalogOpen && matchingProducts.length > visibleCount && <div className="load-more"><button className="dark-button" type="button" onClick={() => setVisibleCount((count) => count + 12)}>Load more ({matchingProducts.length - visibleCount} remaining)</button></div>}
       </section>
 
       <section className="story" id="about">
@@ -673,7 +736,16 @@ export default function App() {
       </section>
 
       <section className="newsletter" id="journal"><div><p className="eyebrow">Ahuza updates</p><h2>Stay in style.</h2><p className="newsletter-copy">New collections, thoughtful notes and offers from AHUZA.</p></div><form onSubmit={(event) => void subscribeToNewsletter(event)}><label className="sr-only" htmlFor="newsletter-email">Email address</label><input id="newsletter-email" name="email" type="email" autoComplete="email" placeholder="Your email address" maxLength={254} required disabled={newsletterBusy} /><label className="newsletter-consent"><input name="consent" type="checkbox" required disabled={newsletterBusy} /> I agree to receive AHUZA news and offers by email.</label><button type="submit" disabled={newsletterBusy}>{newsletterBusy ? 'Subscribing…' : 'Subscribe'} <ArrowRight size={16} /></button>{newsletterMessage && <p className="newsletter-message" role="status">{newsletterMessage}</p>}</form></section>
-      <footer className="site-footer"><a className="wordmark" href="#home">AHUZA</a><div className="footer-links"><a href="#about">About</a><a href="#contact">Contact</a><a href="#journal">Updates</a></div><p>Where Fashion Meets Passion.</p><span>© AHUZA Apparel 2026</span><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></footer>
+      <footer className="site-footer">
+        <div className="footer-top"><button type="button" className="back-to-top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Back to top ↑</button></div>
+        <div className="footer-columns">
+          <div><h3>Shop</h3><ul><li><button type="button" onClick={() => openCollection('All', 'All')}>All women’s wear</button></li>{categories.slice(1).map((category) => <li key={category}><button type="button" onClick={() => openCollection(category, 'All')}>{category}</button></li>)}<li><button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}>New arrivals</button></li></ul></div>
+          <div><h3>Customer service</h3><ul><li><a href="#contact">Contact us</a></li><li><a href="mailto:Info@ahuzawear.com">Info@ahuzawear.com</a></li><li><a href="tel:+919550582277">+91 95505 82277</a></li><li><button type="button" onClick={() => setAccountOpen(true)}>My account &amp; orders</button></li></ul></div>
+          <div><h3>About AHUZA</h3><ul><li><a href="#about">Our story</a></li><li><a href="#why-ahuza">Why AHUZA</a></li><li><a href="#journal">Email updates</a></li></ul></div>
+          <div><h3>AHUZA</h3><p className="footer-tagline">Where Fashion Meets Passion.</p><p className="footer-loc">Telangana, India</p></div>
+        </div>
+        <div className="footer-bottom"><a className="wordmark" href="#home">AHUZA</a><span>© AHUZA Apparel 2026</span><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
+      </footer>
 
       {cartOpen && <div className="overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setCartOpen(false); }}>
         <aside className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="bag-title">
