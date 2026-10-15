@@ -561,7 +561,7 @@ export default function App() {
           <a href="#about" onClick={() => setMobileMenuOpen(false)}>About</a>
           <a href="#contact" onClick={() => setMobileMenuOpen(false)}>Contact</a>
         </nav>
-        <a className="wordmark" href="#home" aria-label="AHUZA home">AHUZA<span>.</span></a>
+        <a className="wordmark" href="#home" aria-label="AHUZA home">AHUZA</a>
         <div className="header-actions"><button className="header-icon" type="button" aria-label="Search" onClick={() => { setCatalogOpen(true); window.setTimeout(() => document.querySelector<HTMLInputElement>('#catalog-search')?.focus(), 0); }}><Search size={18} /></button><button className="account-link" onClick={() => setAccountOpen(true)}>{customer ? 'My account' : 'Account'}</button><button className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
       </header>
       <nav className="category-strip" aria-label="Shop categories"><button type="button" className={selectedCategory === 'All' && !catalogOpen ? 'active' : ''} onClick={() => { setSelectedCategory('All'); setCatalogOpen(true); }}>Shop all</button>{categories.slice(1).map((category) => <button key={category} type="button" className={selectedCategory === category && catalogOpen ? 'active' : ''} onClick={() => { setSelectedCategory(category); setCatalogOpen(true); }}>{category}</button>)}<button type="button" onClick={() => setCatalogOpen(true)}>New arrivals</button></nav>
@@ -673,7 +673,7 @@ export default function App() {
       </section>
 
       <section className="newsletter" id="journal"><div><p className="eyebrow">Ahuza updates</p><h2>Stay in style.</h2><p className="newsletter-copy">New collections, thoughtful notes and offers from AHUZA.</p></div><form onSubmit={(event) => void subscribeToNewsletter(event)}><label className="sr-only" htmlFor="newsletter-email">Email address</label><input id="newsletter-email" name="email" type="email" autoComplete="email" placeholder="Your email address" maxLength={254} required disabled={newsletterBusy} /><label className="newsletter-consent"><input name="consent" type="checkbox" required disabled={newsletterBusy} /> I agree to receive AHUZA news and offers by email.</label><button type="submit" disabled={newsletterBusy}>{newsletterBusy ? 'Subscribing…' : 'Subscribe'} <ArrowRight size={16} /></button>{newsletterMessage && <p className="newsletter-message" role="status">{newsletterMessage}</p>}</form></section>
-      <footer className="site-footer"><a className="wordmark" href="#home">AHUZA<span>.</span></a><div className="footer-links"><a href="#about">About</a><a href="#contact">Contact</a><a href="#journal">Updates</a></div><p>Where Fashion Meets Passion.</p><span>© AHUZA Apparel 2026</span><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></footer>
+      <footer className="site-footer"><a className="wordmark" href="#home">AHUZA</a><div className="footer-links"><a href="#about">About</a><a href="#contact">Contact</a><a href="#journal">Updates</a></div><p>Where Fashion Meets Passion.</p><span>© AHUZA Apparel 2026</span><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></footer>
 
       {cartOpen && <div className="overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setCartOpen(false); }}>
         <aside className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="bag-title">
