@@ -290,19 +290,24 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   if (paymentMethod === 'upi' && !upi.configured) { response.status(503).json({ error: 'Direct UPI is unavailable. Configure a valid UPI_VPA on the server.' }); return; }
   const items = request.body?.items;
   if (!Array.isArray(items) || items.length === 0 || items.length > 20) { response.status(400).json({ error: 'Provide one or more cart items.' }); return; }
-  const address = request.body?.shippingAddress;
-  const shippingAddress: ShippingAddress = {
-    name: typeof address?.name === 'string' ? address.name.trim() : '',
-    addressLine1: typeof address?.addressLine1 === 'string' ? address.addressLine1.trim() : '',
-    ...(typeof address?.addressLine2 === 'string' && address.addressLine2.trim() ? { addressLine2: address.addressLine2.trim() } : {}),
-    city: typeof address?.city === 'string' ? address.city.trim() : '',
-    state: typeof address?.state === 'string' ? address.state.trim() : '',
-    postalCode: typeof address?.postalCode === 'string' ? address.postalCode.trim() : '',
-    country: 'India',
-    phone: typeof address?.phone === 'string' ? address.phone.trim() : '',
+  const parseAddress = (address: any): ShippingAddress | null => {
+    const parsed: ShippingAddress = {
+      name: typeof address?.name === 'string' ? address.name.trim() : '',
+      addressLine1: typeof address?.addressLine1 === 'string' ? address.addressLine1.trim() : '',
+      ...(typeof address?.addressLine2 === 'string' && address.addressLine2.trim() ? { addressLine2: address.addressLine2.trim() } : {}),
+      city: typeof address?.city === 'string' ? address.city.trim() : '',
+      state: typeof address?.state === 'string' ? address.state.trim() : '',
+      postalCode: typeof address?.postalCode === 'string' ? address.postalCode.trim() : '',
+      country: 'India',
+      phone: typeof address?.phone === 'string' ? address.phone.trim() : '',
+    };
+    const valid = stringValue(parsed.name, 100) && stringValue(parsed.addressLine1, 180) && !(parsed.addressLine2 && parsed.addressLine2.length > 180) && stringValue(parsed.city, 80) && stringValue(parsed.state, 80) && /^[1-9][0-9]{5}$/.test(parsed.postalCode) && /^\+?[0-9][0-9\s-]{8,16}$/.test(parsed.phone);
+    return valid ? parsed : null;
   };
-  if (!stringValue(shippingAddress.name, 100) || !stringValue(shippingAddress.addressLine1, 180) || (shippingAddress.addressLine2 && shippingAddress.addressLine2.length > 180) || !stringValue(shippingAddress.city, 80) || !stringValue(shippingAddress.state, 80) || !/^[1-9][0-9]{5}$/.test(shippingAddress.postalCode) || !/^\+?[0-9][0-9\s-]{8,16}$/.test(shippingAddress.phone)) {
-    response.status(400).json({ error: 'Enter a valid name, Indian delivery address, six-digit PIN code, and phone number.' }); return;
+  const shippingAddress = parseAddress(request.body?.shippingAddress);
+  const billingAddress = request.body?.billingAddress === undefined ? shippingAddress : parseAddress(request.body.billingAddress);
+  if (!shippingAddress || !billingAddress) {
+    response.status(400).json({ error: 'Enter a valid name, Indian billing and delivery address, six-digit PIN code, and phone number.' }); return;
   }
   const requested = new Map<string, { productId: string; size?: string; quantity: number }>();
   for (const item of items) {
@@ -342,7 +347,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     if (!available) return false;
     for (const item of orderItems) database.products.find((entry) => entry.id === item.productId)!.stock -= item.quantity;
     database.orders.push({
-      id: localOrderId, userId: request.session.userId!, shippingAddress, items: orderItems,
+      id: localOrderId, userId: request.session.userId!, shippingAddress, billingAddress, items: orderItems,
       amount, subtotalAmount, shippingAmount, discountAmount: 0, taxAmount: 0,
       currency: 'INR', status: paymentMethod === 'cod' ? 'confirmed' : 'pending_payment', paymentStatus: 'pending', paymentMethod,
       ...(paymentMethod === 'upi' ? { paymentReference, reservationExpiresAt: expiresAt!.toISOString() } : {}),

@@ -113,6 +113,12 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
   ]);
 
   useEffect(() => {
+    const toggle = () => setOpen((current) => !current);
+    window.addEventListener('ahuza:toggle-support', toggle);
+    return () => window.removeEventListener('ahuza:toggle-support', toggle);
+  }, []);
+
+  useEffect(() => {
     const updateHours = () => {
       const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
       setSupportAvailable(hour >= 10 && hour < 21);
@@ -342,8 +348,9 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
         <button type="submit" aria-label="Send message" disabled={busy || ticketOpen}><Send size={17} /></button>
       </form>
     </section>}
-    <button className="customer-support-launcher" type="button" onClick={() => setOpen((current) => !current)} aria-label={open ? 'Close customer support' : 'Chat with AHUZA support'} aria-expanded={open} title="Chat with us">
-      {open ? <X size={21} /> : <MessageCircle size={21} />}
+    <button className="customer-support-launcher" type="button" onClick={() => setOpen((current) => !current)} aria-label={open ? 'Close customer support' : 'Ask Ahuza'} aria-expanded={open} title={open ? 'Close customer support' : 'Ask Ahuza'}>
+      {open ? <X size={18} /> : <MessageCircle size={18} />}
+      <span>{open ? 'Close' : 'Ask Ahuza'}</span>
     </button>
   </div>;
 }

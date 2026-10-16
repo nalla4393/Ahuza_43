@@ -3,6 +3,10 @@
 .checkout-details>label,.address-row label{display:grid;gap:5px;font-size:10px}
 .checkout-details>label>span{font-weight:400;color:var(--muted);display:inline}
 .checkout-details input:not([type=checkbox]){height:37px;width:100%;min-width:0;padding:0 9px;border:1px solid var(--line);background:transparent;outline-color:#68735b;font-size:11px}
+.address-title-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px;margin-top:8px}
+.address-title-row .address-title{margin:0}
+.checkout-details .same-address-check{display:inline-flex;align-items:center;gap:6px;font-size:11px;cursor:pointer}
+.checkout-details input[readonly]{background:#f3f1ea;color:#6b6b63}
 .address-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .checkout-details .consent-check{margin:5px 0 1px}
 .checkout-details .dark-button{margin-top:2px}

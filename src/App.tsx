@@ -1,8 +1,10 @@
-import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
-import { ArrowDown, ArrowRight, ArrowUpRight, ChevronDown, Heart, Mail, MapPin, Menu, Minus, Phone, Plus, Search, ShoppingBag, SlidersHorizontal, X } from 'lucide-react';
+import { useEffect, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react';
+import { Package, User, ArrowRight, ArrowUpRight, Heart, MessageCircle, Mail, MapPin, Menu, Minus, Phone, Plus, Search, ShoppingBag, SlidersHorizontal, X } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import OwnerStudio from './OwnerStudio';
 import CustomerSupportChat from './CustomerSupportChat';
+import ProductRail from './ProductRail';
+import HeroCarousel, { type BannerSlide } from './HeroCarousel';
 import { defaultImageSettings, imageSettingsVars, mainImage, srcSet, type ImageSettings, type ProductImage } from './imageTypes';
 
 type Product = {
@@ -39,6 +41,20 @@ type StorefrontContent = { announcement: string; heroEyebrow: string; heroTitle:
 type CartLine = { productId: string; quantity: number; size?: string };
 type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; paymentReference?: string; upiIntent?: string; merchantVpa?: string; merchantName?: string; amount: number; currency: string; expiresAt?: string; status?: string };
 type PaymentConfiguration = { configured: boolean; upiVpa: string | null; merchantName: string; automaticVerification: false };
+
+type AddressValues = { name: string; addressLine1: string; addressLine2: string; city: string; state: string; postalCode: string; phone: string };
+const emptyAddress: AddressValues = { name: '', addressLine1: '', addressLine2: '', city: '', state: '', postalCode: '', phone: '' };
+
+function AddressFields({ section, value, onChange, readOnly = false }: { section: 'billing' | 'shipping'; value: AddressValues; onChange: (value: AddressValues) => void; readOnly?: boolean }) {
+  const bind = (field: keyof AddressValues) => ({ name: `${section}-${field}`, value: value[field], readOnly, onChange: (event: ChangeEvent<HTMLInputElement>) => onChange({ ...value, [field]: event.target.value }) });
+  return <>
+    <label>Full name<input {...bind('name')} autoComplete={`${section} name`} maxLength={100} required /></label>
+    <label>Address line 1<input {...bind('addressLine1')} autoComplete={`${section} address-line1`} maxLength={180} required /></label>
+    <label>Address line 2 <span>Optional</span><input {...bind('addressLine2')} autoComplete={`${section} address-line2`} maxLength={180} /></label>
+    <div className="address-row"><label>City<input {...bind('city')} autoComplete={`${section} address-level2`} maxLength={80} required /></label><label>State<input {...bind('state')} autoComplete={`${section} address-level1`} maxLength={80} required /></label></div>
+    <div className="address-row"><label>PIN code<input {...bind('postalCode')} inputMode="numeric" autoComplete={`${section} postal-code`} pattern="[1-9][0-9]{5}" maxLength={6} required /></label><label>Phone<input {...bind('phone')} type="tel" inputMode="tel" autoComplete={`${section} tel`} pattern="\+?[0-9][0-9\s-]{8,16}" maxLength={18} required /></label></div>
+  </>;
+}
 
 async function parseResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
@@ -81,6 +97,9 @@ export default function App() {
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [busy, setBusy] = useState(false);
+  const [billingAddress, setBillingAddress] = useState<AddressValues>(emptyAddress);
+  const [deliveryAddress, setDeliveryAddress] = useState<AddressValues>(emptyAddress);
+  const [sameAsBilling, setSameAsBilling] = useState(false);
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [newsletterBusy, setNewsletterBusy] = useState(false);
   const [newsletterMessage, setNewsletterMessage] = useState('');
@@ -94,6 +113,7 @@ export default function App() {
   const [zoomed, setZoomed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [megaOpen, setMegaOpen] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedSizeFilter, setSelectedSizeFilter] = useState('All');
@@ -126,8 +146,30 @@ export default function App() {
     setSelectedCategory(category); setSelectedSizeFilter(size); setSearchTerm(''); setMobileMenuOpen(false); setCatalogOpen(true);
     window.setTimeout(() => document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }), 0);
   };
+  const navItems = ['Women', 'Men', 'Kurtis', 'Frocks', 'Kurta Sets', 'Lehengas', 'Night Suits', 'Track Suits', 'New Arrivals', 'Bestsellers', 'Sale'];
+  const megaItems = ['Women', 'Men', 'Sale'];
+  const openNavItem = (label: string) => {
+    setMegaOpen(null);
+    const category = categories.find((item) => item.toLowerCase() === label.toLowerCase());
+    if (label === 'New Arrivals') setSortOrder('newest');
+    openCollection(category || 'All', 'All');
+    if (!category && !['New Arrivals', 'Bestsellers', 'Sale'].includes(label)) setSearchTerm(label);
+  };
+  const circleFallbacks = ['photo-1515886657613-9f3515b0c78f', 'photo-1483985988355-763728e1935b', 'photo-1469334031218-e382a71b716b', 'photo-1539109136881-3be0616acf4b'];
+  const circleItems = navItems.map((label, position) => {
+    const product = products.find((entry) => entry.category.toLowerCase() === label.toLowerCase());
+    const image = product ? (galleryImages(product)[0]?.url || product.imageUrl) : `https://images.unsplash.com/${circleFallbacks[position % circleFallbacks.length]}?auto=format&fit=crop&w=400&h=400&q=70`;
+    return { label, image };
+  });
+  const bannerSlides: BannerSlide[] = [
+    { id: 'collection', eyebrow: storeContent.heroEyebrow, title: storeContent.heroTitle, description: storeContent.heroDescription, cta: 'Shop the collection', desktopImage: storeContent.heroImageUrl, onSelect: () => openCollection('All', 'All') },
+    { id: 'new', eyebrow: 'Just landed', title: 'New Arrivals', description: 'Fresh silhouettes for every occasion, added this week.', cta: 'Shop new in', desktopImage: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=2200&q=80', mobileImage: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=900&h=1100&q=80', onSelect: () => openNavItem('New Arrivals') },
+    { id: 'sale', eyebrow: 'Season sale', title: 'Up to 50% off', description: 'Your favourites at limited-time prices. While stocks last.', cta: 'Shop the sale', desktopImage: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=2200&q=80', mobileImage: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&h=1100&q=80', onSelect: () => openNavItem('Sale') },
+    { id: 'festive', eyebrow: 'Festive edit', title: 'Kurta Sets & Lehengas', description: 'Celebrate in handcrafted ethnic wear.', cta: 'Explore the edit', desktopImage: 'https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=2200&q=80', mobileImage: 'https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=900&h=1100&q=80', onSelect: () => openNavItem('Kurta Sets') },
+  ];
   const shownProducts = matchingProducts.slice(0, visibleCount);
-  const newArrivals = products.slice().sort((a, b) => b.id.localeCompare(a.id)).slice(0, 4);
+  const newArrivals = products.slice().sort((a, b) => b.id.localeCompare(a.id)).slice(0, 12);
+  const readyToShip = products.filter((product) => product.stock > 0).slice(0, 12);
 
   useEffect(() => { setVisibleCount(12); }, [searchTerm, selectedCategory, selectedSizeFilter, sortOrder, minPrice, maxPrice, inStockOnly, savedOnly]);
 
@@ -358,7 +400,7 @@ export default function App() {
     }
   }
 
-  async function checkout(formData: FormData) {
+  async function checkout() {
     if (!customer) {
       setAccountOpen(true);
       setNotice('Sign in to continue to checkout.');
@@ -372,7 +414,8 @@ export default function App() {
           items: cart.map(({ productId, quantity, size }) => ({ productId, quantity, ...(size ? { size } : {}) })),
           paymentMethod,
           marketingConsent,
-          shippingAddress: Object.fromEntries(formData.entries()),
+          shippingAddress: sameAsBilling ? billingAddress : deliveryAddress,
+          billingAddress,
         }),
       });
       const order = await parseResponse<PaymentOrder & { error?: string }>(response);
@@ -576,22 +619,26 @@ export default function App() {
       <div className="announcement">{storeContent.announcement}</div>
       <header className="site-header">
         <button className="icon-button mobile-menu" type="button" aria-label="Open women's collection menu" aria-expanded={mobileMenuOpen} aria-controls="collection-drawer" onClick={() => setMobileMenuOpen(true)}><Menu size={22} /></button>
-        <nav className="main-nav" id="main-navigation" aria-label="Main navigation">
-          <a href="#home" onClick={() => { setCatalogOpen(false); setMobileMenuOpen(false); }}>Home</a>
-          {categories.slice(1).map((category) => <button key={category} type="button" onClick={() => { setSelectedCategory(category); setCatalogOpen(true); setMobileMenuOpen(false); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>{category}</button>)}
-          <button type="button" onClick={() => { setSortOrder('newest'); setCatalogOpen(true); setMobileMenuOpen(false); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>New Arrivals</button>
-          <button type="button" onClick={() => { setSelectedCategory('All'); setCatalogOpen(true); setMobileMenuOpen(false); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>Shop All</button>
-          <a href="#about" onClick={() => setMobileMenuOpen(false)}>About</a>
-          <a href="#contact" onClick={() => setMobileMenuOpen(false)}>Contact</a>
+        <nav className="main-nav" id="main-navigation" aria-label="Main navigation" onMouseLeave={() => setMegaOpen(null)} onKeyDown={(event) => { if (event.key === 'Escape') setMegaOpen(null); }}>
+          {navItems.map((label) => megaItems.includes(label)
+            ? <div className="nav-item" key={label} onMouseEnter={() => setMegaOpen(label)}>
+              <button type="button" aria-haspopup="true" aria-expanded={megaOpen === label} onFocus={() => setMegaOpen(label)} onClick={() => openNavItem(label)}>{label}</button>
+              {megaOpen === label && <div className="mega-menu" role="region" aria-label={`${label} menu`}>
+                <div className="mega-column"><strong>Shop by category</strong>{categories.slice(1).map((category) => <button key={category} type="button" onClick={() => { setMegaOpen(null); openCollection(category, 'All'); }}>{category}</button>)}</div>
+                <div className="mega-column"><strong>Featured</strong>{['New Arrivals', 'Bestsellers', 'Sale'].map((item) => <button key={item} type="button" onClick={() => openNavItem(item)}>{item}</button>)}</div>
+                <button type="button" className="mega-campaign" onClick={() => openNavItem(label === 'Sale' ? 'Sale' : 'New Arrivals')}><img src="https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=600&q=70" alt="" loading="lazy" /><span>{label === 'Sale' ? 'Up to 50% off' : 'New season edit'}</span></button>
+              </div>}
+            </div>
+            : <button key={label} type="button" onClick={() => openNavItem(label)}>{label}</button>)}
         </nav>
-        <a className="wordmark" href="#home" aria-label="AHUZA home">AHUZA</a>
+        <a className="wordmark" href="#home" aria-label="AHUZA home"><span className="wordmark-star" aria-hidden="true">★</span><span className="wordmark-stack"><span className="wordmark-text">AHUZA</span><span className="wordmark-tagline">Celebration starts at Ahuza</span></span><span className="wordmark-sparkles" aria-hidden="true"><i>✦</i><i>★</i><i>✦</i><i>✧</i><i>✦</i></span></a>
         <form className="header-search" role="search" onSubmit={(event) => { event.preventDefault(); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>
           <label className="sr-only" htmlFor="header-search-input">Search AHUZA</label>
           <input id="header-search-input" type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); if (event.target.value) setCatalogOpen(true); }} placeholder="Search for products, categories or fabrics" autoComplete="off" />
           {searchTerm && <button type="button" className="header-search-clear" aria-label="Clear search" onClick={() => setSearchTerm('')}><X size={16} /></button>}
           <button type="submit" className="header-search-submit" aria-label="Search"><Search size={18} /></button>
         </form>
-        <div className="header-actions"><button className={`header-icon wishlist-link${savedOnly ? ' active' : ''}`} type="button" aria-label={`Wishlist, ${wishlist.length} saved`} aria-pressed={savedOnly} onClick={() => { if (!customer) { setAuthMode('login'); setAccountOpen(true); return; } setSavedOnly(true); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}><Heart size={18} fill={wishlist.length ? 'currentColor' : 'none'} />{wishlist.length > 0 && <span className="count-badge">{wishlist.length}</span>}</button><button className="account-link" onClick={() => setAccountOpen(true)}>{customer ? 'My account' : 'Account'}</button><button className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
+        <div className="header-actions"><button className="header-icon chat-link" type="button" aria-label="Ask Ahuza" onClick={() => window.dispatchEvent(new Event('ahuza:toggle-support'))}><MessageCircle size={18} /><span className="chat-label">Ask Ahuza</span></button><button className={`header-icon wishlist-link${savedOnly ? ' active' : ''}`} type="button" aria-label={`Wishlist, ${wishlist.length} saved`} aria-pressed={savedOnly} onClick={() => { if (!customer) { setAuthMode('login'); setAccountOpen(true); return; } setSavedOnly(true); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}><Heart size={18} fill={wishlist.length ? 'currentColor' : 'none'} />{wishlist.length > 0 && <span className="count-badge">{wishlist.length}</span>}</button><button className="account-link" onClick={() => setAccountOpen(true)}>{customer ? 'My account' : 'Account'}</button><button className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
       </header>
       {mobileMenuOpen && <div className="menu-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setMobileMenuOpen(false); }}>
         <aside className="menu-drawer" id="collection-drawer" role="dialog" aria-modal="true" aria-labelledby="menu-title">
@@ -616,44 +663,38 @@ export default function App() {
           </div>}
           <div className="menu-section menu-links">
             <button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}>New Arrivals</button>
-            <a href="#about" onClick={() => setMobileMenuOpen(false)}>About AHUZA</a>
+            <a href="#account-orders" onClick={() => setMobileMenuOpen(false)}>My account &amp; orders</a>
             <a href="#contact" onClick={() => setMobileMenuOpen(false)}>Contact</a>
           </div>
         </aside>
       </div>}
       <nav className="category-strip" aria-label="Shop categories"><button type="button" className={selectedCategory === 'All' && !catalogOpen ? 'active' : ''} onClick={() => { setSelectedCategory('All'); setCatalogOpen(true); }}>Shop all</button>{categories.slice(1).map((category) => <button key={category} type="button" className={selectedCategory === category && catalogOpen ? 'active' : ''} onClick={() => { setSelectedCategory(category); setCatalogOpen(true); }}>{category}</button>)}<button type="button" onClick={() => { setSortOrder('newest'); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>New arrivals</button></nav>
 
-      <section className="hero" id="home">
-        <img className="hero-image" src={storeContent.heroImageUrl} alt="AHUZA's featured collection" fetchPriority="high" />
-        <div className="hero-shade" />
-        <div className="hero-copy">
-          <p className="eyebrow">{storeContent.heroEyebrow}</p>
-          <h1>{storeContent.heroTitle}</h1>
-          <p>{storeContent.heroDescription}</p>
-          <button className="light-link" type="button" onClick={() => { setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>Shop the collection <ArrowRight size={16} /></button>
-        </div>
-        <span className="hero-index">AHUZA / 01</span>
-        <a className="scroll-cue" href="#shop" aria-label="Scroll to collection"><ArrowDown size={17} /></a>
-      </section>
+      <HeroCarousel slides={bannerSlides} />
 
       <section className="promo-tiles" aria-label="Featured">
         <button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}><span>Just in</span><strong>New arrivals</strong><em>Shop now <ArrowRight size={14} /></em></button>
         <button type="button" onClick={() => openCollection('All', 'All')}><span>The full edit</span><strong>Shop all women’s wear</strong><em>Browse <ArrowRight size={14} /></em></button>
-        <a href="#about"><span>Our story</span><strong>Where Fashion Meets Passion</strong><em>Discover AHUZA <ArrowRight size={14} /></em></a>
+        <a href="#account-orders"><span>Your AHUZA</span><strong>My account &amp; orders</strong><em>View <ArrowRight size={14} /></em></a>
       </section>
 
-      <section className="category-feature section-wrap" aria-labelledby="category-title">
-        <div className="section-heading"><div><p className="eyebrow dark-eyebrow">Curated for your wardrobe</p><h2 id="category-title">Find your everyday edit.</h2></div><span className="section-note">Real pieces from the AHUZA collection</span></div>
-        <div className="category-cards">{categories.slice(1, 4).map((category, index) => {
-          const product = products.find((entry) => entry.category === category);
-          return <button type="button" className="category-card" key={category} onClick={() => { setSelectedCategory(category); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>
-            {product && <img src={galleryImages(product)[0]?.url || product.imageUrl} alt="" loading="lazy" />}
-            <span><small>0{index + 1}</small><strong>{category}</strong><ChevronDown size={16} /></span>
-          </button>;
-        })}</div>
-      </section>
+      <ProductRail id="shop-by-category" className="circle-rail" sideArrows eyebrow="Shop by category" title="Find your everyday edit." linkLabel="Shop all" onLink={() => openCollection('All', 'All')}>
+        {circleItems.map((item) => <button type="button" className="category-circle" key={item.label} onClick={() => openNavItem(item.label)}>
+          <span className="circle-img"><img src={item.image} alt="" loading="lazy" /></span>
+          <span className="circle-label">{item.label}</span>
+        </button>)}
+      </ProductRail>
 
-      <section className={`collection section-wrap${catalogOpen ? ' catalog-view' : ''}`} id="shop">
+      {!catalogOpen && <>
+        <ProductRail id="new-arrivals" eyebrow="Just in" title="New arrivals" linkLabel="Shop all" onLink={() => { setSortOrder('newest'); openCollection('All', 'All'); }} style={imageSettingsVars(imageSettings) as CSSProperties}>
+          {newArrivals.map((product, index) => renderProductCard(product, index))}
+        </ProductRail>
+        {readyToShip.length > 0 && <ProductRail id="ready-to-ship" eyebrow="In stock now" title="Ready to ship" linkLabel="View collection" onLink={() => { setInStockOnly(true); openCollection('All', 'All'); }} style={imageSettingsVars(imageSettings) as CSSProperties}>
+          {readyToShip.map((product, index) => renderProductCard(product, index))}
+        </ProductRail>}
+      </>}
+
+      <section className={`collection section-wrap${catalogOpen ? ' catalog-view' : ' is-home-anchor'}`} id="shop">
         <div className="section-heading catalog-heading">
           <div><p className="eyebrow dark-eyebrow">{catalogOpen ? 'Shop AHUZA' : 'Just in'}</p><h2>{catalogOpen ? (searchTerm ? `Results for “${searchTerm}”` : selectedCategory === 'All' ? 'The complete collection.' : selectedCategory) : 'New arrivals'}</h2></div>
           {!catalogOpen && <button className="text-link" type="button" onClick={() => setCatalogOpen(true)}>Shop all <ArrowUpRight size={15} /></button>}
@@ -674,38 +715,15 @@ export default function App() {
         {catalogOpen && matchingProducts.length > visibleCount && <div className="load-more"><button className="dark-button" type="button" onClick={() => setVisibleCount((count) => count + 12)}>Load more ({matchingProducts.length - visibleCount} remaining)</button></div>}
       </section>
 
-      <section className="story" id="about">
-        <div className="story-image"><img src={storeContent.storyImageUrl} alt="A considered wardrobe made to last" loading="lazy" /></div>
-        <div className="story-copy">
-          <p className="eyebrow dark-eyebrow">About AHUZA</p>
-          <h2>{storeContent.storyHeading}</h2>
-          <p>{storeContent.storyBody}</p>
-          <p>AHUZA creates elevated everyday essentials for women and modern wardrobes—pieces designed to move fluidly from work to weekends, with comfort, confidence, and silhouette-driven ease at the centre of every collection.</p>
-          <p className="brand-tagline">Where Fashion Meets Passion.</p>
-          <a className="text-link" href="#why-ahuza">Why AHUZA <ArrowUpRight size={15} /></a>
-        </div>
-      </section>
-
-      <section className="why-ahuza section-wrap" id="why-ahuza">
-        <div className="section-heading">
-          <div><p className="eyebrow dark-eyebrow">Why AHUZA</p><h2>Designed for real life.</h2></div>
-        </div>
-        <div className="why-grid">
-          <article className="why-card">
-            <span>01</span>
-            <h3>Modern essentials</h3>
-            <p>Refined silhouettes, relaxed comfort, and premium textures that work across every moment of the day.</p>
-          </article>
-          <article className="why-card">
-            <span>02</span>
-            <h3>Thoughtful quality</h3>
-            <p>Each piece is selected and built for durability, softness, and a polished look that feels elevated without being loud.</p>
-          </article>
-          <article className="why-card">
-            <span>03</span>
-            <h3>Confidence first</h3>
-            <p>We design for ease, body confidence, and effortless styling—so every outfit helps you feel your best.</p>
-          </article>
+      <section className="account-orders section-wrap" id="account-orders" aria-labelledby="account-orders-title">
+        <div className="section-heading"><div><p className="eyebrow dark-eyebrow">Your AHUZA</p><h2 id="account-orders-title">My account &amp; orders</h2></div></div>
+        <div className="account-orders-grid">
+          <button type="button" className="account-order-card" onClick={() => { setAuthMode('login'); setAccountOpen(true); }}>
+            <User size={26} /><strong>My account</strong><span>{customer ? `Signed in as ${customer.email}` : 'Sign in or create an account to manage your details and wishlist.'}</span><em>{customer ? 'Open account' : 'Sign in'} <ArrowRight size={14} /></em>
+          </button>
+          <button type="button" className="account-order-card" onClick={() => { setAuthMode('login'); setAccountOpen(true); }}>
+            <Package size={26} /><strong>Orders</strong><span>{customer ? 'Track orders, download invoices and leave reviews.' : 'Sign in to track your orders and download invoices.'}</span><em>{customer ? 'View orders' : 'Sign in to view'} <ArrowRight size={14} /></em>
+          </button>
         </div>
       </section>
 
@@ -743,7 +761,7 @@ export default function App() {
         <div className="footer-columns">
           <div><h3>Shop</h3><ul><li><button type="button" onClick={() => openCollection('All', 'All')}>All women’s wear</button></li>{categories.slice(1).map((category) => <li key={category}><button type="button" onClick={() => openCollection(category, 'All')}>{category}</button></li>)}<li><button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}>New arrivals</button></li></ul></div>
           <div><h3>Customer service</h3><ul><li><a href="#contact">Contact us</a></li><li><a href="mailto:Info@ahuzawear.com">Info@ahuzawear.com</a></li><li><a href="tel:+919550582277">+91 95505 82277</a></li><li><button type="button" onClick={() => setAccountOpen(true)}>My account &amp; orders</button></li></ul></div>
-          <div><h3>About AHUZA</h3><ul><li><a href="#about">Our story</a></li><li><a href="#why-ahuza">Why AHUZA</a></li><li><a href="#journal">Email updates</a></li></ul></div>
+          <div><h3>My AHUZA</h3><ul><li><a href="#account-orders">My account</a></li><li><a href="#account-orders">Orders</a></li><li><a href="#journal">Email updates</a></li></ul></div>
           <div><h3>AHUZA</h3><p className="footer-tagline">Where Fashion Meets Passion.</p><p className="footer-loc">Telangana, India</p></div>
         </div>
         <div className="footer-bottom"><a className="wordmark" href="#home">AHUZA</a><span>© AHUZA Apparel 2026</span><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
@@ -763,8 +781,11 @@ export default function App() {
             {paymentOrder.paymentMethod === 'upi' && <small>No gateway or bank verification API is connected. A UPI callback, screenshot, receipt or customer claim is never treated as proof. An authorized AHUZA owner must match the settled transaction in the bank account before confirming the order. The payment link expires after 20 minutes.</small>}
           </section> : cartLines.length === 0 ? <div className="empty-bag"><ShoppingBag size={25} /><p>Your bag is taking a quiet moment.</p><button className="dark-button" onClick={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>Explore the collection</button></div> : <>
             <div className="bag-lines">{cartLines.map(({ product, quantity, size }) => <div className="bag-line" key={`${product.id}-${size || 'standard'}`}><img src={mainImage(product)?.variants[0]?.url || product.imageUrl} alt="" /><div className="bag-line-copy"><h3>{product.name}</h3><p>{formatPrice(product.price)}{size ? ` · Size ${size}` : ''}</p><div className="quantity-control"><button type="button" aria-label={`Remove one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, -1)}><Minus size={13} /></button><span>{quantity}</span><button type="button" aria-label={`Add one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, 1)} disabled={cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0) >= Math.min(product.stock, 10)}><Plus size={13} /></button></div></div><span className="line-total">{formatPrice(product.price * quantity)}</span></div>)}</div>
-            <div className="bag-footer"><div className="subtotal"><span>Subtotal</span><strong>{formatPrice(cartTotal)}</strong></div><div className="subtotal"><span>Shipping</span><strong>{estimatedShipping ? formatPrice(estimatedShipping) : 'Complimentary'}</strong></div><div className="subtotal"><span>Total</span><strong>{formatPrice(cartTotal + estimatedShipping)}</strong></div><p>₹100 shipping below ₹2,500. Complimentary shipping at or above ₹2,500. No discounts or additional taxes are currently applied.</p><form className="checkout-details" onSubmit={(event) => { event.preventDefault(); void checkout(new FormData(event.currentTarget)); }}>
-              <p className="address-title">Delivery address · India</p><label>Full name<input name="name" autoComplete="name" maxLength={100} required /></label><label>Address line 1<input name="addressLine1" autoComplete="address-line1" maxLength={180} required /></label><label>Address line 2 <span>Optional</span><input name="addressLine2" autoComplete="address-line2" maxLength={180} /></label><div className="address-row"><label>City<input name="city" autoComplete="address-level2" maxLength={80} required /></label><label>State<input name="state" autoComplete="address-level1" maxLength={80} required /></label></div><div className="address-row"><label>PIN code<input name="postalCode" inputMode="numeric" autoComplete="postal-code" pattern="[1-9][0-9]{5}" maxLength={6} required /></label><label>Phone<input name="phone" type="tel" inputMode="tel" autoComplete="tel" pattern="\+?[0-9][0-9\s-]{8,16}" maxLength={18} required /></label></div>
+            <div className="bag-footer"><div className="subtotal"><span>Subtotal</span><strong>{formatPrice(cartTotal)}</strong></div><div className="subtotal"><span>Shipping</span><strong>{estimatedShipping ? formatPrice(estimatedShipping) : 'Complimentary'}</strong></div><div className="subtotal"><span>Total</span><strong>{formatPrice(cartTotal + estimatedShipping)}</strong></div><p>₹100 shipping below ₹2,500. Complimentary shipping at or above ₹2,500. No discounts or additional taxes are currently applied.</p><form className="checkout-details" onSubmit={(event) => { event.preventDefault(); void checkout(); }}>
+              <p className="address-title">Billing address · India</p>
+              <AddressFields section="billing" value={billingAddress} onChange={setBillingAddress} />
+              <div className="address-title-row"><p className="address-title">Delivery address · India</p><label className="same-address-check"><input type="checkbox" checked={sameAsBilling} onChange={(event) => setSameAsBilling(event.target.checked)} /> (same as billing address)</label></div>
+              <AddressFields section="shipping" value={sameAsBilling ? billingAddress : deliveryAddress} onChange={setDeliveryAddress} readOnly={sameAsBilling} />
               <fieldset className="payment-method-options"><legend>Payment method</legend><label><input type="radio" name="paymentMethod" value="upi" checked={paymentMethod === 'upi'} onChange={() => setPaymentMethod('upi')} disabled={!paymentConfiguration?.configured} /> Pay via UPI</label><label><input type="radio" name="paymentMethod" value="cod" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} /> Cash on delivery</label></fieldset>
               {paymentMethod === 'upi' && !paymentConfiguration?.configured && <p className="payment-config-warning" role="status">{paymentConfiguration ? 'Direct UPI is unavailable until the server has a valid UPI_VPA. Cash on delivery is still available.' : 'Checking UPI availability… Cash on delivery is available.'}</p>}
               {paymentMethod === 'upi' && paymentConfiguration?.configured && <p className="payment-config-warning">UPI opens directly in your app. Payment remains pending until AHUZA manually verifies the bank settlement.</p>}

@@ -84,6 +84,7 @@ export type Order = {
   id: string;
   userId: string;
   shippingAddress: ShippingAddress;
+  billingAddress?: ShippingAddress;
   items: { productId: string; name: string; sku: string; quantity: number; unitPrice: number; size?: string }[];
   amount: number;
   currency: string;
@@ -206,6 +207,7 @@ export type Database = {
   paymentReceiptReviews?: PaymentReceiptReview[];
   integrationWebhooks?: { googleAds?: string; zapier?: string };
   sitePublished?: boolean;
+  seededProductIds?: string[];
   content: StorefrontContent;
   imageSettings?: ImageSettings;
   imageLibrary?: ProductImage[];
@@ -221,13 +223,27 @@ const seedProducts: Product[] = [
   { id: 'everyday-trouser', name: 'Everyday Trouser', description: 'Tencel blend · Moss', price: 3290, sku: 'AH-ET-002', stock: 18, category: 'Bottoms', imageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=82', active: true, ghostMannequin: { imageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=82', tags: ['tencel', 'straight leg', 'mid rise'], background: '#e6e3da' } },
   { id: 'weekend-knit', name: 'Weekend Knit', description: 'Lightweight linen · Natural', price: 2890, sku: 'AH-WK-003', stock: 13, category: 'Knitwear', imageUrl: 'https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=900&q=82', active: true, ghostMannequin: { imageUrl: 'https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=900&q=82', tags: ['linen blend', 'relaxed fit'], background: '#efede6' } },
   { id: 'easy-layer', name: 'Easy Layer', description: 'Recycled cotton · Terracotta', price: 3790, sku: 'AH-EL-004', stock: 9, category: 'Layers', imageUrl: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=900&q=82', active: true, ghostMannequin: { imageUrl: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=900&q=82', tags: ['recycled cotton', 'lightweight', 'layering'], background: '#e9e5dc' } },
+  { id: 'floral-wrap-dress', name: 'Floral Wrap Dress', description: 'Viscose crepe · Ivory bloom', price: 3990, sku: 'AH-FWD-005', stock: 15, category: 'Dresses', imageUrl: 'https://images.unsplash.com/photo-1496747611176-843222e1e57c?auto=format&fit=crop&w=900&q=82', active: true, sizes: ['XS', 'S', 'M', 'L', 'XL'], ghostMannequin: { imageUrl: 'https://images.unsplash.com/photo-1496747611176-843222e1e57c?auto=format&fit=crop&w=900&q=82', tags: ['viscose', 'wrap dress', 'floral print'], background: '#eeece5' } },
+  { id: 'striped-wide-leg-trouser', name: 'Striped Wide-Leg Trouser', description: 'Crepe blend · Noir stripe', price: 3490, sku: 'AH-SWT-006', stock: 15, category: 'Bottoms', imageUrl: 'https://images.unsplash.com/photo-1509631179647-0177331693ae?auto=format&fit=crop&w=900&q=82', active: true, sizes: ['XS', 'S', 'M', 'L', 'XL'], ghostMannequin: { imageUrl: 'https://images.unsplash.com/photo-1509631179647-0177331693ae?auto=format&fit=crop&w=900&q=82', tags: ['wide leg', 'high rise', 'striped'], background: '#e6e3da' } },
+  { id: 'sunshine-co-ord-set', name: 'Sunshine Co-ord Set', description: 'Soft fleece · Marigold', price: 4290, sku: 'AH-SCS-007', stock: 15, category: 'Sets', imageUrl: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=900&q=82', active: true, sizes: ['XS', 'S', 'M', 'L', 'XL'], ghostMannequin: { imageUrl: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=900&q=82', tags: ['co-ord set', 'fleece', 'relaxed fit'], background: '#efede6' } },
+  { id: 'off-shoulder-midi', name: 'Off-Shoulder Midi', description: 'Stretch jersey · Plum', price: 3790, sku: 'AH-OSM-008', stock: 15, category: 'Dresses', imageUrl: 'https://images.unsplash.com/photo-1566174053879-31528523f8ae?auto=format&fit=crop&w=900&q=82', active: true, sizes: ['XS', 'S', 'M', 'L', 'XL'], ghostMannequin: { imageUrl: 'https://images.unsplash.com/photo-1566174053879-31528523f8ae?auto=format&fit=crop&w=900&q=82', tags: ['midi', 'off shoulder', 'stretch'], background: '#e9e5dc' } },
+  { id: 'poppy-flare-dress', name: 'Poppy Flare Dress', description: 'Cotton poplin · Poppy red', price: 3890, sku: 'AH-PFD-009', stock: 15, category: 'Dresses', imageUrl: 'https://images.unsplash.com/photo-1572804013309-59a88b7e92f1?auto=format&fit=crop&w=900&q=82', active: true, sizes: ['XS', 'S', 'M', 'L', 'XL'], ghostMannequin: { imageUrl: 'https://images.unsplash.com/photo-1572804013309-59a88b7e92f1?auto=format&fit=crop&w=900&q=82', tags: ['flare', 'belted', 'floral print'], background: '#eeece5' } },
+  { id: 'ruffle-romance-blouse', name: 'Ruffle Romance Blouse', description: 'Chiffon · Blush bloom', price: 2790, sku: 'AH-RRB-010', stock: 15, category: 'Tops', imageUrl: 'https://images.unsplash.com/photo-1581044777550-4cfa60707c03?auto=format&fit=crop&w=900&q=82', active: true, sizes: ['XS', 'S', 'M', 'L', 'XL'], ghostMannequin: { imageUrl: 'https://images.unsplash.com/photo-1581044777550-4cfa60707c03?auto=format&fit=crop&w=900&q=82', tags: ['chiffon', 'ruffle', 'off shoulder'], background: '#efede6' } },
+  { id: 'pleated-mini-skirt', name: 'Pleated Mini Skirt', description: 'Twill · Black', price: 2190, sku: 'AH-PMS-011', stock: 15, category: 'Bottoms', imageUrl: 'https://images.unsplash.com/photo-1583496661160-fb5886a0aaaa?auto=format&fit=crop&w=900&q=82', active: true, sizes: ['XS', 'S', 'M', 'L', 'XL'], ghostMannequin: { imageUrl: 'https://images.unsplash.com/photo-1583496661160-fb5886a0aaaa?auto=format&fit=crop&w=900&q=82', tags: ['pleated', 'mini', 'twill'], background: '#e6e3da' } },
+  { id: 'blush-jogger-trouser', name: 'Blush Jogger Trouser', description: 'Satin blend · Blush', price: 3190, sku: 'AH-BJT-012', stock: 15, category: 'Bottoms', imageUrl: 'https://images.unsplash.com/photo-1594633312681-425c7b97ccd1?auto=format&fit=crop&w=900&q=82', active: true, sizes: ['XS', 'S', 'M', 'L', 'XL'], ghostMannequin: { imageUrl: 'https://images.unsplash.com/photo-1594633312681-425c7b97ccd1?auto=format&fit=crop&w=900&q=82', tags: ['jogger', 'satin', 'cuffed hem'], background: '#e9e5dc' } },
 ];
+
+// Adds seed products introduced after a database was created, once, so owner deletions stay deleted.
+function newSeedProducts(existing: Product[], seeded?: string[]): Product[] {
+  const known = new Set([...(seeded ?? []), ...existing.map((product) => product.id)]);
+  return structuredClone(seedProducts.filter((product) => !known.has(product.id)));
+}
 
 let writeQueue: Promise<void> = Promise.resolve();
 let loaded: Database | undefined;
 
 function emptyDatabase(): Database {
-  return { products: structuredClone(seedProducts), customers: [], orders: [], events: [], supportTickets: [], paymentReceiptReviews: [], sitePublished: true, content: structuredClone(defaultStorefrontContent), imageSettings: structuredClone(defaultImageSettings) };
+  return { products: structuredClone(seedProducts), seededProductIds: seedProducts.map((product) => product.id), customers: [], orders: [], events: [], supportTickets: [], paymentReceiptReviews: [], sitePublished: true, content: structuredClone(defaultStorefrontContent), imageSettings: structuredClone(defaultImageSettings) };
 }
 
 export function mergeImageSettings(value: unknown): ImageSettings {
@@ -248,7 +264,8 @@ async function loadDatabase(): Promise<Database> {
     const raw = await readFile(databasePath, 'utf8');
     const parsed = JSON.parse(raw) as Partial<Database>;
     loaded = {
-      products: Array.isArray(parsed.products) ? parsed.products : structuredClone(seedProducts),
+      products: Array.isArray(parsed.products) ? [...parsed.products, ...newSeedProducts(parsed.products, parsed.seededProductIds)] : structuredClone(seedProducts),
+      seededProductIds: seedProducts.map((product) => product.id),
       customers: Array.isArray(parsed.customers) ? parsed.customers : [],
       orders: Array.isArray(parsed.orders) ? parsed.orders : [],
       events: Array.isArray(parsed.events) ? parsed.events : [],

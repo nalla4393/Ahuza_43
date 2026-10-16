@@ -1,5 +1,5 @@
 .customer-support{--support-ink:#243129;--support-green:#3a493c;--support-paper:#fbfaf6;position:fixed;right:24px;bottom:24px;z-index:19;font-family:'DM Sans',sans-serif;color:var(--support-ink)}
-.customer-support-launcher{display:grid;place-items:center;width:54px;height:54px;margin-left:auto;border:0;border-radius:50%;background:var(--support-green);color:#fff;box-shadow:0 8px 24px #17201838;cursor:pointer;transition:transform .2s,background-color .2s}
+.customer-support-launcher{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-width:54px;height:48px;margin-left:auto;padding:0 16px;border:0;border-radius:999px;background:var(--support-green);color:#fff;box-shadow:0 8px 24px #17201838;font:600 13px 'DM Sans',sans-serif;white-space:nowrap;cursor:pointer;transition:transform .2s,background-color .2s}
 .customer-support-launcher:hover{transform:translateY(-2px);background:#526451}
 .customer-support-launcher:focus-visible,.customer-support button:focus-visible,.customer-support input:focus-visible{outline:2px solid #bb765d;outline-offset:3px}
 .customer-support-panel{position:absolute;right:0;bottom:68px;display:flex;flex-direction:column;width:min(360px,calc(100vw - 32px));height:min(500px,calc(100svh - 112px));overflow:hidden;border:1px solid #d9d8cf;background:var(--support-paper);box-shadow:0 14px 44px #1720182e;animation:support-enter .2s ease-out}
@@ -20,6 +20,6 @@
 .customer-support-compose button{width:40px;height:40px;background:var(--support-green);color:#fff}
 @keyframes support-enter{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 @keyframes support-spin{to{transform:rotate(360deg)}}
-@media(max-width:600px){.customer-support{right:14px;bottom:14px}.customer-support-panel{width:calc(100vw - 28px);height:min(500px,calc(100svh - 96px));bottom:66px}.customer-support-launcher{width:50px;height:50px}}
+@media(max-width:600px){.customer-support{right:14px;bottom:14px}.customer-support-panel{width:calc(100vw - 28px);height:min(500px,calc(100svh - 96px));bottom:60px}.customer-support-launcher{height:46px;padding:0 14px}}
 @media(max-width:600px){.support-flow-controls{max-height:165px}.support-navigation{justify-content:space-between}}
 @media(prefers-reduced-motion:reduce){.customer-support-launcher{transition:none}.customer-support-panel{animation:none}.support-spin{animation-duration:1.5s}}
