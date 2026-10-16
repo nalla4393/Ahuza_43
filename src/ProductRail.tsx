@@ -10,10 +10,9 @@ type Props = {
   children: ReactNode;
   style?: CSSProperties;
   className?: string;
-  sideArrows?: boolean;
 };
 
-export default function ProductRail({ id, eyebrow, title, linkLabel, onLink, children, style, className, sideArrows }: Props) {
+export default function ProductRail({ id, eyebrow, title, linkLabel, onLink, children, style, className }: Props) {
   const track = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ start: true, end: false });
 
@@ -42,16 +41,12 @@ export default function ProductRail({ id, eyebrow, title, linkLabel, onLink, chi
         <div><p className="eyebrow dark-eyebrow">{eyebrow}</p><h2>{title}</h2></div>
         <div className="rail-actions">
           <button className="text-link" type="button" onClick={onLink}>{linkLabel} <ArrowUpRight size={15} /></button>
-          {!sideArrows && <>
-            <button type="button" className="rail-arrow" aria-label={`Scroll ${title} left`} disabled={edges.start} onClick={() => scrollBy(-1)}><ChevronLeft size={20} /></button>
-            <button type="button" className="rail-arrow" aria-label={`Scroll ${title} right`} disabled={edges.end} onClick={() => scrollBy(1)}><ChevronRight size={20} /></button>
-          </>}
         </div>
       </div>
       <div className="rail-frame">
-        {sideArrows && <button type="button" className="rail-arrow rail-side rail-side-left" aria-label={`Scroll ${title} left`} disabled={edges.start} onClick={() => scrollBy(-1)}><ChevronLeft size={22} /></button>}
+        <button type="button" className="rail-arrow rail-side rail-side-left" aria-label={`Scroll ${title} left`} disabled={edges.start} onClick={() => scrollBy(-1)}><ChevronLeft size={22} /></button>
         <div className="rail-track" ref={track} style={style} tabIndex={0} role="group" aria-roledescription="carousel">{children}</div>
-        {sideArrows && <button type="button" className="rail-arrow rail-side rail-side-right" aria-label={`Scroll ${title} right`} disabled={edges.end} onClick={() => scrollBy(1)}><ChevronRight size={22} /></button>}
+        <button type="button" className="rail-arrow rail-side rail-side-right" aria-label={`Scroll ${title} right`} disabled={edges.end} onClick={() => scrollBy(1)}><ChevronRight size={22} /></button>
       </div>
     </section>
   );

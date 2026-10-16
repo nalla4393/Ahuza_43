@@ -4,7 +4,7 @@ import { rateLimit } from 'express-rate-limit';
 import PDFDocument from 'pdfkit';
 import { hashPassword, verifyPassword } from './services/auth.js';
 import { extractPaymentReceipt, generateCustomerEmailBody, generateCustomerSupportReply, generateOwnerAgentPlan, generateSocialPost, isTextAiConfigured, type CustomerEmailKind, type OwnerAgentIntent } from './services/ai.js';
-import { getDatabase, mergeImageSettings, mutateDatabase, type Database, type Order, type PaymentReceiptReview, type Product, type ShippingAddress, type StorefrontContent, type SupportTicket } from './services/database.js';
+import { bannerImageKeys, circleImageKeys, getDatabase, mergeImageSettings, mutateDatabase, type Database, type Order, type PaymentReceiptReview, type Product, type ShippingAddress, type StorefrontContent, type SupportTicket } from './services/database.js';
 import { sendRestockAlerts } from './services/stock-alerts.js';
 import { deleteProductImageFiles, detectImageType, maxUploadBytes, sanitizeImageSettings, saveProductImage } from './services/images.js';
 import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
@@ -730,14 +730,25 @@ api.put('/owner/image-settings', requireOwner, ownerLimit, async (request, respo
 
 api.patch('/owner/content', requireOwner, ownerLimit, async (request, response) => {
   const patch = request.body;
-  const allowed: (keyof StorefrontContent)[] = ['announcement', 'heroEyebrow', 'heroTitle', 'heroDescription', 'heroImageUrl', 'storyHeading', 'storyBody', 'storyImageUrl'];
+  const allowed: (keyof StorefrontContent)[] = ['announcement', 'heroEyebrow', 'heroTitle', 'heroDescription', 'heroImageUrl', 'storyHeading', 'storyBody', 'storyImageUrl', 'circleImages', 'bannerImages'];
   if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).length === 0) { response.status(400).json({ error: 'Provide at least one storefront field.' }); return; }
+  const imageMaps: Record<string, string[]> = { circleImages: circleImageKeys, bannerImages: bannerImageKeys };
+  const cleaned: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(patch)) {
+    if (key in imageMaps) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) { response.status(400).json({ error: `Invalid value for ${key}.` }); return; }
+      const entries = Object.entries(value as Record<string, unknown>);
+      // An empty string clears an override so the storefront falls back to its default image.
+      if (entries.some(([name, url]) => !imageMaps[key].includes(name) || (url !== '' && !httpsUrl(url)))) { response.status(400).json({ error: `Invalid image in ${key}.` }); return; }
+      cleaned[key] = Object.fromEntries(entries.filter(([, url]) => url !== ''));
+      continue;
+    }
     if (!allowed.includes(key as keyof StorefrontContent)) { response.status(400).json({ error: `Unknown storefront field: ${key}.` }); return; }
     if (key.endsWith('ImageUrl') ? !httpsUrl(value) : !stringValue(value, key === 'heroTitle' ? 120 : 500)) { response.status(400).json({ error: `Invalid value for ${key}.` }); return; }
+    cleaned[key] = value;
   }
   const content = await mutateDatabase((database) => {
-    database.content = { ...database.content, ...patch };
+    database.content = { ...database.content, ...cleaned };
     return database.content;
   });
   response.json({ content });

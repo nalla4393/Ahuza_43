@@ -37,7 +37,7 @@ const formatPrice = (price: number) => new Intl.NumberFormat('en-IN', {
 
 type Customer = { id: string; email: string };
 type CustomerOrder = { id: string; amount: number; currency: string; status: string; paymentMethod?: 'upi' | 'cod'; paymentStatus?: string; paymentVerifiedAt?: string; hasPendingReceiptReview?: boolean; createdAt: string; trackingNumber?: string; trackingUrl?: string; review?: { rating: number; comment?: string; createdAt: string }; items: { name: string; quantity: number; size?: string }[] };
-type StorefrontContent = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string };
+type StorefrontContent = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string; circleImages?: Record<string, string>; bannerImages?: Record<string, string> };
 type CartLine = { productId: string; quantity: number; size?: string };
 type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; paymentReference?: string; upiIntent?: string; merchantVpa?: string; merchantName?: string; amount: number; currency: string; expiresAt?: string; status?: string };
 type PaymentConfiguration = { configured: boolean; upiVpa: string | null; merchantName: string; automaticVerification: false };
@@ -158,14 +158,14 @@ export default function App() {
   const circleFallbacks = ['photo-1515886657613-9f3515b0c78f', 'photo-1483985988355-763728e1935b', 'photo-1469334031218-e382a71b716b', 'photo-1539109136881-3be0616acf4b'];
   const circleItems = navItems.map((label, position) => {
     const product = products.find((entry) => entry.category.toLowerCase() === label.toLowerCase());
-    const image = product ? (galleryImages(product)[0]?.url || product.imageUrl) : `https://images.unsplash.com/${circleFallbacks[position % circleFallbacks.length]}?auto=format&fit=crop&w=400&h=400&q=70`;
+    const image = storeContent.circleImages?.[label] || (product ? (galleryImages(product)[0]?.url || product.imageUrl) : `https://images.unsplash.com/${circleFallbacks[position % circleFallbacks.length]}?auto=format&fit=crop&w=400&h=400&q=70`);
     return { label, image };
   });
   const bannerSlides: BannerSlide[] = [
     { id: 'collection', eyebrow: storeContent.heroEyebrow, title: storeContent.heroTitle, description: storeContent.heroDescription, cta: 'Shop the collection', desktopImage: storeContent.heroImageUrl, onSelect: () => openCollection('All', 'All') },
-    { id: 'new', eyebrow: 'Just landed', title: 'New Arrivals', description: 'Fresh silhouettes for every occasion, added this week.', cta: 'Shop new in', desktopImage: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=2200&q=80', mobileImage: 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=900&h=1100&q=80', onSelect: () => openNavItem('New Arrivals') },
-    { id: 'sale', eyebrow: 'Season sale', title: 'Up to 50% off', description: 'Your favourites at limited-time prices. While stocks last.', cta: 'Shop the sale', desktopImage: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=2200&q=80', mobileImage: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&h=1100&q=80', onSelect: () => openNavItem('Sale') },
-    { id: 'festive', eyebrow: 'Festive edit', title: 'Kurta Sets & Lehengas', description: 'Celebrate in handcrafted ethnic wear.', cta: 'Explore the edit', desktopImage: 'https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=2200&q=80', mobileImage: 'https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=900&h=1100&q=80', onSelect: () => openNavItem('Kurta Sets') },
+    { id: 'new', eyebrow: 'Just landed', title: 'New Arrivals', description: 'Fresh silhouettes for every occasion, added this week.', cta: 'Shop new in', desktopImage: storeContent.bannerImages?.new || 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=2200&q=80', mobileImage: storeContent.bannerImages?.new || 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=900&h=1100&q=80', onSelect: () => openNavItem('New Arrivals') },
+    { id: 'sale', eyebrow: 'Season sale', title: 'Up to 50% off', description: 'Your favourites at limited-time prices. While stocks last.', cta: 'Shop the sale', desktopImage: storeContent.bannerImages?.sale || 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=2200&q=80', mobileImage: storeContent.bannerImages?.sale || 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&h=1100&q=80', onSelect: () => openNavItem('Sale') },
+    { id: 'festive', eyebrow: 'Festive edit', title: 'Kurta Sets & Lehengas', description: 'Celebrate in handcrafted ethnic wear.', cta: 'Explore the edit', desktopImage: storeContent.bannerImages?.festive || 'https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=2200&q=80', mobileImage: storeContent.bannerImages?.festive || 'https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=900&h=1100&q=80', onSelect: () => openNavItem('Kurta Sets') },
   ];
   const shownProducts = matchingProducts.slice(0, visibleCount);
   const newArrivals = products.slice().sort((a, b) => b.id.localeCompare(a.id)).slice(0, 12);
@@ -678,7 +678,7 @@ export default function App() {
         <a href="#account-orders"><span>Your AHUZA</span><strong>My account &amp; orders</strong><em>View <ArrowRight size={14} /></em></a>
       </section>
 
-      <ProductRail id="shop-by-category" className="circle-rail" sideArrows eyebrow="Shop by category" title="Find your everyday edit." linkLabel="Shop all" onLink={() => openCollection('All', 'All')}>
+      <ProductRail id="shop-by-category" className="circle-rail" eyebrow="Shop by category" title="Find your everyday edit." linkLabel="Shop all" onLink={() => openCollection('All', 'All')}>
         {circleItems.map((item) => <button type="button" className="category-circle" key={item.label} onClick={() => openNavItem(item.label)}>
           <span className="circle-img"><img src={item.image} alt="" loading="lazy" /></span>
           <span className="circle-label">{item.label}</span>

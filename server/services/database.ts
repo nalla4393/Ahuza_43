@@ -172,7 +172,12 @@ export type StorefrontContent = {
   storyHeading: string;
   storyBody: string;
   storyImageUrl: string;
+  circleImages: Record<string, string>;
+  bannerImages: Record<string, string>;
 };
+
+export const circleImageKeys = ['Women', 'Men', 'Kurtis', 'Frocks', 'Kurta Sets', 'Lehengas', 'Night Suits', 'Track Suits', 'New Arrivals', 'Bestsellers', 'Sale'];
+export const bannerImageKeys = ['new', 'sale', 'festive'];
 
 export const defaultStorefrontContent: StorefrontContent = {
   announcement: 'A softer kind of everyday. Complimentary shipping over ₹2,500.',
@@ -183,6 +188,8 @@ export const defaultStorefrontContent: StorefrontContent = {
   storyHeading: 'Wear what feels like you.',
   storyBody: 'We make pieces to live in, not just look at. Easy silhouettes, tactile fabrics, and the quiet confidence of getting dressed without overthinking it.',
   storyImageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1200&q=85',
+  circleImages: {},
+  bannerImages: {},
 };
 
 export type AutomationTrigger = 'order_placed' | 'order_delivered' | 'win_back';

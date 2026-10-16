@@ -140,7 +140,6 @@ html,body,body *{font-family:var(--site-font) !important}
 .category-circle:hover .circle-img,.category-circle:focus-visible .circle-img{box-shadow:0 0 0 3px var(--accent);transform:translateY(-3px)}
 .category-circle:hover img{transform:scale(1.08)}
 .circle-label{font-size:13px;font-weight:600;text-align:center;line-height:1.25}
-.circle-rail .rail-track{scrollbar-width:thin;scrollbar-color:#111 #e6e6e6}
 
 /* Account & orders */
 .account-orders-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
@@ -162,8 +161,8 @@ html,body,body *{font-family:var(--site-font) !important}
 
 /* Circle rail: side arrows, no scrollbar */
 .rail-frame{position:relative}
-.circle-rail .rail-track{scrollbar-width:none;padding-left:4px;padding-right:4px}
-.circle-rail .rail-track::-webkit-scrollbar{display:none}
+.product-rail .rail-track{scrollbar-width:none;-ms-overflow-style:none;padding-left:4px;padding-right:4px}
+.product-rail .rail-track::-webkit-scrollbar{display:none;width:0;height:0}
 .rail-side{position:absolute;top:calc(50% - 30px);z-index:2;width:42px;height:42px;margin-top:-21px;box-shadow:0 4px 14px rgb(0 0 0 / 18%)}
 .rail-side-left{left:-14px}.rail-side-right{right:-14px}
 @media(max-width:760px){.rail-side{display:flex;width:34px;height:34px}.rail-side-left{left:-6px}.rail-side-right{right:-6px}}
