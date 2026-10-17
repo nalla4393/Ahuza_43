@@ -227,6 +227,11 @@ html,body,body *{font-family:var(--site-font) !important}
 .account-page-dialog>.eyebrow{margin-bottom:10px}
 .account-page-dialog h2{max-width:none;margin-bottom:24px}
 .customer-profile{display:grid;gap:8px;padding:18px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.customer-account-nav{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 24px}
+.customer-account-nav a{display:inline-flex;align-items:center;min-height:38px;padding:0 14px;border:1px solid var(--line);color:var(--ink);font-size:13px;font-weight:600;text-decoration:none}
+.customer-account-nav a:hover,.customer-account-nav a:focus-visible{border-color:var(--ahuza-chatbot-green);color:var(--ahuza-chatbot-green)}
+.account-page-dialog #profile-section,.account-page-dialog #wishlist-section,.account-page-dialog #order-history-title{scroll-margin-top:24px}
+.footer-columns{grid-template-columns:repeat(3,minmax(0,1fr))}
 .customer-profile h3{margin:0;font-size:13px}
 .customer-profile .account-email{margin:0}
 .account-page-dialog .customer-wishlist,.account-page-dialog .customer-order-history{margin:28px 0}
@@ -236,10 +241,14 @@ html,body,body *{font-family:var(--site-font) !important}
 .account-page-dialog .customer-order>div{gap:8px}
 .account-page-dialog .customer-order-actions{min-width:min(280px,35%)}
 .account-page-dialog .invoice-button{font-size:12px}
+@media(max-width:900px){.footer-columns{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){
+  .footer-columns{grid-template-columns:1fr}
   .account-page-dialog{padding:18px 18px 40px}
   .account-page-back{margin-bottom:26px}
   .account-page-dialog .dialog-close{top:18px;right:18px}
   .account-page-dialog .customer-order{flex-direction:column}
   .account-page-dialog .customer-order-actions{width:100%;min-width:0}
+  .customer-account-nav{gap:7px}
+  .customer-account-nav a{min-height:36px;padding:0 11px}
 }
