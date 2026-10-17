@@ -180,13 +180,13 @@ export const circleImageKeys = ['Women', 'Men', 'Kurtis', 'Frocks', 'Kurta Sets'
 export const bannerImageKeys = ['new', 'sale', 'festive'];
 
 export const defaultStorefrontContent: StorefrontContent = {
-  announcement: 'A softer kind of everyday. Complimentary shipping over ₹2,500.',
+  announcement: 'A softer kind of everyday Complimentary shipping over ₹2,500',
   heroEyebrow: 'The in-between collection · 01/26',
-  heroTitle: 'Room to be yourself.',
-  heroDescription: 'Thoughtful layers for all the ways a day can unfold.',
+  heroTitle: 'Room to be yourself',
+  heroDescription: 'Thoughtful layers for all the ways a day can unfold',
   heroImageUrl: 'https://images.unsplash.com/photo-1539109136881-3be0616acf4b?auto=format&fit=crop&w=2200&q=85',
-  storyHeading: 'Wear what feels like you.',
-  storyBody: 'We make pieces to live in, not just look at. Easy silhouettes, tactile fabrics, and the quiet confidence of getting dressed without overthinking it.',
+  storyHeading: 'Wear what feels like you',
+  storyBody: 'We make pieces to live in, not just look at Easy silhouettes, tactile fabrics, and the quiet confidence of getting dressed without overthinking it',
   storyImageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1200&q=85',
   circleImages: {},
   bannerImages: {},
@@ -224,7 +224,7 @@ export type Database = {
   orderEmailNotifications?: OrderEmailNotification[];
 };
 
-const databasePath = path.resolve(process.env.DATA_FILE || '.data/ahuza-db.json');
+const databasePath = path.resolve(process.env.DATA_FILE || 'data/ahuza-db.json');
 const seedProducts: Product[] = [
   { id: 'soft-form-shirt', name: 'Soft Form Shirt', description: 'Organic cotton · Cloud', price: 2490, sku: 'AH-SFS-001', stock: 24, category: 'Tops', imageUrl: 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=900&q=82', active: true, ghostMannequin: { imageUrl: 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=900&q=82', tags: ['cotton', 'relaxed fit', 'long sleeve'], background: '#eeece5' } },
   { id: 'everyday-trouser', name: 'Everyday Trouser', description: 'Tencel blend · Moss', price: 3290, sku: 'AH-ET-002', stock: 18, category: 'Bottoms', imageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=82', active: true, ghostMannequin: { imageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=82', tags: ['tencel', 'straight leg', 'mid rise'], background: '#e6e3da' } },
@@ -299,7 +299,7 @@ async function loadDatabase(): Promise<Database> {
 
 async function persist(database: Database): Promise<void> {
   await mkdir(path.dirname(databasePath), { recursive: true });
-  const temporaryPath = `${databasePath}.${randomUUID()}.tmp`;
+  const temporaryPath = `${databasePath}${randomUUID()}tmp`;
   await writeFile(temporaryPath, JSON.stringify(database, null, 2), { mode: 0o600 });
   await rename(temporaryPath, databasePath);
 }

@@ -125,7 +125,7 @@ export default function HeroCarousel({ slides }: { slides: BannerSlide[] }) {
               <Countdown endsAt={slide.endsAt} />
               <span className="banner-cta">{slide.cta} <ArrowRight size={16} /></span>
             </div>
-            <button type="button" className="banner-hit" tabIndex={active ? 0 : -1} aria-label={`${slide.title}. ${slide.cta}`} onClick={slide.onSelect} />
+            <button type="button" className="banner-hit" tabIndex={active ? 0 : -1} aria-label={`${slide.title} ${slide.cta}`} onClick={slide.onSelect} />
           </article>
         );
       })}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { ArrowLeft, ArrowRight, ImagePlus, RefreshCw, Replace, Star, Trash2, X } from 'lucide-react';
 import type { ProductImage } from './imageTypes';
+import { removeSentenceFullStops } from './siteCopy';
 
 type QueueItem = { id: string; file: File; preview: string; progress: number; status: 'uploading' | 'error'; error?: string; replaceId?: string };
 type Props = {
@@ -28,12 +29,12 @@ function sendFile(ownerKey: string, file: File, onProgress: (percent: number) =>
     request.upload.onprogress = (event) => { if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100)); };
     request.onload = () => {
       let payload: { image?: ProductImage; error?: string } = {};
-      try { payload = JSON.parse(request.responseText); } catch { /* non-JSON error body */ }
+      try { payload = removeSentenceFullStops(JSON.parse(request.responseText)); } catch { /* non-JSON error body */ }
       if (request.status === 201 && payload.image) resolve(payload.image);
-      else reject(new Error(request.status === 413 ? 'The file is larger than the allowed upload size.' : payload.error || 'Upload failed. Please retry.'));
+      else reject(new Error(request.status === 413 ? 'The file is larger than the allowed upload size' : payload.error || 'Upload failed Please retry'));
     };
-    request.onerror = () => reject(new Error('Network problem. Check your connection and retry.'));
-    request.ontimeout = () => reject(new Error('The upload timed out on a slow connection. Please retry.'));
+    request.onerror = () => reject(new Error('Network problem Check your connection and retry'));
+    request.ontimeout = () => reject(new Error('The upload timed out on a slow connection Please retry'));
     signal.addEventListener('abort', () => { request.abort(); reject(new DOMException('Aborted', 'AbortError')); });
     request.send(file);
   });
@@ -77,17 +78,17 @@ export default function ProductImageManager({ ownerKey, images, mainImageId, leg
       latest.current = { images: next, mainImageId: nextMain };
       onChange(next, nextMain);
       dropItem(item.id);
-      onMessage(`${item.file.name} uploaded successfully.`);
+      onMessage(`${item.file.name} uploaded successfully`);
     } catch (reason) {
       if (reason instanceof DOMException && reason.name === 'AbortError') return;
       controllers.current.delete(item.id);
-      patchItem(item.id, { status: 'error', error: reason instanceof Error ? reason.message : 'Upload failed.' });
+      patchItem(item.id, { status: 'error', error: reason instanceof Error ? reason.message : 'Upload failed' });
     }
   }
 
   function enqueue(files: File[], replaceId?: string) {
     const items: QueueItem[] = files.map((file) => {
-      const rejected = !allowedTypes.includes(file.type) ? 'Only JPG, PNG and WebP images are supported.' : file.size > maxMb * 1024 * 1024 ? `The file is larger than the ${maxMb} MB limit.` : '';
+      const rejected = !allowedTypes.includes(file.type) ? 'Only JPG, PNG and WebP images are supported' : file.size > maxMb * 1024 * 1024 ? `The file is larger than the ${maxMb} MB limit` : '';
       return { id: crypto.randomUUID(), file, preview: URL.createObjectURL(file), progress: 0, status: rejected ? 'error' : 'uploading', error: rejected || undefined, replaceId };
     });
     setQueue((current) => [...current, ...items]);
@@ -143,7 +144,7 @@ export default function ProductImageManager({ ownerKey, images, mainImageId, leg
         <button type="button" className="pim-cancel" onClick={() => dropItem(item.id)} aria-label="Remove selected image"><X size={14} /></button>
       </figure>)}
     </div>
-    {images.length === 0 && !showLegacy && queue.length === 0 && <p className="studio-muted">No images yet. Tap Upload Image to choose photos from your gallery or computer.</p>}
-    {queue.length > 0 && <p className="pim-note">Finish or remove pending uploads before saving the product.</p>}
+    {images.length === 0 && !showLegacy && queue.length === 0 && <p className="studio-muted">No images yet Tap Upload Image to choose photos from your gallery or computer</p>}
+    {queue.length > 0 && <p className="pim-note">Finish or remove pending uploads before saving the product</p>}
   </div>;
 }

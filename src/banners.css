@@ -31,7 +31,7 @@
 
 /* Header: logo shifted left, bold sans wordmark */
 .site-header{padding-left:2.2%;padding-right:2.2%}
-.site-header>.wordmark{font-family:'DM Sans',sans-serif;font-weight:700;font-size:30px;letter-spacing:.02em;margin-left:-4px}
+.site-header>.wordmark{font-family:'DM Sans',sans-serif;font-weight:700;font-size:42px;letter-spacing:.02em;margin-left:-4px}
 .site-header .main-nav{position:relative;flex-wrap:wrap}
 .main-nav .nav-item{display:flex}
 .mega-menu{position:absolute;left:0;right:0;top:100%;z-index:20;display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:32px;padding:28px 4%;background:#fff;border-top:1px solid var(--line);box-shadow:0 14px 28px rgb(0 0 0 / 12%);max-height:calc(100vh - 160px);overflow:auto;text-transform:none}
@@ -41,7 +41,7 @@
 .main-nav .mega-campaign{position:relative;display:block;padding:0;height:180px;overflow:hidden;border:0}
 .mega-campaign img{width:100%;height:100%;object-fit:cover}
 .main-nav .mega-campaign span{position:absolute;left:12px;bottom:12px;padding:8px 14px;background:#fff;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
-@media(max-width:760px){.site-header>.wordmark{font-size:26px;margin-left:0}}
+@media(max-width:760px){.site-header>.wordmark{font-size:34px;margin-left:0}}
 
 /* Visual polish */
 .announcement{background:linear-gradient(90deg,#111,#3a1a20 50%,#111);letter-spacing:.08em;text-transform:uppercase;font-size:11px}
@@ -103,21 +103,21 @@
 @media(max-width:760px){.rail-track{gap:12px}.rail-track>*{flex-basis:calc((100% - 12px) / 1.7)}.rail-arrow{display:none}}
 @media(prefers-reduced-motion:reduce){.rail-track{scroll-behavior:auto}}
 
-/* Header layout: logo + actions on top, hamburger with search beneath, nav below */
-.site-header{grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"logo . actions" "menu search search" "nav nav nav";column-gap:12px;row-gap:8px}
+/* Keep the brand, search, and actions together above the navigation */
+.site-header{grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"logo search actions" "menu nav nav";column-gap:18px;row-gap:8px}
 .site-header>.wordmark{justify-self:start}
 .site-header .header-search{max-width:none;justify-self:stretch}
 .site-header .main-nav{margin-top:2px}
 @media(max-width:1000px){
-  .site-header{grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"logo . actions" "menu search search";padding:10px 4%}
+  .site-header{grid-template-areas:"logo search actions" "menu nav nav";padding:10px 4%}
   .site-header>.wordmark{justify-self:start}
 }
 
-/* Row 1: logo. Row 2: hamburger, search, icons. Row 3: nav */
-.site-header{grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"logo logo logo" "menu search actions" "nav nav nav"}
+/* Place the menu button alongside navigation on the second row */
+.site-header{grid-template-areas:"logo search actions" "menu nav nav"}
 .site-header .header-actions{justify-self:end;gap:14px}
 @media(max-width:1000px){
-  .site-header{grid-template-areas:"logo logo logo" "menu search actions"}
+  .site-header{grid-template-areas:"logo search actions" "menu nav nav"}
 }
 
 /* Smaller hero */
@@ -169,11 +169,11 @@ html,body,body *{font-family:var(--site-font) !important}
 
 /* Wordmark star and celebration sparkles */
 .site-header>.wordmark{position:relative;display:inline-flex;align-items:center;gap:6px;background:none;-webkit-background-clip:border-box;background-clip:border-box;color:inherit}
-.wordmark .wordmark-text{background:linear-gradient(135deg,#111 30%,var(--accent) 120%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.wordmark .wordmark-text{color:#c43d58;-webkit-text-fill-color:currentColor}
 .wordmark .wordmark-stack{display:flex;flex-direction:column;align-items:flex-start;line-height:1.05}
-.wordmark .wordmark-tagline{margin-top:3px;font-size:10px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--muted,#6b6b63);-webkit-text-fill-color:currentColor}
-@media(max-width:760px){.wordmark .wordmark-tagline{font-size:8px;letter-spacing:.1em}}
-.wordmark .wordmark-star{font-size:.5em;line-height:1;color:#d4a017;animation:starTwinkle 2.4s ease-in-out infinite}
+.wordmark .wordmark-tagline{margin-top:3px;font-size:10px;font-weight:500;letter-spacing:.04em;color:var(--muted,#6b6b63);-webkit-text-fill-color:currentColor}
+@media(max-width:760px){.wordmark .wordmark-tagline{font-size:9px;letter-spacing:.02em}}
+.wordmark .wordmark-star{font-size:1.15em;line-height:1;color:#c43d58;animation:starTwinkle 2.4s ease-in-out infinite}
 .wordmark-sparkles{position:absolute;inset:-8px -10px;pointer-events:none}
 .wordmark-sparkles i{position:absolute;font-style:normal;font-size:12px;color:#d4a017;opacity:0;animation:sparkle 2.6s ease-in-out infinite}
 .wordmark-sparkles i:nth-child(1){left:8%;top:0;animation-delay:0s}
@@ -184,3 +184,36 @@ html,body,body *{font-family:var(--site-font) !important}
 @keyframes sparkle{0%,100%{opacity:0;transform:translateY(4px) scale(.3) rotate(0)}40%,60%{opacity:1;transform:translateY(-3px) scale(1) rotate(90deg)}}
 @keyframes starTwinkle{0%,100%{transform:scale(1) rotate(0)}50%{transform:scale(1.3) rotate(20deg)}}
 @media(prefers-reduced-motion:reduce){.wordmark .wordmark-star,.wordmark-sparkles i{animation:none}.wordmark-sparkles i{opacity:.8}}
+
+@media(max-width:760px){
+  .site-header{grid-template-columns:max-content minmax(48px,1fr) max-content;grid-template-areas:"logo search actions" "menu menu menu";column-gap:6px;row-gap:6px;padding:8px 3%}
+  .site-header>.wordmark{justify-self:start;font-size:25px;margin:0}
+  .site-header .wordmark-tagline{font-size:7px;letter-spacing:0}
+  .site-header .header-search{min-width:0;max-width:none;padding:0 3px 0 8px}
+  .site-header .header-search input{height:36px;font-size:13px}
+  .site-header .header-search button{width:30px;height:30px}
+  .site-header .header-actions{display:flex;justify-self:end;align-items:center;flex-wrap:nowrap;gap:3px;white-space:nowrap}
+  .site-header .header-actions>button{display:inline-flex;align-items:center;justify-content:center;min-width:28px;min-height:32px;padding:4px}
+  .site-header .account-link,.site-header .bag-button{white-space:nowrap;font-size:11px}
+  .site-header .chat-link{display:inline-flex;gap:0;padding:4px}
+  .site-header .chat-link .chat-label{display:none}
+  .site-header .account-link span,.site-header .bag-button span{display:none}
+  .site-header .mobile-menu{grid-area:menu;justify-self:start;width:40px;height:36px}
+}
+
+@media(max-width:380px){
+  .site-header{grid-template-columns:max-content minmax(40px,1fr) max-content;column-gap:4px;padding-right:2%;padding-left:2%}
+  .site-header>.wordmark{font-size:22px}
+  .site-header .wordmark-tagline{font-size:6px}
+  .site-header .header-actions{gap:1px}
+  .site-header .header-actions>button{min-width:25px;padding:3px}
+}
+
+.site-footer{background:#1c6048!important;color:#fff}
+.site-footer .footer-top{background:#164b38}
+.site-footer .footer-columns li a,.site-footer .footer-columns li button,.site-footer .footer-bottom span,.site-footer .footer-bottom .owner-entry{color:#e1eee8}
+.site-footer .footer-columns li a:hover,.site-footer .footer-columns li button:hover{color:#fff}
+.site-footer .footer-bottom{border-top-color:rgb(255 255 255 / 24%)}
+.newsletter form>button{border:1px solid #c43d58;background:#c43d58;color:#fff;transition:background .2s,border-color .2s,transform .2s}
+.newsletter form>button:hover:not(:disabled){border-color:#a92f49;background:#a92f49}
+.newsletter form>button:focus-visible{outline:2px solid #c43d58;outline-offset:3px}

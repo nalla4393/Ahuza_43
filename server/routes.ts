@@ -23,7 +23,7 @@ const paymentReceiptLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 3, stan
 const paymentLimit = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false });
 
 function requireCustomer(request: Request, response: Response, next: NextFunction): void {
-  if (!request.session.userId) { response.status(401).json({ error: 'Sign in is required.' }); return; }
+  if (!request.session.userId) { response.status(401).json({ error: 'Sign in is required' }); return; }
   next();
 }
 
@@ -31,14 +31,14 @@ function requireOwner(request: Request, response: Response, next: NextFunction):
   const expected = process.env.OWNER_API_KEY || '';
   const supplied = request.get('x-owner-key') || '';
   const valid = expected.length > 0 && supplied.length === expected.length && timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
-  if (!valid) { response.status(403).json({ error: 'Owner access required.' }); return; }
+  if (!valid) { response.status(403).json({ error: 'Owner access required' }); return; }
   next();
 }
 
 function asyncError(response: Response, error: unknown): void {
-  if (error instanceof Error && error.message === 'AI_NOT_CONFIGURED') { response.status(503).json({ error: 'AI integration is not configured. Set OPENAI_API_KEY (or GEMINI_API_KEY) in the server environment.' }); return; }
+  if (error instanceof Error && error.message === 'AI_NOT_CONFIGURED') { response.status(503).json({ error: 'AI integration is not configured Set OPENAI_API_KEY (or GEMINI_API_KEY) in the server environment' }); return; }
   console.error(error);
-  response.status(502).json({ error: 'The requested integration is temporarily unavailable.' });
+  response.status(502).json({ error: 'The requested integration is temporarily unavailable' });
 }
 
 function stringValue(value: unknown, maxLength = 500): value is string {
@@ -88,7 +88,7 @@ api.use(async (request, response, next) => {
   const existingOrders = (method === 'GET' && (path === '/orders' || /^\/orders\/[^/]+(?:\/invoice)?$/.test(path)))
     || ((method === 'POST' || method === 'PATCH') && /^\/orders\/[^/]+(?:\/returns|\/payment-receipts)?$/.test(path));
   if (ownerApi || healthOrStatus || paymentReadOnly || customerAccount || existingOrders) { next(); return; }
-  response.status(503).json({ error: 'The AHUZA storefront is temporarily unavailable. Please check back soon.' });
+  response.status(503).json({ error: 'The AHUZA storefront is temporarily unavailable Please check back soon' });
 });
 
 api.get('/storefront', async (_request, response) => {
@@ -103,17 +103,17 @@ api.get('/products', async (_request, response) => {
 
 api.get('/products/:id', async (request, response) => {
   const product = (await getDatabase()).products.find((entry) => entry.id === request.params.id && entry.active);
-  if (!product) { response.status(404).json({ error: 'Product not found.' }); return; }
+  if (!product) { response.status(404).json({ error: 'Product not found' }); return; }
   response.json({ product });
 });
 
 api.post('/products/:id/stock-alert', requireCustomer, async (request, response) => {
   const result = await mutateDatabase<{ error: string; status: number } | { subscribed: true; alreadySubscribed: boolean }>((database) => {
     const product = database.products.find((entry) => entry.id === request.params.id && entry.active);
-    if (!product) return { error: 'Product not found.', status: 404 };
-    if (product.stock > 0) return { error: 'This item is available now.', status: 409 };
+    if (!product) return { error: 'Product not found', status: 404 };
+    if (product.stock > 0) return { error: 'This item is available now', status: 409 };
     const customer = database.customers.find((entry) => entry.id === request.session.userId);
-    if (!customer) return { error: 'Sign in to receive a restock alert.', status: 401 };
+    if (!customer) return { error: 'Sign in to receive a restock alert', status: 401 };
     database.stockAlerts ||= [];
     const existing = database.stockAlerts.find((alert) => alert.productId === product.id && alert.customerId === customer.id && !alert.notifiedAt);
     if (existing) return { subscribed: true, alreadySubscribed: true };
@@ -127,7 +127,7 @@ api.post('/products/:id/stock-alert', requireCustomer, async (request, response)
 api.post('/newsletter/subscribe', newsletterLimit, async (request, response) => {
   const email = typeof request.body?.email === 'string' ? request.body.email.trim().toLowerCase() : '';
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254 || request.body?.consent !== true) {
-    response.status(400).json({ error: 'Enter a valid email and agree to receive AHUZA newsletter updates.' }); return;
+    response.status(400).json({ error: 'Enter a valid email and agree to receive AHUZA newsletter updates' }); return;
   }
   const result = await mutateDatabase((database) => {
     database.newsletterSubscribers ||= [];
@@ -137,7 +137,7 @@ api.post('/newsletter/subscribe', newsletterLimit, async (request, response) => 
       id: randomUUID(),
       email,
       consentedAt: new Date().toISOString(),
-      consentText: 'I agree to receive AHUZA news, new collection updates and offers by email.',
+      consentText: 'I agree to receive AHUZA news, new collection updates and offers by email',
       source: 'storefront',
     });
     return { subscribed: true as const, alreadySubscribed: false };
@@ -151,17 +151,17 @@ api.post('/newsletter/subscribe', newsletterLimit, async (request, response) => 
 
 api.post('/customer-support/chat', supportLimit, async (request, response) => {
   const message = request.body?.message;
-  if (!stringValue(message, 1000)) { response.status(400).json({ error: 'A message is required (up to 1,000 characters).' }); return; }
+  if (!stringValue(message, 1000)) { response.status(400).json({ error: 'A message is required (up to 1,000 characters)' }); return; }
   const deliveryIssue = /\b(?:delivery|shipping|shipment)\b.{0,40}\b(?:issue|problem|late|delay|delayed|missing|lost|not received)\b|\b(?:late delivery|delayed|missing parcel|lost parcel|not received|never arrived|wrong item|damaged|complaint|complain|refund request|replacement request)\b/i.test(message);
   if (deliveryIssue) {
-    response.json({ reply: 'We’re sorry for the inconvenience. Please create a support ticket and our team will follow up within 48 working hours. Support hours are 10:00 AM–9:00 PM IST.', requiresHumanSupport: true });
+    response.json({ reply: 'We’re sorry for the inconvenience Please create a support ticket and our team will follow up within 48 working hours Support hours are 10:00 AM–9:00 PM IST', requiresHumanSupport: true });
     return;
   }
   try {
     const database = await getDatabase();
     const storeContext = JSON.stringify({
       contact: 'Info@ahuzawear.com, +91 95505 82277, Telangana, India',
-      returns: 'Returns and replacements may be requested within 7 days after delivery.',
+      returns: 'Returns and replacements may be requested within 7 days after delivery',
       products: database.products.filter((product) => product.active).map(({ name, description, price, stock, category }) => ({ name, description, price, stock, category })),
     });
     const history = Array.isArray(request.body?.history)
@@ -173,7 +173,7 @@ api.post('/customer-support/chat', supportLimit, async (request, response) => {
     response.json({ reply: await generateCustomerSupportReply(message, storeContext, history), requiresHumanSupport: false });
   } catch (error) {
     if (error instanceof Error && error.message === 'AI_NOT_CONFIGURED') {
-      response.json({ reply: 'I’m sorry, I can’t answer that just now. Customer support is available from 10:00 AM to 9:00 PM IST. You can create a support ticket or email Info@ahuzawear.com for help.', requiresHumanSupport: false });
+      response.json({ reply: 'I’m sorry, I can’t answer that just now Customer support is available from 10:00 AM to 9:00 PM IST You can create a support ticket or email Info@ahuzawear.com for help', requiresHumanSupport: false });
       return;
     }
     asyncError(response, error);
@@ -184,7 +184,7 @@ api.post('/customer-support/tickets', supportLimit, async (request, response) =>
   const message = request.body?.message;
   const email = typeof request.body?.email === 'string' ? request.body.email.trim().toLowerCase() : request.session.email || '';
   if (!stringValue(message, 2000) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
-    response.status(400).json({ error: 'Provide your support message and a valid email address.' }); return;
+    response.status(400).json({ error: 'Provide your support message and a valid email address' }); return;
   }
   const deliveryIssue = /\b(?:delivery|shipping|shipment)\b.{0,40}\b(?:issue|problem|late|delay|delayed|missing|lost|not received)\b|\b(?:late delivery|delayed|missing parcel|lost parcel|not received|never arrived|wrong item|damaged)\b/i.test(message);
   const complaint = /\b(?:complaint|complain|unhappy|dissatisfied|refund|replacement)\b/i.test(message);
@@ -205,8 +205,8 @@ api.post('/customer-support/tickets', supportLimit, async (request, response) =>
     console.error(`Support ticket ${ticket.id} was saved, but its email notification failed:`, error);
   }
   const notificationMessage = notificationSent
-    ? `We’re sorry for the inconvenience. Your reference ID is ${ticket.id}. Our support team will reach out within 48 working hours. Support hours are 10:00 AM–9:00 PM IST.`
-    : `Your support ticket ${ticket.id} was saved, but we could not notify our support team by email. Please contact Info@ahuzawear.com or +91 95505 82277 and include this reference.`;
+    ? `We’re sorry for the inconvenience Your reference ID is ${ticket.id} Our support team will reach out within 48 working hours Support hours are 10:00 AM–9:00 PM IST`
+    : `Your support ticket ${ticket.id} was saved, but we could not notify our support team by email Please contact Info@ahuzawear.com or +91 95505 82277 and include this reference`;
   response.status(201).json({ ticket: { id: ticket.id, status: ticket.status }, notificationSent, message: notificationMessage });
 });
 
@@ -214,7 +214,7 @@ api.post('/auth/signup', authLimit, async (request, response) => {
   const email = typeof request.body?.email === 'string' ? request.body.email.trim().toLowerCase() : '';
   const password = request.body?.password;
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || typeof password !== 'string' || password.length < 12 || password.length > 200) {
-    response.status(400).json({ error: 'Enter a valid email and a password of at least 12 characters.' }); return;
+    response.status(400).json({ error: 'Enter a valid email and a password of at least 12 characters' }); return;
   }
   const customer = await mutateDatabase(async (database) => {
     if (database.customers.some((entry) => entry.email === email)) return null;
@@ -222,7 +222,7 @@ api.post('/auth/signup', authLimit, async (request, response) => {
     database.customers.push(created);
     return { id: created.id, email: created.email };
   });
-  if (!customer) { response.status(409).json({ error: 'An account already exists for this email.' }); return; }
+  if (!customer) { response.status(409).json({ error: 'An account already exists for this email' }); return; }
   await new Promise<void>((resolve, reject) => request.session.regenerate((error) => error ? reject(error) : resolve()));
   request.session.userId = customer.id;
   request.session.email = customer.email;
@@ -232,9 +232,9 @@ api.post('/auth/signup', authLimit, async (request, response) => {
 api.post('/auth/login', authLimit, async (request, response) => {
   const email = typeof request.body?.email === 'string' ? request.body.email.trim().toLowerCase() : '';
   const password = request.body?.password;
-  if (!stringValue(email, 254) || typeof password !== 'string' || password.length > 200) { response.status(400).json({ error: 'Enter your email and password.' }); return; }
+  if (!stringValue(email, 254) || typeof password !== 'string' || password.length > 200) { response.status(400).json({ error: 'Enter your email and password' }); return; }
   const customer = (await getDatabase()).customers.find((entry) => entry.email === email);
-  if (!customer || !await verifyPassword(password, customer.passwordHash)) { response.status(401).json({ error: 'Email or password is incorrect.' }); return; }
+  if (!customer || !await verifyPassword(password, customer.passwordHash)) { response.status(401).json({ error: 'Email or password is incorrect' }); return; }
   await new Promise<void>((resolve, reject) => request.session.regenerate((error) => error ? reject(error) : resolve()));
   request.session.userId = customer.id;
   request.session.email = customer.email;
@@ -267,7 +267,7 @@ api.put('/wishlist/:productId', requireCustomer, async (request, response) => {
     customer.wishlist = list.slice(-200);
     return customer.wishlist;
   });
-  if (!result) { response.status(404).json({ error: 'Product not found.' }); return; }
+  if (!result) { response.status(404).json({ error: 'Product not found' }); return; }
   response.json({ productIds: result });
 });
 
@@ -279,17 +279,17 @@ api.delete('/wishlist/:productId', requireCustomer, async (request, response) =>
     customer.wishlist = (customer.wishlist || []).filter((id) => id !== productId);
     return customer.wishlist;
   });
-  if (!result) { response.status(404).json({ error: 'Account not found.' }); return; }
+  if (!result) { response.status(404).json({ error: 'Account not found' }); return; }
   response.json({ productIds: result });
 });
 
 async function createPaymentOrder(request: Request, response: Response): Promise<void> {
   const paymentMethod = request.body?.paymentMethod;
-  if (paymentMethod !== 'upi' && paymentMethod !== 'cod') { response.status(400).json({ error: 'Choose UPI or cash on delivery.' }); return; }
+  if (paymentMethod !== 'upi' && paymentMethod !== 'cod') { response.status(400).json({ error: 'Choose UPI or cash on delivery' }); return; }
   const upi = getUpiConfiguration();
-  if (paymentMethod === 'upi' && !upi.configured) { response.status(503).json({ error: 'Direct UPI is unavailable. Configure a valid UPI_VPA on the server.' }); return; }
+  if (paymentMethod === 'upi' && !upi.configured) { response.status(503).json({ error: 'Direct UPI is unavailable Configure a valid UPI_VPA on the server' }); return; }
   const items = request.body?.items;
-  if (!Array.isArray(items) || items.length === 0 || items.length > 20) { response.status(400).json({ error: 'Provide one or more cart items.' }); return; }
+  if (!Array.isArray(items) || items.length === 0 || items.length > 20) { response.status(400).json({ error: 'Provide one or more cart items' }); return; }
   const parseAddress = (address: any): ShippingAddress | null => {
     const parsed: ShippingAddress = {
       name: typeof address?.name === 'string' ? address.name.trim() : '',
@@ -307,35 +307,35 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   const shippingAddress = parseAddress(request.body?.shippingAddress);
   const billingAddress = request.body?.billingAddress === undefined ? shippingAddress : parseAddress(request.body.billingAddress);
   if (!shippingAddress || !billingAddress) {
-    response.status(400).json({ error: 'Enter a valid name, Indian billing and delivery address, six-digit PIN code, and phone number.' }); return;
+    response.status(400).json({ error: 'Enter a valid name, Indian billing and delivery address, six-digit PIN code, and phone number' }); return;
   }
   const requested = new Map<string, { productId: string; size?: string; quantity: number }>();
   for (const item of items) {
     if (!stringValue(item?.productId, 100) || !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 10
-      || (item.size !== undefined && !stringValue(item.size, 20))) { response.status(400).json({ error: 'Each item needs a product ID, valid size (when required), and quantity from 1 to 10.' }); return; }
+      || (item.size !== undefined && !stringValue(item.size, 20))) { response.status(400).json({ error: 'Each item needs a product ID, valid size (when required), and quantity from 1 to 10' }); return; }
     const key = `${item.productId}:${typeof item.size === 'string' ? item.size.trim().toLowerCase() : ''}`;
     const existing = requested.get(key);
     const quantity = (existing?.quantity || 0) + item.quantity;
-    if (quantity > 10) { response.status(400).json({ error: 'Each product is limited to 10 items per order.' }); return; }
+    if (quantity > 10) { response.status(400).json({ error: 'Each product is limited to 10 items per order' }); return; }
     requested.set(key, { productId: item.productId, ...(typeof item.size === 'string' ? { size: item.size.trim() } : {}), quantity });
   }
   const products = (await getDatabase()).products;
   const orderItems: Order['items'] = [];
   for (const { productId, size, quantity } of requested.values()) {
     const product = products.find((entry) => entry.id === productId && entry.active);
-    if (!product || product.stock < quantity) { response.status(409).json({ error: `Product ${productId} is unavailable in the requested quantity.` }); return; }
+    if (!product || product.stock < quantity) { response.status(409).json({ error: `Product ${productId} is unavailable in the requested quantity` }); return; }
     if (product.sizes?.length && (!size || !product.sizes.some((available) => available.toLowerCase() === size.toLowerCase()))) {
-      response.status(400).json({ error: `Choose an available size for ${product.name}.` }); return;
+      response.status(400).json({ error: `Choose an available size for ${product.name}` }); return;
     }
     if (size && !product.sizes?.some((available) => available.toLowerCase() === size.toLowerCase())) {
-      response.status(400).json({ error: `Size ${size} is not available for ${product.name}.` }); return;
+      response.status(400).json({ error: `Size ${size} is not available for ${product.name}` }); return;
     }
     orderItems.push({ productId, name: product.name, sku: product.sku, quantity, unitPrice: product.price, ...(size ? { size: product.sizes!.find((available) => available.toLowerCase() === size.toLowerCase()) } : {}) });
   }
   const subtotalAmount = orderItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0) * 100;
   const shippingAmount = subtotalAmount < 250000 ? 10000 : 0;
   const amount = subtotalAmount + shippingAmount;
-  if (!Number.isSafeInteger(amount) || amount < 100) { response.status(400).json({ error: 'Order total is invalid.' }); return; }
+  if (!Number.isSafeInteger(amount) || amount < 100) { response.status(400).json({ error: 'Order total is invalid' }); return; }
   const localOrderId = randomUUID();
   const paymentReference = `AHUZA-${randomUUID().replaceAll('-', '').slice(0, 20).toUpperCase()}`;
   const expiresAt = paymentMethod === 'upi' ? new Date(Date.now() + 20 * 60 * 1000) : null;
@@ -356,7 +356,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     });
     return true;
   });
-  if (!persisted) { response.status(409).json({ error: 'Inventory changed while placing your order. Please refresh your bag.' }); return; }
+  if (!persisted) { response.status(409).json({ error: 'Inventory changed while placing your order Please refresh your bag' }); return; }
   const placed = (await getDatabase()).orders.find((entry) => entry.id === localOrderId);
   const customerEmail = (await getDatabase()).customers.find((entry) => entry.id === request.session.userId)?.email;
   if (placed && customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
@@ -379,13 +379,13 @@ api.post('/payments/orders', requireCustomer, paymentLimit, async (request, resp
 
 api.get('/payments/orders/:id/status', requireCustomer, paymentLimit, async (request, response) => {
   const order = (await getDatabase()).orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
-  if (!order) { response.status(404).json({ error: 'Order not found.' }); return; }
+  if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
   response.json({ orderId: order.id, status: order.paymentStatus || 'pending', orderStatus: order.status, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt, verification: 'manual_bank_reconciliation_required' });
 });
 
 api.post('/payments/orders/:id/failure', requireCustomer, paymentLimit, async (request, response) => {
   if (!request.body || request.body.failed !== true || Object.keys(request.body).length !== 1) {
-    response.status(400).json({ error: 'Report only that the UPI app did not complete the attempt.' }); return;
+    response.status(400).json({ error: 'Report only that the UPI app did not complete the attempt' }); return;
   }
   const updated = await mutateDatabase((database) => {
     const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
@@ -393,8 +393,8 @@ api.post('/payments/orders/:id/failure', requireCustomer, paymentLimit, async (r
     order.paymentStatus = 'failed';
     return true;
   });
-  if (!updated) { response.status(409).json({ error: 'This UPI order is no longer pending.' }); return; }
-  response.json({ status: 'failed', note: 'Customer-reported attempt only; AHUZA bank verification is still required.' });
+  if (!updated) { response.status(409).json({ error: 'This UPI order is no longer pending' }); return; }
+  response.json({ status: 'failed', note: 'Customer-reported attempt only; AHUZA bank verification is still required' });
 });
 
 api.post('/payments/orders/:id/cancel', requireCustomer, paymentLimit, async (request, response) => {
@@ -405,29 +405,29 @@ api.post('/payments/orders/:id/cancel', requireCustomer, paymentLimit, async (re
     order.paymentStatus = 'cancelled';
     return 'cancelled';
   });
-  if (result === 'missing') { response.status(404).json({ error: 'Order not found.' }); return; }
-  if (result === 'conflict') { response.status(409).json({ error: 'This order cannot be cancelled.' }); return; }
+  if (result === 'missing') { response.status(404).json({ error: 'Order not found' }); return; }
+  if (result === 'conflict') { response.status(409).json({ error: 'This order cannot be cancelled' }); return; }
   response.json({ status: result });
 });
 
 api.get('/orders/:id', requireCustomer, async (request, response) => {
   const order = (await getDatabase()).orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
-  if (!order) { response.status(404).json({ error: 'Order not found.' }); return; }
+  if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
   response.json({ order });
 });
 
 api.post('/orders/:id/payment-receipts', requireCustomer, paymentReceiptLimit, express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '5mb' }), async (request, response) => {
-  if (!Buffer.isBuffer(request.body)) { response.status(415).json({ error: 'Upload a JPEG, PNG, or WebP receipt image.' }); return; }
+  if (!Buffer.isBuffer(request.body)) { response.status(415).json({ error: 'Upload a JPEG, PNG, or WebP receipt image' }); return; }
   const mimeType = detectReceiptMimeType(request.body);
   const declaredMimeType = request.get('content-type')?.split(';', 1)[0].trim().toLowerCase();
-  if (!mimeType || mimeType !== declaredMimeType) { response.status(415).json({ error: 'The uploaded file is not a valid JPEG, PNG, or WebP image.' }); return; }
+  if (!mimeType || mimeType !== declaredMimeType) { response.status(415).json({ error: 'The uploaded file is not a valid JPEG, PNG, or WebP image' }); return; }
 
   const database = await getDatabase();
   const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
-  if (!order) { response.status(404).json({ error: 'Order not found.' }); return; }
-  if (!['pending_payment', 'cancelled'].includes(order.status)) { response.status(409).json({ error: 'A receipt can only be submitted for an unpaid order.' }); return; }
+  if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
+  if (!['pending_payment', 'cancelled'].includes(order.status)) { response.status(409).json({ error: 'A receipt can only be submitted for an unpaid order' }); return; }
   if (database.paymentReceiptReviews?.some((entry) => entry.orderId === order.id && entry.status === 'pending_admin_review')) {
-    response.status(409).json({ error: 'A receipt for this order is already waiting for owner review.' }); return;
+    response.status(409).json({ error: 'A receipt for this order is already waiting for owner review' }); return;
   }
 
   let extraction;
@@ -435,10 +435,10 @@ api.post('/orders/:id/payment-receipts', requireCustomer, paymentReceiptLimit, e
     extraction = await extractPaymentReceipt(request.body, mimeType);
   } catch (error) {
     if (error instanceof Error && error.message === 'AI_NOT_CONFIGURED') {
-      response.status(503).json({ error: 'Receipt review is unavailable until the server has GEMINI_API_KEY configured.' }); return;
+      response.status(503).json({ error: 'Receipt review is unavailable until the server has GEMINI_API_KEY configured' }); return;
     }
     if (error instanceof Error && error.message === 'RECEIPT_PARSE_FAILED') {
-      response.status(422).json({ error: 'The receipt details could not be read safely. Try a clearer image.' }); return;
+      response.status(422).json({ error: 'The receipt details could not be read safely Try a clearer image' }); return;
     }
     asyncError(response, error);
     return;
@@ -450,13 +450,13 @@ api.post('/orders/:id/payment-receipts', requireCustomer, paymentReceiptLimit, e
     if (!currentOrder || !['pending_payment', 'cancelled'].includes(currentOrder.status)
       || current.paymentReceiptReviews.some((entry) => entry.orderId === order.id && entry.status === 'pending_admin_review')) return null;
     const flags: string[] = [];
-    if (!extraction.isSuccessful) flags.push('AI extraction indicates a possibly unsuccessful transaction; verify independently.');
-    if (extraction.amountPaid === null) flags.push('Amount was not clearly extracted.');
-    else if (Math.abs(extraction.amountPaid - currentOrder.amount / 100) > 0.01) flags.push('Extracted amount differs from the order amount.');
-    if (!extraction.utrNumber) flags.push('UTR/reference number was not clearly extracted.');
+    if (!extraction.isSuccessful) flags.push('AI extraction indicates a possibly unsuccessful transaction; verify independently');
+    if (extraction.amountPaid === null) flags.push('Amount was not clearly extracted');
+    else if (Math.abs(extraction.amountPaid - currentOrder.amount / 100) > 0.01) flags.push('Extracted amount differs from the order amount');
+    if (!extraction.utrNumber) flags.push('UTR/reference number was not clearly extracted');
     const normalizedUtr = extraction.utrNumber?.replace(/\s+/g, '').toLowerCase();
     if (normalizedUtr && current.paymentReceiptReviews.some((entry) => entry.extraction.utrNumber?.replace(/\s+/g, '').toLowerCase() === normalizedUtr)) {
-      flags.push('This UTR/reference number appears in another receipt submission.');
+      flags.push('This UTR/reference number appears in another receipt submission');
     }
     const review: PaymentReceiptReview = {
       id: randomUUID(),
@@ -471,7 +471,7 @@ api.post('/orders/:id/payment-receipts', requireCustomer, paymentReceiptLimit, e
     current.paymentReceiptReviews.push(review);
     return review;
   });
-  if (!saved) { response.status(409).json({ error: 'Order status changed or a receipt was submitted while processing. Refresh your orders and try again.' }); return; }
+  if (!saved) { response.status(409).json({ error: 'Order status changed or a receipt was submitted while processing Refresh your orders and try again' }); return; }
   response.status(202).json({ review: { id: saved.id, orderId: saved.orderId, status: saved.status, flags: saved.flags } });
 });
 
@@ -492,13 +492,13 @@ api.post('/orders/:id/review', requireCustomer, async (request, response) => {
   const comment: unknown = request.body?.comment;
   if (typeof rating !== 'number' || !Number.isInteger(rating) || rating < 1 || rating > 5
     || (comment !== undefined && (typeof comment !== 'string' || comment.length > 1000))) {
-    response.status(400).json({ error: 'Choose a rating from 1 to 5 stars and an optional comment up to 1,000 characters.' }); return;
+    response.status(400).json({ error: 'Choose a rating from 1 to 5 stars and an optional comment up to 1,000 characters' }); return;
   }
   const result = await mutateDatabase<{ error: string; status: number } | { review: NonNullable<Order['review']> }>((database) => {
     const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
-    if (!order) return { error: 'Order not found.', status: 404 };
-    if (order.status !== 'delivered') return { error: 'You can review an order after it is marked delivered.', status: 409 };
-    if (order.review) return { error: 'You have already reviewed this order.', status: 409 };
+    if (!order) return { error: 'Order not found', status: 404 };
+    if (order.status !== 'delivered') return { error: 'You can review an order after it is marked delivered', status: 409 };
+    if (order.review) return { error: 'You have already reviewed this order', status: 409 };
     order.review = { rating, ...(typeof comment === 'string' && comment.trim() ? { comment: comment.trim() } : {}), createdAt: new Date().toISOString() };
     return { review: order.review };
   });
@@ -509,17 +509,17 @@ api.post('/orders/:id/review', requireCustomer, async (request, response) => {
 api.get('/orders/:id/invoice', requireCustomer, async (request, response) => {
   const database = await getDatabase();
   const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
-  if (!order) { response.status(404).json({ error: 'Order not found.' }); return; }
+  if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
   if (!['paid', 'shipped', 'out_for_delivery', 'delivered'].includes(order.status) || order.paymentStatus !== 'paid'
     || (order.paymentMethod === 'upi' && !order.paymentVerifiedAt)) {
-    response.status(409).json({ error: 'An invoice is available only after payment is confirmed.' }); return;
+    response.status(409).json({ error: 'An invoice is available only after payment is confirmed' }); return;
   }
   const customerEmail = database.customers.find((customer) => customer.id === order.userId)?.email || 'Not available';
   const safePdfText = (value: string) => value.normalize('NFKD').replace(/[^\x20-\x7e]/g, '?');
 
   const document = new PDFDocument({ size: 'A4', margin: 48 });
   response.setHeader('Content-Type', 'application/pdf');
-  response.setHeader('Content-Disposition', `attachment; filename="ahuza-invoice-${order.id}.pdf"`);
+  response.setHeader('Content-Disposition', `attachment; filename="ahuza-invoice-${order.id}pdf"`);
   document.pipe(response);
   document.fontSize(22).font('Helvetica-Bold').text('AHUZA APPAREL');
   document.moveDown(0.5).fontSize(18).text('INVOICE');
@@ -544,19 +544,19 @@ api.get('/orders/:id/invoice', requireCustomer, async (request, response) => {
     document.moveDown(0.6);
   }
   document.moveDown().fontSize(12).font('Helvetica-Bold').text(`Total paid: ${order.currency} ${(order.amount / 100).toFixed(2)}`, { align: 'right' });
-  document.moveDown(2).fontSize(9).font('Helvetica').text('Thank you for shopping with AHUZA Apparel.');
+  document.moveDown(2).fontSize(9).font('Helvetica').text('Thank you for shopping with AHUZA Apparel');
   document.end();
 });
 
 api.post('/orders/:id/returns', requireCustomer, async (request, response) => {
   const action = request.body?.action;
   const reason = typeof request.body?.reason === 'string' ? request.body.reason.trim().slice(0, 500) : '';
-  if (!['return', 'replacement'].includes(action) || !reason) { response.status(400).json({ error: 'Choose return or replacement and provide a reason.' }); return; }
+  if (!['return', 'replacement'].includes(action) || !reason) { response.status(400).json({ error: 'Choose return or replacement and provide a reason' }); return; }
   const result = await mutateDatabase<{ order: Order } | { error: string; status: number }>((database) => {
     const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
-    if (!order) return { error: 'Order not found.', status: 404 };
-    if (order.status !== 'delivered' || !order.deliveredAt || Date.now() > new Date(order.deliveredAt).getTime() + 7 * 24 * 60 * 60 * 1000) return { error: 'Returns and replacements are available within 7 days of delivery.', status: 400 };
-    if (order.returnRequest) return { error: 'A request has already been submitted for this order.', status: 409 };
+    if (!order) return { error: 'Order not found', status: 404 };
+    if (order.status !== 'delivered' || !order.deliveredAt || Date.now() > new Date(order.deliveredAt).getTime() + 7 * 24 * 60 * 60 * 1000) return { error: 'Returns and replacements are available within 7 days of delivery', status: 400 };
+    if (order.returnRequest) return { error: 'A request has already been submitted for this order', status: 409 };
     order.returnRequest = { action, reason, status: 'requested', createdAt: new Date().toISOString() };
     return { order };
   });
@@ -566,7 +566,7 @@ api.post('/orders/:id/returns', requireCustomer, async (request, response) => {
 
 api.post('/marketing/events', analyticsLimit, async (request, response) => {
   const { name, page, campaign, consent } = request.body || {};
-  if (!stringValue(name, 64) || !/^[a-z0-9_]+$/i.test(name)) { response.status(400).json({ error: 'A valid event name is required.' }); return; }
+  if (!stringValue(name, 64) || !/^[a-z0-9_]+$/i.test(name)) { response.status(400).json({ error: 'A valid event name is required' }); return; }
   const event = { name, ...(stringValue(page, 200) ? { page } : {}), ...(stringValue(campaign, 100) ? { campaign } : {}) };
   await recordMarketingEvent(event);
   if (consent === true) void triggerAutomations(event);
@@ -589,13 +589,13 @@ api.get('/owner/content', requireOwner, ownerLimit, async (_request, response) =
 
 api.patch('/owner/site-status', requireOwner, ownerLimit, async (request, response) => {
   if (!request.body || typeof request.body.published !== 'boolean' || Object.keys(request.body).length !== 1) {
-    response.status(400).json({ error: 'Provide only a boolean published value.' }); return;
+    response.status(400).json({ error: 'Provide only a boolean published value' }); return;
   }
   const published = await mutateDatabase((database) => {
     database.sitePublished = request.body.published;
     return database.sitePublished;
   });
-  console.info(`Storefront ${published ? 'published' : 'unpublished'} by owner.`);
+  console.info(`Storefront ${published ? 'published' : 'unpublished'} by owner`);
   response.json({ published });
 });
 
@@ -605,12 +605,12 @@ api.post('/owner/inventory', requireOwner, ownerLimit, async (request, response)
   const { name, description, price, sku, stock, category, imageUrl, ghostMannequin, images, mainImageId, active, sizes } = request.body || {};
   const hasImages = Array.isArray(images) && images.length > 0;
   if (!stringValue(name, 120) || !stringValue(description, 1000) || !Number.isFinite(price) || price <= 0 || price > 10000000 || !stringValue(sku, 80) || !Number.isInteger(stock) || stock < 0 || stock > 100000 || !stringValue(category, 80) || (!hasImages && !httpsUrl(imageUrl))) {
-    response.status(400).json({ error: 'Provide a title, description, positive price, SKU, stock, category, and at least one uploaded image.' }); return;
+    response.status(400).json({ error: 'Provide a title, description, positive price, SKU, stock, category, and at least one uploaded image' }); return;
   }
-  if (images !== undefined && !validImageIds(images, mainImageId)) { response.status(400).json({ error: 'Image list is invalid.' }); return; }
-  if (sizes !== undefined && !validProductSizes(sizes)) { response.status(400).json({ error: 'Sizes must be a list of up to 20 unique labels, each 1 to 20 characters.' }); return; }
-  if (active !== undefined && typeof active !== 'boolean') { response.status(400).json({ error: 'Status must be Published or Unpublished.' }); return; }
-  if (ghostMannequin !== undefined && !validGhostMannequin(ghostMannequin)) { response.status(400).json({ error: 'Ghost mannequin metadata is invalid.' }); return; }
+  if (images !== undefined && !validImageIds(images, mainImageId)) { response.status(400).json({ error: 'Image list is invalid' }); return; }
+  if (sizes !== undefined && !validProductSizes(sizes)) { response.status(400).json({ error: 'Sizes must be a list of up to 20 unique labels, each 1 to 20 characters' }); return; }
+  if (active !== undefined && typeof active !== 'boolean') { response.status(400).json({ error: 'Status must be Published or Unpublished' }); return; }
+  if (ghostMannequin !== undefined && !validGhostMannequin(ghostMannequin)) { response.status(400).json({ error: 'Ghost mannequin metadata is invalid' }); return; }
   const product = await mutateDatabase((database) => {
     if (database.products.some((entry) => entry.sku.toLowerCase() === sku.trim().toLowerCase())) return null;
     const created: Product = { id: randomUUID(), name: name.trim(), description: description.trim(), price, sku: sku.trim(), stock, category: category.trim(), imageUrl: imageUrl || '', active: active ?? true, ghostMannequin: { tags: [], ...(ghostMannequin as Product['ghostMannequin'] | undefined) }, ...(sizes?.length ? { sizes } : {}) };
@@ -618,30 +618,30 @@ api.post('/owner/inventory', requireOwner, ownerLimit, async (request, response)
     database.products.push(created);
     return created;
   });
-  if (product === 'bad-images') { response.status(400).json({ error: 'One or more images were not uploaded successfully.' }); return; }
-  if (!product) { response.status(409).json({ error: 'SKU is already assigned to another product.' }); return; }
+  if (product === 'bad-images') { response.status(400).json({ error: 'One or more images were not uploaded successfully' }); return; }
+  if (!product) { response.status(409).json({ error: 'SKU is already assigned to another product' }); return; }
   response.status(201).json({ product });
 });
 
 api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, response) => {
   const { name, description, price, category, imageUrl, stock, sku, active, ghostMannequin, images, mainImageId, sizes } = request.body || {};
-  if (images !== undefined && !validImageIds(images, mainImageId)) { response.status(400).json({ error: 'Image list is invalid.' }); return; }
-  if (sizes !== undefined && !validProductSizes(sizes)) { response.status(400).json({ error: 'Sizes must be a list of up to 20 unique labels, each 1 to 20 characters.' }); return; }
-  if (name !== undefined && !stringValue(name, 120)) { response.status(400).json({ error: 'Title must be 1 to 120 characters.' }); return; }
-  if (description !== undefined && !stringValue(description, 1000)) { response.status(400).json({ error: 'Description must be 1 to 1,000 characters.' }); return; }
-  if (price !== undefined && (!Number.isFinite(price) || price <= 0 || price > 10000000)) { response.status(400).json({ error: 'Price must be greater than zero.' }); return; }
-  if (category !== undefined && !stringValue(category, 80)) { response.status(400).json({ error: 'Category must be 1 to 80 characters.' }); return; }
-  if (imageUrl !== undefined && !httpsUrl(imageUrl)) { response.status(400).json({ error: 'Image URL must use HTTPS.' }); return; }
-  if (stock !== undefined && (!Number.isInteger(stock) || stock < 0 || stock > 100000)) { response.status(400).json({ error: 'Stock must be a non-negative whole number.' }); return; }
-  if (sku !== undefined && !stringValue(sku, 80)) { response.status(400).json({ error: 'SKU must be 1 to 80 characters.' }); return; }
-  if (active !== undefined && typeof active !== 'boolean') { response.status(400).json({ error: 'Active must be a boolean.' }); return; }
-  if (ghostMannequin !== undefined && !validGhostMannequin(ghostMannequin)) { response.status(400).json({ error: 'Ghost mannequin metadata is invalid.' }); return; }
+  if (images !== undefined && !validImageIds(images, mainImageId)) { response.status(400).json({ error: 'Image list is invalid' }); return; }
+  if (sizes !== undefined && !validProductSizes(sizes)) { response.status(400).json({ error: 'Sizes must be a list of up to 20 unique labels, each 1 to 20 characters' }); return; }
+  if (name !== undefined && !stringValue(name, 120)) { response.status(400).json({ error: 'Title must be 1 to 120 characters' }); return; }
+  if (description !== undefined && !stringValue(description, 1000)) { response.status(400).json({ error: 'Description must be 1 to 1,000 characters' }); return; }
+  if (price !== undefined && (!Number.isFinite(price) || price <= 0 || price > 10000000)) { response.status(400).json({ error: 'Price must be greater than zero' }); return; }
+  if (category !== undefined && !stringValue(category, 80)) { response.status(400).json({ error: 'Category must be 1 to 80 characters' }); return; }
+  if (imageUrl !== undefined && !httpsUrl(imageUrl)) { response.status(400).json({ error: 'Image URL must use HTTPS' }); return; }
+  if (stock !== undefined && (!Number.isInteger(stock) || stock < 0 || stock > 100000)) { response.status(400).json({ error: 'Stock must be a non-negative whole number' }); return; }
+  if (sku !== undefined && !stringValue(sku, 80)) { response.status(400).json({ error: 'SKU must be 1 to 80 characters' }); return; }
+  if (active !== undefined && typeof active !== 'boolean') { response.status(400).json({ error: 'Active must be a boolean' }); return; }
+  if (ghostMannequin !== undefined && !validGhostMannequin(ghostMannequin)) { response.status(400).json({ error: 'Ghost mannequin metadata is invalid' }); return; }
   const removedImageIds: string[] = [];
   const result = await mutateDatabase<{ product: Product } | { error: string; status: number }>((database) => {
     const product = database.products.find((entry) => entry.id === request.params.id);
-    if (!product) return { error: 'Product not found.', status: 404 };
+    if (!product) return { error: 'Product not found', status: 404 };
     const previousIds = (product.images || []).map((image) => image.id);
-    if (sku && database.products.some((entry) => entry.id !== product.id && entry.sku.toLowerCase() === sku.toLowerCase())) return { error: 'SKU is already assigned to another product.', status: 409 };
+    if (sku && database.products.some((entry) => entry.id !== product.id && entry.sku.toLowerCase() === sku.toLowerCase())) return { error: 'SKU is already assigned to another product', status: 409 };
     if (name !== undefined) product.name = name.trim();
     if (description !== undefined) product.description = description.trim();
     if (price !== undefined) product.price = price;
@@ -653,7 +653,7 @@ api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, resp
     if (sizes !== undefined) product.sizes = sizes;
     if (ghostMannequin !== undefined) product.ghostMannequin = { ...product.ghostMannequin, ...ghostMannequin } as Product['ghostMannequin'];
     if (images !== undefined) {
-      if (!applyImages(database, product, images, mainImageId)) return { error: 'One or more images were not uploaded successfully.', status: 400 };
+      if (!applyImages(database, product, images, mainImageId)) return { error: 'One or more images were not uploaded successfully', status: 400 };
       for (const id of previousIds) if (!database.products.some((entry) => entry.images?.some((image) => image.id === id))) removedImageIds.push(id);
       database.imageLibrary = (database.imageLibrary || []).filter((image) => !removedImageIds.includes(image.id));
     }
@@ -691,9 +691,9 @@ function applyImages(database: Database, product: Product, ids: string[], mainIm
 }
 
 api.post('/owner/images', requireOwner, uploadLimit, express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: maxUploadBytes }), async (request, response) => {
-  if (!Buffer.isBuffer(request.body) || request.body.length === 0) { response.status(415).json({ error: 'Upload a JPG, PNG, or WebP image.' }); return; }
+  if (!Buffer.isBuffer(request.body) || request.body.length === 0) { response.status(415).json({ error: 'Upload a JPG, PNG, or WebP image' }); return; }
   const detected = detectImageType(request.body);
-  if (!detected || detected !== request.get('content-type')?.split(';')[0]?.trim().toLowerCase()) { response.status(415).json({ error: 'The file is not a valid JPG, PNG, or WebP image.' }); return; }
+  if (!detected || detected !== request.get('content-type')?.split(';')[0]?.trim().toLowerCase()) { response.status(415).json({ error: 'The file is not a valid JPG, PNG, or WebP image' }); return; }
   const name = decodeURIComponent(request.get('x-file-name') || 'image').replace(/[^\w .()-]/g, '_');
   try {
     const database = await getDatabase();
@@ -701,9 +701,9 @@ api.post('/owner/images', requireOwner, uploadLimit, express.raw({ type: ['image
     await mutateDatabase((db) => { (db.imageLibrary ||= []).push(image); });
     response.status(201).json({ image });
   } catch (error) {
-    if (error instanceof Error && error.message === 'INVALID_IMAGE') { response.status(415).json({ error: 'The image could not be read.' }); return; }
+    if (error instanceof Error && error.message === 'INVALID_IMAGE') { response.status(415).json({ error: 'The image could not be read' }); return; }
     console.error('Image upload failed:', error);
-    response.status(500).json({ error: 'The image could not be saved. Please retry.' });
+    response.status(500).json({ error: 'The image could not be saved Please retry' });
   }
 });
 
@@ -714,7 +714,7 @@ api.delete('/owner/images/:id', requireOwner, ownerLimit, async (request, respon
     database.imageLibrary = (database.imageLibrary || []).filter((image) => image.id !== id);
     return true;
   });
-  if (!removed) { response.status(409).json({ error: 'Image is used by a product. Remove it from the product first.' }); return; }
+  if (!removed) { response.status(409).json({ error: 'Image is used by a product Remove it from the product first' }); return; }
   await deleteProductImageFiles(id);
   response.json({ ok: true });
 });
@@ -722,7 +722,7 @@ api.delete('/owner/images/:id', requireOwner, ownerLimit, async (request, respon
 api.get('/owner/image-settings', requireOwner, ownerLimit, async (_request, response) => response.json({ imageSettings: mergeImageSettings((await getDatabase()).imageSettings), maxUploadMb: Math.round(maxUploadBytes / 1024 / 1024) }));
 
 api.put('/owner/image-settings', requireOwner, ownerLimit, async (request, response) => {
-  if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)) { response.status(400).json({ error: 'Provide image settings.' }); return; }
+  if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)) { response.status(400).json({ error: 'Provide image settings' }); return; }
   const imageSettings = sanitizeImageSettings(request.body);
   await mutateDatabase((database) => { database.imageSettings = imageSettings; });
   response.json({ imageSettings });
@@ -731,20 +731,20 @@ api.put('/owner/image-settings', requireOwner, ownerLimit, async (request, respo
 api.patch('/owner/content', requireOwner, ownerLimit, async (request, response) => {
   const patch = request.body;
   const allowed: (keyof StorefrontContent)[] = ['announcement', 'heroEyebrow', 'heroTitle', 'heroDescription', 'heroImageUrl', 'storyHeading', 'storyBody', 'storyImageUrl', 'circleImages', 'bannerImages'];
-  if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).length === 0) { response.status(400).json({ error: 'Provide at least one storefront field.' }); return; }
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).length === 0) { response.status(400).json({ error: 'Provide at least one storefront field' }); return; }
   const imageMaps: Record<string, string[]> = { circleImages: circleImageKeys, bannerImages: bannerImageKeys };
   const cleaned: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(patch)) {
     if (key in imageMaps) {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) { response.status(400).json({ error: `Invalid value for ${key}.` }); return; }
+      if (!value || typeof value !== 'object' || Array.isArray(value)) { response.status(400).json({ error: `Invalid value for ${key}` }); return; }
       const entries = Object.entries(value as Record<string, unknown>);
       // An empty string clears an override so the storefront falls back to its default image.
-      if (entries.some(([name, url]) => !imageMaps[key].includes(name) || (url !== '' && !httpsUrl(url)))) { response.status(400).json({ error: `Invalid image in ${key}.` }); return; }
+      if (entries.some(([name, url]) => !imageMaps[key].includes(name) || (url !== '' && !httpsUrl(url)))) { response.status(400).json({ error: `Invalid image in ${key}` }); return; }
       cleaned[key] = Object.fromEntries(entries.filter(([, url]) => url !== ''));
       continue;
     }
-    if (!allowed.includes(key as keyof StorefrontContent)) { response.status(400).json({ error: `Unknown storefront field: ${key}.` }); return; }
-    if (key.endsWith('ImageUrl') ? !httpsUrl(value) : !stringValue(value, key === 'heroTitle' ? 120 : 500)) { response.status(400).json({ error: `Invalid value for ${key}.` }); return; }
+    if (!allowed.includes(key as keyof StorefrontContent)) { response.status(400).json({ error: `Unknown storefront field: ${key}` }); return; }
+    if (key.endsWith('ImageUrl') ? !httpsUrl(value) : !stringValue(value, key === 'heroTitle' ? 120 : 500)) { response.status(400).json({ error: `Invalid value for ${key}` }); return; }
     cleaned[key] = value;
   }
   const content = await mutateDatabase((database) => {
@@ -766,7 +766,7 @@ api.patch('/owner/payment-receipts/:id', requireOwner, ownerLimit, async (reques
   if (!body || typeof body !== 'object' || Array.isArray(body)
     || Object.keys(body).some((key) => key !== 'reviewNote')
     || (body.reviewNote !== undefined && (typeof body.reviewNote !== 'string' || body.reviewNote.length > 500))) {
-    response.status(400).json({ error: 'Review note must be at most 500 characters.' }); return;
+    response.status(400).json({ error: 'Review note must be at most 500 characters' }); return;
   }
   const review = await mutateDatabase((database) => {
     const current = database.paymentReceiptReviews?.find((entry) => entry.id === request.params.id);
@@ -776,7 +776,7 @@ api.patch('/owner/payment-receipts/:id', requireOwner, ownerLimit, async (reques
     if (typeof body.reviewNote === 'string' && body.reviewNote.trim()) current.reviewNote = body.reviewNote.trim();
     return current;
   });
-  if (!review) { response.status(404).json({ error: 'Pending receipt review not found.' }); return; }
+  if (!review) { response.status(404).json({ error: 'Pending receipt review not found' }); return; }
   response.json({ review });
 });
 
@@ -795,12 +795,12 @@ api.patch('/owner/integrations', requireOwner, ownerLimit, async (request, respo
   const settings = request.body;
   const allowed = ['googleAds', 'zapier'];
   if (!settings || typeof settings !== 'object' || Array.isArray(settings) || Object.keys(settings).length === 0 || Object.keys(settings).some((key) => !allowed.includes(key))) {
-    response.status(400).json({ error: 'Provide a Google Ads and/or Zapier webhook URL.' }); return;
+    response.status(400).json({ error: 'Provide a Google Ads and/or Zapier webhook URL' }); return;
   }
   for (const key of allowed) {
     const value = settings[key];
-    if (value !== undefined && value !== '' && !httpsUrl(value)) { response.status(400).json({ error: `${key === 'googleAds' ? 'Google Ads' : 'Zapier'} webhook URL must use HTTPS.` }); return; }
-    if (value !== undefined && typeof value === 'string' && value.length > 2000) { response.status(400).json({ error: 'Webhook URLs must be at most 2,000 characters.' }); return; }
+    if (value !== undefined && value !== '' && !httpsUrl(value)) { response.status(400).json({ error: `${key === 'googleAds' ? 'Google Ads' : 'Zapier'} webhook URL must use HTTPS` }); return; }
+    if (value !== undefined && typeof value === 'string' && value.length > 2000) { response.status(400).json({ error: 'Webhook URLs must be at most 2,000 characters' }); return; }
   }
   await mutateDatabase((database) => {
     database.integrationWebhooks ||= {};
@@ -817,14 +817,14 @@ api.get('/owner/support-tickets', requireOwner, ownerLimit, async (_request, res
 });
 
 api.patch('/owner/support-tickets/:id', requireOwner, ownerLimit, async (request, response) => {
-  if (request.body?.status !== 'resolved') { response.status(400).json({ error: 'Ticket status must be resolved.' }); return; }
+  if (request.body?.status !== 'resolved') { response.status(400).json({ error: 'Ticket status must be resolved' }); return; }
   const ticket = await mutateDatabase((database) => {
     const current = database.supportTickets.find((entry) => entry.id === request.params.id);
     if (!current) return null;
     current.status = 'resolved';
     return current;
   });
-  if (!ticket) { response.status(404).json({ error: 'Support ticket not found.' }); return; }
+  if (!ticket) { response.status(404).json({ error: 'Support ticket not found' }); return; }
   response.json({ ticket });
 });
 
@@ -840,9 +840,9 @@ api.patch('/owner/orders/:id/status', requireOwner, ownerLimit, async (request, 
   const status = request.body?.status;
   const trackingNumber = request.body?.trackingNumber;
   const trackingUrl = request.body?.trackingUrl;
-  if (!['shipped', 'out_for_delivery', 'delivered'].includes(status)) { response.status(400).json({ error: 'Status must be shipped, out for delivery, or delivered.' }); return; }
-  if (trackingNumber !== undefined && (typeof trackingNumber !== 'string' || trackingNumber.length > 100)) { response.status(400).json({ error: 'Tracking reference must be at most 100 characters.' }); return; }
-  if (trackingUrl !== undefined && trackingUrl !== '' && !validTrackingUrl(trackingUrl)) { response.status(400).json({ error: 'Tracking link must be a valid HTTPS URL.' }); return; }
+  if (!['shipped', 'out_for_delivery', 'delivered'].includes(status)) { response.status(400).json({ error: 'Status must be shipped, out for delivery, or delivered' }); return; }
+  if (trackingNumber !== undefined && (typeof trackingNumber !== 'string' || trackingNumber.length > 100)) { response.status(400).json({ error: 'Tracking reference must be at most 100 characters' }); return; }
+  if (trackingUrl !== undefined && trackingUrl !== '' && !validTrackingUrl(trackingUrl)) { response.status(400).json({ error: 'Tracking link must be a valid HTTPS URL' }); return; }
   const result = await mutateDatabase((database) => {
     const order = database.orders.find((entry) => entry.id === request.params.id);
     if (!order) return null;
@@ -865,7 +865,7 @@ api.patch('/owner/orders/:id/status', requireOwner, ownerLimit, async (request, 
     return { order, changed };
   });
 
-  if (!result) { response.status(404).json({ error: 'Paid order not found or status transition is invalid.' }); return; }
+  if (!result) { response.status(404).json({ error: 'Paid order not found or status transition is invalid' }); return; }
   const email = (await getDatabase()).customers.find((entry) => entry.id === result.order.userId)?.email;
   const notificationKind = status === 'shipped' || status === 'out_for_delivery' || status === 'delivered' ? status : null;
   if (result.changed && email && notificationKind) void enqueueOrderEmail(result.order.id, notificationKind).catch((error) => console.error(`${status} email queue failed:`, error));
@@ -875,7 +875,7 @@ api.patch('/owner/orders/:id/status', requireOwner, ownerLimit, async (request, 
 
 api.patch('/owner/orders/:id/cod-payment', requireOwner, ownerLimit, async (request, response) => {
   if (request.body?.status !== 'paid' || Object.keys(request.body || {}).some((key) => key !== 'status')) {
-    response.status(400).json({ error: 'Cash-on-delivery payment status must be set to paid.' }); return;
+    response.status(400).json({ error: 'Cash-on-delivery payment status must be set to paid' }); return;
   }
   const result = await mutateDatabase((database) => {
     const order = database.orders.find((entry) => entry.id === request.params.id);
@@ -884,7 +884,7 @@ api.patch('/owner/orders/:id/cod-payment', requireOwner, ownerLimit, async (requ
       order.paymentVerifiedAt = new Date().toISOString();
       return { order, changed: true };
   });
-  if (!result) { response.status(409).json({ error: 'Only a delivered, unpaid cash-on-delivery order can be marked paid.' }); return; }
+  if (!result) { response.status(409).json({ error: 'Only a delivered, unpaid cash-on-delivery order can be marked paid' }); return; }
   if (result.order.marketingConsent) {
     void triggerAutomations({ name: 'purchase', orderId: result.order.id, amount: result.order.amount / 100, currency: result.order.currency, consent: true });
   }
@@ -895,7 +895,7 @@ api.patch('/owner/orders/:id/upi-payment', requireOwner, ownerLimit, async (requ
   const bankReference = request.body?.bankReference;
   if (request.body?.status !== 'paid' || Object.keys(request.body || {}).some((key) => !['status', 'bankReference'].includes(key))
     || typeof bankReference !== 'string' || !/^[A-Za-z0-9-]{6,80}$/.test(bankReference.trim())) {
-    response.status(400).json({ error: 'Confirm only after checking the settled payment in your bank account, and provide its bank reference.' }); return;
+    response.status(400).json({ error: 'Confirm only after checking the settled payment in your bank account, and provide its bank reference' }); return;
   }
   const order = await mutateDatabase((database) => {
     const current = database.orders.find((entry) => entry.id === request.params.id);
@@ -924,9 +924,9 @@ api.patch('/owner/orders/:id/upi-payment', requireOwner, ownerLimit, async (requ
     delete current.reservationExpiresAt;
     return structuredClone(current);
   });
-  if (order === 'duplicate') { response.status(409).json({ error: 'This bank reference has already been recorded for another order.' }); return; }
-  if (order === 'stock_unavailable') { response.status(409).json({ error: 'The payment must be manually reconciled, but the original items are no longer in stock. Contact the customer before fulfillment.' }); return; }
-  if (!order) { response.status(409).json({ error: 'Only an unpaid, pending UPI order can be confirmed. Check the order and bank settlement.' }); return; }
+  if (order === 'duplicate') { response.status(409).json({ error: 'This bank reference has already been recorded for another order' }); return; }
+  if (order === 'stock_unavailable') { response.status(409).json({ error: 'The payment must be manually reconciled, but the original items are no longer in stock Contact the customer before fulfillment' }); return; }
+  if (!order) { response.status(409).json({ error: 'Only an unpaid, pending UPI order can be confirmed Check the order and bank settlement' }); return; }
   void enqueueOrderEmail(order.id, 'payment_confirmed').catch((error) => console.error('Payment confirmation email queue failed:', error));
   if (order.marketingConsent) void triggerAutomations({ name: 'purchase', orderId: order.id, amount: order.amount / 100, currency: order.currency, consent: true });
   response.json({ order });
@@ -934,14 +934,14 @@ api.patch('/owner/orders/:id/upi-payment', requireOwner, ownerLimit, async (requ
 
 api.patch('/owner/orders/:id/return', requireOwner, ownerLimit, async (request, response) => {
   const status = request.body?.status;
-  if (!['approved', 'rejected'].includes(status)) { response.status(400).json({ error: 'Status must be approved or rejected.' }); return; }
+  if (!['approved', 'rejected'].includes(status)) { response.status(400).json({ error: 'Status must be approved or rejected' }); return; }
   const order = await mutateDatabase((database) => {
     const current = database.orders.find((entry) => entry.id === request.params.id);
     if (!current?.returnRequest) return null;
     current.returnRequest.status = status;
     return current;
   });
-  if (!order) { response.status(404).json({ error: 'Return request not found.' }); return; }
+  if (!order) { response.status(404).json({ error: 'Return request not found' }); return; }
   response.json({ order });
 });
 
@@ -969,15 +969,15 @@ function validateOwnerAgentIntent(intent: OwnerAgentIntent, database: Awaited<Re
 
 api.post('/owner/chat', requireOwner, ownerLimit, async (request, response) => {
   const message = request.body?.message;
-  if (!stringValue(message, 4000)) { response.status(400).json({ error: 'Message is required (up to 4,000 characters).' }); return; }
+  if (!stringValue(message, 4000)) { response.status(400).json({ error: 'Message is required (up to 4,000 characters)' }); return; }
   try {
     const database = await getDatabase();
     const stockCommand = message.trim().match(/^(?:set|update)\s+(?:stock|inventory)\s+(?:for\s+)?([a-z0-9_-]+)\s+(?:to|=)\s*(\d+)$/i);
     if (stockCommand) {
       const intent: OwnerAgentIntent = { type: 'update_stock', productIdOrSku: stockCommand[1], stock: Number(stockCommand[2]) };
       const action = validateOwnerAgentIntent(intent, database);
-      if (!action || action.type !== 'update_stock') { response.status(400).json({ error: 'Check the product ID or SKU and choose stock from 0 to 100,000.' }); return; }
-      response.json({ reply: `I can change ${action.productName} (${action.sku}) from ${action.previousStock} to ${action.stock} units.`, action });
+      if (!action || action.type !== 'update_stock') { response.status(400).json({ error: 'Check the product ID or SKU and choose stock from 0 to 100,000' }); return; }
+      response.json({ reply: `I can change ${action.productName} (${action.sku}) from ${action.previousStock} to ${action.stock} units`, action });
       return;
     }
     const summary = JSON.stringify({
@@ -993,7 +993,7 @@ api.post('/owner/chat', requireOwner, ownerLimit, async (request, response) => {
     const plan = await generateOwnerAgentPlan(message, summary);
     if (!plan.action) { response.json(plan); return; }
     const action = validateOwnerAgentIntent(plan.action, database);
-    if (!action) { response.json({ reply: 'I could not verify that product or order action against the current store data. Refresh the dashboard and try again.' }); return; }
+    if (!action) { response.json({ reply: 'I could not verify that product or order action against the current store data Refresh the dashboard and try again' }); return; }
     response.json({ ...plan, action });
   } catch (error) { asyncError(response, error); }
 });
@@ -1002,7 +1002,7 @@ api.post('/owner/agent/execute', requireOwner, ownerLimit, async (request, respo
   const action = request.body?.action;
   if (action?.type === 'update_stock') {
     if (!stringValue(action.productId, 100) || !Number.isInteger(action.previousStock) || !Number.isInteger(action.stock) || action.stock < 0 || action.stock > 100000) {
-      response.status(400).json({ error: 'The inventory action is invalid.' }); return;
+      response.status(400).json({ error: 'The inventory action is invalid' }); return;
     }
     const product = await mutateDatabase((database) => {
       const current = database.products.find((entry) => entry.id === action.productId);
@@ -1010,15 +1010,15 @@ api.post('/owner/agent/execute', requireOwner, ownerLimit, async (request, respo
       current.stock = action.stock;
       return { id: current.id, name: current.name, sku: current.sku, stock: current.stock };
     });
-    if (!product) { response.status(409).json({ error: 'Inventory changed since this proposal. Refresh and ask the agent again.' }); return; }
+    if (!product) { response.status(409).json({ error: 'Inventory changed since this proposal Refresh and ask the agent again' }); return; }
     if (product.stock > 0) void sendRestockAlerts().catch((error) => console.error('Restock alert scan failed:', error));
     void triggerAutomations({ name: 'inventory_updated', orderId: product.id });
-    response.json({ completed: true, message: `Updated ${product.name} (${product.sku}) stock to ${product.stock}.` });
+    response.json({ completed: true, message: `Updated ${product.name} (${product.sku}) stock to ${product.stock}` });
     return;
   }
   if (action?.type === 'update_order_status') {
     if (!stringValue(action.orderId, 100) || !['paid', 'shipped', 'delivered'].includes(action.previousStatus) || !['shipped', 'delivered'].includes(action.status)) {
-      response.status(400).json({ error: 'The order action is invalid.' }); return;
+      response.status(400).json({ error: 'The order action is invalid' }); return;
     }
     const result = await mutateDatabase((database) => {
       const order = database.orders.find((entry) => entry.id === action.orderId);
@@ -1030,13 +1030,13 @@ api.post('/owner/agent/execute', requireOwner, ownerLimit, async (request, respo
       if (action.status === 'delivered' && !order.deliveredAt) order.deliveredAt = new Date().toISOString();
       return { order, changed };
     });
-    if (!result) { response.status(409).json({ error: 'Order status changed or this transition is not allowed. Refresh and ask the agent again.' }); return; }
+    if (!result) { response.status(409).json({ error: 'Order status changed or this transition is not allowed Refresh and ask the agent again' }); return; }
     if (result.changed) void enqueueOrderEmail(result.order.id, action.status === 'shipped' ? 'shipped' : 'delivered').catch((error) => console.error(`${action.status} email queue failed:`, error));
     if (result.changed) void triggerAutomations({ name: `order_${action.status}`, orderId: result.order.id, amount: result.order.amount / 100, currency: result.order.currency });
-    response.json({ completed: true, message: `Marked order ${result.order.id} ${action.status}.` });
+    response.json({ completed: true, message: `Marked order ${result.order.id} ${action.status}` });
     return;
   }
-  response.status(400).json({ error: 'The agent action is unsupported.' });
+  response.status(400).json({ error: 'The agent action is unsupported' });
 });
 
 const customerEmailKinds: CustomerEmailKind[] = ['alert', 'thank_you', 'follow_up'];
@@ -1049,20 +1049,20 @@ function customerEmailSubject(kind: CustomerEmailKind, orderId: string): string 
 
 async function getEmailOrder(orderId: unknown, kind: unknown, response: Response): Promise<{ order: Order; email: string; kind: CustomerEmailKind } | null> {
   if (!stringValue(orderId, 100) || typeof kind !== 'string' || !customerEmailKinds.includes(kind as CustomerEmailKind)) {
-    response.status(400).json({ error: 'Choose an order and a valid email type.' });
+    response.status(400).json({ error: 'Choose an order and a valid email type' });
     return null;
   }
   const database = await getDatabase();
   const order = database.orders.find((entry) => entry.id === orderId);
-  if (!order) { response.status(404).json({ error: 'Order not found.' }); return null; }
+  if (!order) { response.status(404).json({ error: 'Order not found' }); return null; }
   if (!['paid', 'shipped', 'delivered'].includes(order.status)) {
-    response.status(400).json({ error: 'Emails can be sent only for paid orders.' }); return null;
+    response.status(400).json({ error: 'Emails can be sent only for paid orders' }); return null;
   }
   if (kind === 'follow_up' && order.status !== 'delivered') {
-    response.status(400).json({ error: 'Follow-up messages are available after delivery.' }); return null;
+    response.status(400).json({ error: 'Follow-up messages are available after delivery' }); return null;
   }
   const customer = database.customers.find((entry) => entry.id === order.userId);
-  if (!customer) { response.status(404).json({ error: 'Customer email is unavailable for this order.' }); return null; }
+  if (!customer) { response.status(404).json({ error: 'Customer email is unavailable for this order' }); return null; }
   return { order, email: customer.email, kind: kind as CustomerEmailKind };
 }
 
@@ -1088,9 +1088,9 @@ api.post('/owner/email-agent/send', requireOwner, ownerLimit, async (request, re
   const selected = await getEmailOrder(request.body?.orderId, request.body?.kind, response);
   if (!selected) return;
   if (!stringValue(request.body?.subject, 180) || !stringValue(request.body?.body, 5000)) {
-    response.status(400).json({ error: 'Review and provide an email subject and message.' }); return;
+    response.status(400).json({ error: 'Review and provide an email subject and message' }); return;
   }
-  if (!isEmailConfigured()) { response.status(503).json({ error: 'Email sending is not configured. Set SMTP_HOST, SMTP_USER and SMTP_PASS (or RESEND_API_KEY).' }); return; }
+  if (!isEmailConfigured()) { response.status(503).json({ error: 'Email sending is not configured Set SMTP_HOST, SMTP_USER and SMTP_PASS (or RESEND_API_KEY)' }); return; }
   try {
     await sendEmail(selected.email, request.body.subject.trim(), request.body.body.trim());
     response.status(202).json({ sent: true, to: selected.email });
@@ -1101,8 +1101,8 @@ api.post('/owner/social-post', requireOwner, ownerLimit, async (request, respons
   const productId = request.body?.productId;
   const database = await getDatabase();
   const product = database.products.find((entry) => entry.id === productId && entry.active);
-  if (!product) { response.status(404).json({ error: 'Active product not found.' }); return; }
-  try { response.json({ caption: await generateSocialPost(product.name, `${product.description}. Category: ${product.category}.`) }); }
+  if (!product) { response.status(404).json({ error: 'Active product not found' }); return; }
+  try { response.json({ caption: await generateSocialPost(product.name, `${product.description} Category: ${product.category}`) }); }
   catch (error) { asyncError(response, error); }
 });
 
@@ -1115,13 +1115,13 @@ api.post('/owner/marketing-automations', requireOwner, ownerLimit, async (reques
 });
 
 api.patch('/owner/marketing-automations/:id', requireOwner, ownerLimit, async (request, response) => {
-  if (typeof request.body?.enabled !== 'boolean') { response.status(400).json({ error: 'Provide enabled true or false.' }); return; }
+  if (typeof request.body?.enabled !== 'boolean') { response.status(400).json({ error: 'Provide enabled true or false' }); return; }
   const rule = await mutateDatabase((database) => {
     const found = database.automations?.find((entry) => entry.id === request.params.id);
     if (found) found.enabled = request.body.enabled;
     return found ? structuredClone(found) : null;
   });
-  if (!rule) { response.status(404).json({ error: 'Automation not found.' }); return; }
+  if (!rule) { response.status(404).json({ error: 'Automation not found' }); return; }
   response.json({ rule });
 });
 
@@ -1131,7 +1131,7 @@ api.delete('/owner/marketing-automations/:id', requireOwner, ownerLimit, async (
     database.automations = (database.automations || []).filter((entry) => entry.id !== request.params.id);
     return before !== database.automations.length;
   });
-  if (!removed) { response.status(404).json({ error: 'Automation not found.' }); return; }
+  if (!removed) { response.status(404).json({ error: 'Automation not found' }); return; }
   response.status(204).end();
 });
 

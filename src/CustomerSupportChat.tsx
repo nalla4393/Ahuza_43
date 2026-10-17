@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { LoaderCircle, MessageCircle, Send, X } from 'lucide-react';
 import './customer-support.css';
+import { removeSentenceFullStops } from './siteCopy';
 
 type ChatMessage = { role: 'assistant' | 'customer'; text: string };
 type Choice = { label: string; value: string };
@@ -90,9 +91,9 @@ function statusLabel(status: string): string {
 
 async function readJsonResponse<T>(response: Response, serviceName: string): Promise<T> {
   const body = await response.text();
-  if (!body) throw new Error(`${serviceName} returned an empty response. Please try again.`);
-  try { return JSON.parse(body) as T; }
-  catch { throw new Error(`${serviceName} returned an invalid response. Please try again.`); }
+  if (!body) throw new Error(`${serviceName} returned an empty response Please try again`);
+  try { return removeSentenceFullStops(JSON.parse(body) as T); }
+  catch { throw new Error(`${serviceName} returned an invalid response Please try again`); }
 }
 
 type Props = { onOpenAccount: () => void };
@@ -129,7 +130,7 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
   }, []);
 
   function addMessage(message: ChatMessage) {
-    setMessages((current) => [...current.slice(-38), message]);
+    setMessages((current) => [...current.slice(-38), { ...message, text: removeSentenceFullStops(message.text) }]);
   }
 
   function resetToMainMenu() {
@@ -163,29 +164,29 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
     setReturnDetails(null);
     if (value === 'tracking' || value === 'return-status') {
       setTask(value);
-      addMessage({ role: 'assistant', text: 'Please enter your order ID. Sign in to your AHUZA account first so I can show only your order information.' });
+      addMessage({ role: 'assistant', text: 'Please enter your order ID Sign in to your AHUZA account first so I can show only your order information' });
     } else if (value === 'return-product' || value === 'exchange-product') {
       setTask('return-order');
       setReturnDetails({ orderId: '', action: value === 'exchange-product' ? 'replacement' : 'return' });
-      addMessage({ role: 'assistant', text: 'Please enter the order ID for the delivered order. Returns and replacements may be requested within 7 days after delivery; eligibility will be checked by the order system.' });
+      addMessage({ role: 'assistant', text: 'Please enter the order ID for the delivered order Returns and replacements may be requested within 7 days after delivery; eligibility will be checked by the order system' });
     } else if (value === 'return-policy') {
-      addMessage({ role: 'assistant', text: 'AHUZA accepts return or replacement requests within 7 days after delivery. The order system checks eligibility when a request is submitted.' });
+      addMessage({ role: 'assistant', text: 'AHUZA accepts return or replacement requests within 7 days after delivery The order system checks eligibility when a request is submitted' });
     } else if (value === 'pincode') {
       setTask('pincode');
-      addMessage({ role: 'assistant', text: 'Please enter your 6-digit PIN code. I do not have access to AHUZA delivery serviceability data, so I will not guess availability.' });
+      addMessage({ role: 'assistant', text: 'Please enter your 6-digit PIN code I do not have access to AHUZA delivery serviceability data, so I will not guess availability' });
     } else if (value === 'coupon') {
       setTask('coupon');
-      addMessage({ role: 'assistant', text: 'Coupon and discount data is not available in the store system, so I cannot verify a code or eligibility. You can enter the code and details for a support request.' });
+      addMessage({ role: 'assistant', text: 'Coupon and discount data is not available in the store system, so I cannot verify a code or eligibility You can enter the code and details for a support request' });
     } else if (value === 'product-details') {
       setTask('product');
-      addMessage({ role: 'assistant', text: `Please enter the product name and your question about ${label.toLowerCase()}. I’ll use only information in the product catalogue; measurements or variants not listed there are unavailable.` });
+      addMessage({ role: 'assistant', text: `Please enter the product name and your question about ${label.toLowerCase()} I’ll use only information in the product catalogue; measurements or variants not listed there are unavailable` });
     } else if (value === 'support-ticket') {
       setRequiresHumanSupport(true);
       setTicketOpen(true);
-      addMessage({ role: 'assistant', text: 'Please share your complaint and a contact email so I can create a support ticket.' });
+      addMessage({ role: 'assistant', text: 'Please share your complaint and a contact email so I can create a support ticket' });
     } else {
       setTask('general');
-      addMessage({ role: 'assistant', text: `Please describe your ${label.toLowerCase()} question. I’ll answer from available store information or help you contact support.` });
+      addMessage({ role: 'assistant', text: `Please describe your ${label.toLowerCase()} question I’ll answer from available store information or help you contact support` });
     }
   }
 
@@ -227,11 +228,11 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
     const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}`);
     const result = await readJsonResponse<{ order?: ChatOrder; error?: string }>(response, 'Order service');
     if (response.status === 401) {
-      addMessage({ role: 'assistant', text: 'Please sign in to look up an order. I’ll open the secure account sign-in.' });
+      addMessage({ role: 'assistant', text: 'Please sign in to look up an order I’ll open the secure account sign-in' });
       onOpenAccount();
       return null;
     }
-    if (!response.ok || !result.order) throw new Error(result.error || 'I could not find that order in your account.');
+    if (!response.ok || !result.order) throw new Error(result.error || 'I could not find that order in your account');
     return result.order;
   }
 
@@ -246,26 +247,26 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
     setBusy(true);
     try {
       if (task === 'pincode') {
-        if (!/^[1-9]\d{5}$/.test(message)) throw new Error('Please enter a valid 6-digit Indian PIN code.');
-        addMessage({ role: 'assistant', text: 'Serviceability information is unavailable in AHUZA’s system, so I cannot confirm delivery to this PIN code. Would you like to contact support?' });
+        if (!/^[1-9]\d{5}$/.test(message)) throw new Error('Please enter a valid 6-digit Indian PIN code');
+        addMessage({ role: 'assistant', text: 'Serviceability information is unavailable in AHUZA’s system, so I cannot confirm delivery to this PIN code Would you like to contact support?' });
         setRequiresHumanSupport(true);
       } else if (task === 'tracking' || task === 'return-status' || task === 'return-order') {
         const order = await lookUpOrder(message);
         if (order && task === 'tracking') {
-          addMessage({ role: 'assistant', text: `Order ${order.id}: ${statusLabel(order.status)}.${order.trackingNumber ? ` Tracking reference: ${order.trackingNumber}.` : ' Live courier milestones are not available in the order system.'}` });
+          addMessage({ role: 'assistant', text: `Order ${order.id}: ${statusLabel(order.status)}${order.trackingNumber ? ` Tracking reference: ${order.trackingNumber}` : ' Live courier milestones are not available in the order system'}` });
         } else if (order && task === 'return-status') {
           const returnRequest = order.returnRequest;
           addMessage({ role: 'assistant', text: returnRequest
-            ? `Your ${returnRequest.action} request for order ${order.id} is ${returnRequest.status}.`
-            : `There is no return or exchange request recorded for order ${order.id}.` });
+            ? `Your ${returnRequest.action} request for order ${order.id} is ${returnRequest.status}`
+            : `There is no return or exchange request recorded for order ${order.id}` });
         } else if (order && task === 'return-order') {
           setReturnDetails((current) => current ? { ...current, orderId: order.id } : null);
           if (order.status !== 'delivered') {
-            addMessage({ role: 'assistant', text: `The order system shows this order as ${statusLabel(order.status)}. A return or replacement cannot be submitted from chat unless the order is delivered. Contact support if you need help.` });
+            addMessage({ role: 'assistant', text: `The order system shows this order as ${statusLabel(order.status)} A return or replacement cannot be submitted from chat unless the order is delivered Contact support if you need help` });
             setRequiresHumanSupport(true);
           } else {
             setTask('return-reason');
-            addMessage({ role: 'assistant', text: 'Please describe the reason for your return or replacement request. The order system will confirm whether it is eligible.' });
+            addMessage({ role: 'assistant', text: 'Please describe the reason for your return or replacement request The order system will confirm whether it is eligible' });
           }
         }
       } else if (task === 'return-reason' && returnDetails) {
@@ -274,11 +275,11 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
           body: JSON.stringify({ action: returnDetails.action, reason: message }),
         });
         const result = await readJsonResponse<{ order?: { returnRequest?: { status: string } }; error?: string }>(response, 'Returns service');
-        if (!response.ok) throw new Error(result.error || 'The order system could not accept this request.');
-        addMessage({ role: 'assistant', text: `Your ${returnDetails.action === 'return' ? 'return' : 'replacement'} request was submitted. Current status: ${result.order?.returnRequest?.status || 'requested'}.` });
+        if (!response.ok) throw new Error(result.error || 'The order system could not accept this request');
+        addMessage({ role: 'assistant', text: `Your ${returnDetails.action === 'return' ? 'return' : 'replacement'} request was submitted Current status: ${result.order?.returnRequest?.status || 'requested'}` });
         setTask(null);
       } else if (task === 'coupon') {
-        addMessage({ role: 'assistant', text: 'I do not have coupon or discount records to validate that code. Please contact support for an accurate answer.' });
+        addMessage({ role: 'assistant', text: 'I do not have coupon or discount records to validate that code Please contact support for an accurate answer' });
         setRequiresHumanSupport(true);
       } else {
         const response = await fetch('/api/customer-support/chat', {
@@ -286,12 +287,12 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
           body: JSON.stringify({ message: task === 'product' ? `Product question (${menuPath.at(-1) || 'catalogue'}): ${message}` : message, history: messages.slice(-8) }),
         });
         const result = await readJsonResponse<{ reply?: string; error?: string; requiresHumanSupport?: boolean }>(response, 'Support chat');
-        if (!response.ok || !result.reply) throw new Error(result.error || 'Support chat is temporarily unavailable. Email Info@ahuzawear.com for help.');
+        if (!response.ok || !result.reply) throw new Error(result.error || 'Support chat is temporarily unavailable Email Info@ahuzawear.com for help');
         addMessage({ role: 'assistant', text: result.reply });
         if (result.requiresHumanSupport) setRequiresHumanSupport(true);
       }
     } catch (error) {
-      addMessage({ role: 'assistant', text: error instanceof Error ? error.message : 'Support chat is temporarily unavailable. Please try again.' });
+      addMessage({ role: 'assistant', text: error instanceof Error ? error.message : 'Support chat is temporarily unavailable Please try again' });
       setRequiresHumanSupport(true);
     } finally {
       setBusy(false);
@@ -312,13 +313,13 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
         body: JSON.stringify({ email, message: `${conversation}\nCustomer request: ${details}`.slice(-2000) }),
       });
       const result = await readJsonResponse<{ message?: string; error?: string }>(response, 'Support ticket service');
-      if (!response.ok || !result.message) throw new Error(result.error || 'Could not create your support ticket. Please email Info@ahuzawear.com.');
+      if (!response.ok || !result.message) throw new Error(result.error || 'Could not create your support ticket Please email Info@ahuzawear.com');
       addMessage({ role: 'assistant', text: result.message });
       setRequiresHumanSupport(false);
       setTicketOpen(false);
       form.reset();
     } catch (error) {
-      addMessage({ role: 'assistant', text: error instanceof Error ? error.message : 'Could not create your support ticket. Please email Info@ahuzawear.com.' });
+      addMessage({ role: 'assistant', text: error instanceof Error ? error.message : 'Could not create your support ticket Please email Info@ahuzawear.com' });
     } finally {
       setTicketBusy(false);
     }
@@ -335,8 +336,8 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
       </div>
       {!ticketOpen && <div className="support-flow-controls">
         {!leafOpen && activeMenu.choices.map((choice) => <button className="support-choice" type="button" key={`${choice.value}-${choice.label}`} onClick={() => chooseOption(choice)} disabled={busy}>{choice.label}</button>)}
-        {requiresHumanSupport && <div className="support-escalation"><p>I’m unable to resolve this issue automatically. Would you like to contact AHUZA Support?</p><button type="button" onClick={() => { setTicketOpen(true); addMessage({ role: 'assistant', text: 'Please share the details needed for a support request.' }); }}>Contact Support</button><button type="button" onClick={resetToMainMenu}>Back to Main Menu</button></div>}
-        <div className="support-navigation"><button type="button" onClick={goBack} disabled={menuPath.length === 1 && !leafOpen}>← Back</button><button type="button" onClick={resetToMainMenu}>Main Menu</button><button type="button" onClick={() => { setTicketOpen(true); setRequiresHumanSupport(true); addMessage({ role: 'assistant', text: 'Please share the details needed for a support request.' }); }}>Talk to Support</button></div>
+        {requiresHumanSupport && <div className="support-escalation"><p>I’m unable to resolve this issue automatically Would you like to contact AHUZA Support?</p><button type="button" onClick={() => { setTicketOpen(true); addMessage({ role: 'assistant', text: 'Please share the details needed for a support request' }); }}>Contact Support</button><button type="button" onClick={resetToMainMenu}>Back to Main Menu</button></div>}
+        <div className="support-navigation"><button type="button" onClick={goBack} disabled={menuPath.length === 1 && !leafOpen}>← Back</button><button type="button" onClick={resetToMainMenu}>Main Menu</button><button type="button" onClick={() => { setTicketOpen(true); setRequiresHumanSupport(true); addMessage({ role: 'assistant', text: 'Please share the details needed for a support request' }); }}>Talk to Support</button></div>
       </div>}
       {ticketOpen && <form className="customer-support-ticket" onSubmit={(event) => void raiseTicket(event)}>
         <label>Email for follow-up<input type="email" name="email" autoComplete="email" maxLength={254} required disabled={ticketBusy} /></label>

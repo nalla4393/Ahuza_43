@@ -34,7 +34,7 @@ export default function ImageSettingsPanel({ settings, maxUploadMb, busy, onSave
       <Slider label="Image display size" value={draft.displaySize} min={40} max={100} unit="%" onChange={(value) => set('displaySize', value)} />
       <Slider label="Thumbnail size" value={draft.thumbnailSize} min={40} max={140} onChange={(value) => set('thumbnailSize', value)} />
       <Slider label="Image spacing" value={draft.spacing} min={0} max={64} onChange={(value) => set('spacing', value)} />
-      <p className="wide studio-muted">“Fill” stretches the image to the frame; “Contain” and “Cover” never distort it. Transparent shows through only for PNG/WebP with transparency.</p>
+      <p className="wide studio-muted">“Fill” stretches the image to the frame; “Contain” and “Cover” never distort it Transparent shows through only for PNG/WebP with transparency</p>
     </Group>
     <Group title="Image display (mobile)">
       <Select label="Aspect ratio" value={draft.mobile.aspectRatio} options={ratios} names={ratioNames} onChange={(value) => setDraft((current) => ({ ...current, mobile: { ...current.mobile, aspectRatio: value } }))} />
@@ -42,10 +42,10 @@ export default function ImageSettingsPanel({ settings, maxUploadMb, busy, onSave
       <Slider label="Image spacing" value={draft.mobile.spacing} min={0} max={48} onChange={(value) => setDraft((current) => ({ ...current, mobile: { ...current.mobile, spacing: value } }))} />
     </Group>
     <Group title="Image quality">
-      <Check2 label="Preserve the original image file" hint="Keeps the uploaded original untouched. Applies to new uploads." checked={draft.quality.preserveOriginal} onChange={(value) => setDraft((current) => ({ ...current, quality: { ...current.quality, preserveOriginal: value } }))} />
-      <Check2 label="Generate optimized responsive versions" hint="High-quality WebP copies at several widths for phones and desktops. Applies to new uploads." checked={draft.quality.optimizedVersions} onChange={(value) => setDraft((current) => ({ ...current, quality: { ...current.quality, optimizedVersions: value } }))} />
-      <Check2 label="Preserve transparency" hint="Off flattens transparent areas onto white in optimized versions." checked={draft.quality.preserveTransparency} onChange={(value) => setDraft((current) => ({ ...current, quality: { ...current.quality, preserveTransparency: value } }))} />
-      <p className="wide studio-muted">Colours and patterns are never altered and images are never stretched except when you choose “Fill”. Maximum upload size: {maxUploadMb} MB (server setting MAX_UPLOAD_MB).</p>
+      <Check2 label="Preserve the original image file" hint="Keeps the uploaded original untouched Applies to new uploads" checked={draft.quality.preserveOriginal} onChange={(value) => setDraft((current) => ({ ...current, quality: { ...current.quality, preserveOriginal: value } }))} />
+      <Check2 label="Generate optimized responsive versions" hint="High-quality WebP copies at several widths for phones and desktops Applies to new uploads" checked={draft.quality.optimizedVersions} onChange={(value) => setDraft((current) => ({ ...current, quality: { ...current.quality, optimizedVersions: value } }))} />
+      <Check2 label="Preserve transparency" hint="Off flattens transparent areas onto white in optimized versions" checked={draft.quality.preserveTransparency} onChange={(value) => setDraft((current) => ({ ...current, quality: { ...current.quality, preserveTransparency: value } }))} />
+      <p className="wide studio-muted">Colours and patterns are never altered and images are never stretched except when you choose “Fill” Maximum upload size: {maxUploadMb} MB (server setting MAX_UPLOAD_MB)</p>
     </Group>
     <Group title="Image layout">
       <Select label="Product page images" value={draft.layout.mode} options={['gallery', 'single'] as const} names={{ gallery: 'Multi-image gallery', single: 'Single image' }} onChange={(value) => setDraft((current) => ({ ...current, layout: { ...current.layout, mode: value } }))} />
