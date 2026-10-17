@@ -168,12 +168,13 @@ html,body,body *{font-family:var(--site-font) !important}
 @media(max-width:760px){.rail-side{display:flex;width:34px;height:34px}.rail-side-left{left:-6px}.rail-side-right{right:-6px}}
 
 /* Wordmark star and celebration sparkles */
+:root{--ahuza-brand:#c43d58;--ahuza-brand-hover:#a92f49;--ahuza-chatbot-green:#3a493c;--ahuza-chatbot-ink:#243129}
 .site-header>.wordmark{position:relative;display:inline-flex;align-items:center;gap:6px;background:none;-webkit-background-clip:border-box;background-clip:border-box;color:inherit}
-.wordmark .wordmark-text{color:#c43d58;-webkit-text-fill-color:currentColor}
+.wordmark .wordmark-text{color:var(--ahuza-brand);-webkit-text-fill-color:currentColor}
 .wordmark .wordmark-stack{display:flex;flex-direction:column;align-items:flex-start;line-height:1.05}
 .wordmark .wordmark-tagline{margin-top:3px;font-size:10px;font-weight:500;letter-spacing:.04em;color:var(--muted,#6b6b63);-webkit-text-fill-color:currentColor}
 @media(max-width:760px){.wordmark .wordmark-tagline{font-size:9px;letter-spacing:.02em}}
-.wordmark .wordmark-star{font-size:1.15em;line-height:1;color:#c43d58;animation:starTwinkle 2.4s ease-in-out infinite}
+.wordmark .wordmark-star{font-size:1.15em;line-height:1;color:var(--ahuza-brand);animation:starTwinkle 2.4s ease-in-out infinite}
 .wordmark-sparkles{position:absolute;inset:-8px -10px;pointer-events:none}
 .wordmark-sparkles i{position:absolute;font-style:normal;font-size:12px;color:#d4a017;opacity:0;animation:sparkle 2.6s ease-in-out infinite}
 .wordmark-sparkles i:nth-child(1){left:8%;top:0;animation-delay:0s}
@@ -209,11 +210,36 @@ html,body,body *{font-family:var(--site-font) !important}
   .site-header .header-actions>button{min-width:25px;padding:3px}
 }
 
-.site-footer{background:#1c6048!important;color:#fff}
-.site-footer .footer-top{background:#164b38}
+.site-footer{background:var(--ahuza-chatbot-green)!important;color:#fff}
+.site-footer .footer-top{background:var(--ahuza-chatbot-ink)}
 .site-footer .footer-columns li a,.site-footer .footer-columns li button,.site-footer .footer-bottom span,.site-footer .footer-bottom .owner-entry{color:#e1eee8}
 .site-footer .footer-columns li a:hover,.site-footer .footer-columns li button:hover{color:#fff}
 .site-footer .footer-bottom{border-top-color:rgb(255 255 255 / 24%)}
-.newsletter form>button{border:1px solid #c43d58;background:#c43d58;color:#fff;transition:background .2s,border-color .2s,transform .2s}
-.newsletter form>button:hover:not(:disabled){border-color:#a92f49;background:#a92f49}
-.newsletter form>button:focus-visible{outline:2px solid #c43d58;outline-offset:3px}
+.newsletter form>button{border:1px solid var(--ahuza-brand);background:var(--ahuza-brand);color:#fff;transition:background .2s,border-color .2s,transform .2s}
+.newsletter form>button:hover:not(:disabled){border-color:var(--ahuza-brand-hover);background:var(--ahuza-brand-hover)}
+.newsletter form>button:focus-visible{outline:2px solid var(--ahuza-brand);outline-offset:3px}
+
+.account-page-overlay{z-index:40;overflow-y:auto;background:var(--paper)}
+.account-page-dialog{position:relative;top:auto;left:auto;transform:none;width:min(100%,1100px);min-height:100svh;max-height:none;margin:0 auto;padding:28px clamp(20px,6vw,80px) 64px;overflow:visible;box-shadow:none;animation:none}
+.account-page-back{display:inline-flex;align-items:center;gap:8px;min-height:40px;margin:0 0 32px;padding:0;border:0;background:none;color:var(--ink);font:600 13px 'DM Sans',sans-serif;cursor:pointer}
+.account-page-back svg{transform:rotate(180deg)}
+.account-page-dialog .dialog-close{position:fixed;top:24px;right:max(24px,calc((100vw - 1100px)/2 + 24px));z-index:1}
+.account-page-dialog>.eyebrow{margin-bottom:10px}
+.account-page-dialog h2{max-width:none;margin-bottom:24px}
+.customer-profile{display:grid;gap:8px;padding:18px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.customer-profile h3{margin:0;font-size:13px}
+.customer-profile .account-email{margin:0}
+.account-page-dialog .customer-wishlist,.account-page-dialog .customer-order-history{margin:28px 0}
+.account-page-dialog .customer-wishlist h3,.account-page-dialog .customer-order-history h3{font-size:15px}
+.account-page-dialog #order-history-title{scroll-margin-top:24px}
+.account-page-dialog .customer-order{align-items:flex-start}
+.account-page-dialog .customer-order>div{gap:8px}
+.account-page-dialog .customer-order-actions{min-width:min(280px,35%)}
+.account-page-dialog .invoice-button{font-size:12px}
+@media(max-width:760px){
+  .account-page-dialog{padding:18px 18px 40px}
+  .account-page-back{margin-bottom:26px}
+  .account-page-dialog .dialog-close{top:18px;right:18px}
+  .account-page-dialog .customer-order{flex-direction:column}
+  .account-page-dialog .customer-order-actions{width:100%;min-width:0}
+}

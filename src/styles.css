@@ -192,7 +192,7 @@ body{background:#fff}
 }
 
 /* Macy's-style promo tiles, card details, footer */
-.promo-tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-bottom:1px solid var(--line)}
+.promo-tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:0;border-bottom:1px solid var(--line)}
 .promo-tiles>*{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:130px;padding:24px 16px;border:0;border-right:1px solid var(--line);background:#faf8f4;color:#111;text-align:center;cursor:pointer;transition:background .2s}
 .promo-tiles>*:last-child{border-right:0}
 .promo-tiles>*:hover{background:#f0ece4}

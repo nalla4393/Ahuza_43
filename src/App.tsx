@@ -1,5 +1,5 @@
 import { useEffect, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react';
-import { Package, User, ArrowRight, ArrowUpRight, Heart, MessageCircle, Mail, MapPin, Menu, Minus, Phone, Plus, Search, ShoppingBag, SlidersHorizontal, X } from 'lucide-react';
+import { User, ArrowRight, ArrowUpRight, Heart, MessageCircle, Mail, MapPin, Menu, Minus, Phone, Plus, Search, ShoppingBag, SlidersHorizontal, X } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import OwnerStudio from './OwnerStudio';
 import CustomerSupportChat from './CustomerSupportChat';
@@ -83,6 +83,8 @@ export default function App() {
   const [cartOpen, setCartOpen] = useState(false);
   const [wishlist, setWishlist] = useState<string[]>([]);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [accountPageOpen, setAccountPageOpen] = useState(false);
+  const [accountPageSection, setAccountPageSection] = useState<'profile' | 'orders'>('profile');
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState('');
@@ -287,6 +289,11 @@ export default function App() {
   }, [accountOpen, customer]);
 
   useEffect(() => {
+    if (!accountPageOpen || accountPageSection !== 'orders' || !customer) return;
+    window.requestAnimationFrame(() => document.querySelector('#order-history-title')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }, [accountPageOpen, accountPageSection, customer]);
+
+  useEffect(() => {
     if (!customer) { setWishlist([]); return; }
     fetch('/api/wishlist').then(async (response) => {
       if (response.ok) setWishlist(((await response.json()) as { productIds: string[] }).productIds);
@@ -392,8 +399,8 @@ export default function App() {
       const result = await response.json() as { customer?: Customer; error?: string };
       if (!response.ok || !result.customer) throw new Error(result.error || 'Could not sign in');
       setCustomer(result.customer);
-      setAccountOpen(false);
-      setNotice(`Signed in as ${result.customer.email}`);
+      if (!accountPageOpen) setAccountOpen(false);
+      setNotice(accountPageOpen ? '' : `Signed in as ${result.customer.email}`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not sign in');
     } finally {
@@ -493,6 +500,15 @@ export default function App() {
     setCustomer(null);
     setOrders([]);
     setAccountOpen(false);
+    setAccountPageOpen(false);
+  }
+
+  function openCustomerPage(section: 'profile' | 'orders') {
+    setMobileMenuOpen(false);
+    setAccountPageSection(section);
+    setAuthMode('login');
+    setAccountPageOpen(true);
+    setAccountOpen(true);
   }
 
   async function subscribeToNewsletter(event: FormEvent<HTMLFormElement>) {
@@ -664,7 +680,8 @@ export default function App() {
           </div>}
           <div className="menu-section menu-links">
             <button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}>New Arrivals</button>
-            <a href="#account-orders" onClick={() => setMobileMenuOpen(false)}>My account &amp; orders</a>
+            <button type="button" onClick={() => openCustomerPage('profile')}>My account</button>
+            <button type="button" onClick={() => openCustomerPage('orders')}>My orders</button>
             <a href="#contact" onClick={() => setMobileMenuOpen(false)}>Contact</a>
           </div>
         </aside>
@@ -676,7 +693,6 @@ export default function App() {
       <section className="promo-tiles" aria-label="Featured">
         <button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}><span>Just in</span><strong>New arrivals</strong><em>Shop now <ArrowRight size={14} /></em></button>
         <button type="button" onClick={() => openCollection('All', 'All')}><span>The full edit</span><strong>Shop all women’s wear</strong><em>Browse <ArrowRight size={14} /></em></button>
-        <a href="#account-orders"><span>Your AHUZA</span><strong>My account &amp; orders</strong><em>View <ArrowRight size={14} /></em></a>
       </section>
 
       <ProductRail id="shop-by-category" className="circle-rail" eyebrow="Shop by category" title="Find your everyday edit" linkLabel="Shop all" onLink={() => openCollection('All', 'All')}>
@@ -716,18 +732,6 @@ export default function App() {
         {catalogOpen && matchingProducts.length > visibleCount && <div className="load-more"><button className="dark-button" type="button" onClick={() => setVisibleCount((count) => count + 12)}>Load more ({matchingProducts.length - visibleCount} remaining)</button></div>}
       </section>
 
-      <section className="account-orders section-wrap" id="account-orders" aria-labelledby="account-orders-title">
-        <div className="section-heading"><div><p className="eyebrow dark-eyebrow">Your AHUZA</p><h2 id="account-orders-title">My account &amp; orders</h2></div></div>
-        <div className="account-orders-grid">
-          <button type="button" className="account-order-card" onClick={() => { setAuthMode('login'); setAccountOpen(true); }}>
-            <User size={26} /><strong>My account</strong><span>{customer ? `Signed in as ${customer.email}` : 'Sign in or create an account to manage your details and wishlist'}</span><em>{customer ? 'Open account' : 'Sign in'} <ArrowRight size={14} /></em>
-          </button>
-          <button type="button" className="account-order-card" onClick={() => { setAuthMode('login'); setAccountOpen(true); }}>
-            <Package size={26} /><strong>Orders</strong><span>{customer ? 'Track orders, download invoices and leave reviews' : 'Sign in to track your orders and download invoices'}</span><em>{customer ? 'View orders' : 'Sign in to view'} <ArrowRight size={14} /></em>
-          </button>
-        </div>
-      </section>
-
       <section className="trust-strip" aria-label="AHUZA service promises">
         <div><strong>Thoughtful delivery</strong><span>Shipping details are shown clearly at checkout</span></div>
         <div><strong>Secure checkout</strong><span>Your payment is handled through the existing AHUZA flow</span></div>
@@ -761,8 +765,8 @@ export default function App() {
         <div className="footer-top"><button type="button" className="back-to-top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Back to top ↑</button></div>
         <div className="footer-columns">
           <div><h3>Shop</h3><ul><li><button type="button" onClick={() => openCollection('All', 'All')}>All women’s wear</button></li>{categories.slice(1).map((category) => <li key={category}><button type="button" onClick={() => openCollection(category, 'All')}>{category}</button></li>)}<li><button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}>New arrivals</button></li></ul></div>
-          <div><h3>Customer service</h3><ul><li><a href="#contact">Contact us</a></li><li><a href="mailto:Info@ahuzawear.com">Info@ahuzawear.com</a></li><li><a href="tel:+919550582277">+91 95505 82277</a></li><li><button type="button" onClick={() => setAccountOpen(true)}>My account &amp; orders</button></li></ul></div>
-          <div><h3>My AHUZA</h3><ul><li><a href="#account-orders">My account</a></li><li><a href="#account-orders">Orders</a></li><li><a href="#journal">Email updates</a></li></ul></div>
+          <div><h3>Customer service</h3><ul><li><a href="#contact">Contact us</a></li><li><a href="mailto:Info@ahuzawear.com">Info@ahuzawear.com</a></li><li><a href="tel:+919550582277">+91 95505 82277</a></li><li><button type="button" onClick={() => openCustomerPage('profile')}>My account</button></li></ul></div>
+          <div><h3>My AHUZA</h3><ul><li><button type="button" onClick={() => openCustomerPage('profile')}>My account</button></li><li><button type="button" onClick={() => openCustomerPage('orders')}>My orders</button></li><li><a href="#journal">Email updates</a></li></ul></div>
           <div><h3>AHUZA</h3><p className="footer-tagline">Where Fashion Meets Passion</p><p className="footer-loc">Telangana, India</p></div>
         </div>
         <div className="footer-bottom"><a className="wordmark" href="#home">AHUZA</a><span>© AHUZA Apparel 2026</span><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
@@ -795,10 +799,11 @@ export default function App() {
         </aside>
       </div>}
 
-      {accountOpen && <div className="overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setAccountOpen(false); }}>
-        <section className="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-title">
-          <button className="icon-button dialog-close" aria-label="Close account" onClick={() => setAccountOpen(false)}><X size={20} /></button>
-          {customer ? <><p className="eyebrow dark-eyebrow">Your AHUZA account</p><h2 id="account-title">Welcome back</h2><p className="account-email">{customer.email}</p><section className="customer-wishlist" aria-labelledby="wishlist-title"><h3 id="wishlist-title">Wishlist ({wishlist.length})</h3>{wishlist.length === 0 && <p>Tap the heart on any piece to save it here</p>}{wishlist.map((id) => products.find((product) => product.id === id)).filter((product): product is Product => Boolean(product)).map((product) => <div className="wishlist-item" key={product.id}><span>{product.name} · {formatPrice(product.price)}</span>{product.stock < 1 ? <button type="button" className="dark-button" onClick={() => void requestRestockAlert(product)}>Notify me</button> : <button type="button" className="dark-button" onClick={() => addToBag(product)}>{product.sizes?.length ? 'Choose size' : 'Add to cart'}</button>}<button type="button" className="icon-button" aria-label={`Remove ${product.name} from wishlist`} onClick={() => void toggleWishlist(product)}><X size={16} /></button></div>)}</section><section className="customer-order-history" aria-labelledby="order-history-title"><h3 id="order-history-title">Order history</h3>{ordersLoading && <p>Loading your orders…</p>}{ordersError && <p className="order-history-error" role="alert">{ordersError}</p>}{!ordersLoading && !ordersError && orders.length === 0 && <p>Your orders will appear here</p>}{orders.map((order) => <article className="customer-order" key={order.id}><div><strong>{order.id.slice(0, 8)}</strong><span>{new Date(order.createdAt).toLocaleDateString('en-IN')} · {order.status.replaceAll('_', ' ')} · payment {order.paymentStatus || 'pending'}</span><span>{order.items.map((item) => `${item.name}${item.size ? ` (Size ${item.size})` : ''} × ${item.quantity}`).join(', ')}</span>{order.trackingNumber && <span>Tracking number: {order.trackingNumber}</span>}{order.trackingUrl && <a className="customer-track-link" href={order.trackingUrl} target="_blank" rel="noopener noreferrer">Track package <ArrowRight size={14} /></a>}{order.status === 'out_for_delivery' && <strong className="delivery-update">Your parcel is out for delivery</strong>}</div><div className="customer-order-actions"><button className="invoice-button" type="button" onClick={() => void downloadInvoice(order)} disabled={!order.paymentVerifiedAt || !['paid', 'shipped', 'out_for_delivery', 'delivered'].includes(order.status)}>{order.paymentVerifiedAt && ['paid', 'shipped', 'out_for_delivery', 'delivered'].includes(order.status) ? 'Download invoice' : 'Invoice after payment'}</button>{order.review ? <p className="order-review-result" aria-label={`Your rating: ${order.review.rating} out of 5`}>{'★'.repeat(order.review.rating)}{'☆'.repeat(5 - order.review.rating)}{order.review.comment ? ` · ${order.review.comment}` : ''}</p> : order.status === 'delivered' ? <form className="order-review-form" onSubmit={(event) => { event.preventDefault(); void submitOrderReview(order.id, new FormData(event.currentTarget)); }}><label>Rate this order<select name="rating" defaultValue="5"><option value="5">★★★★★ · Loved it</option><option value="4">★★★★ · Great</option><option value="3">★★★ · Good</option><option value="2">★★ · Could be better</option><option value="1">★ · Not satisfied</option></select></label><label>Review (optional)<textarea name="comment" maxLength={1000} rows={2} placeholder="Share your experience" /></label><button className="invoice-button" type="submit" disabled={reviewBusy === order.id}>{reviewBusy === order.id ? 'Sending…' : 'Submit review'}</button>{reviewMessages[order.id] && <small role="status">{reviewMessages[order.id]}</small>}</form> : null}{['pending_payment', 'cancelled'].includes(order.status) && (order.hasPendingReceiptReview ? <small>Receipt waiting for owner review This does not confirm payment</small> : <form className="receipt-upload-form" onSubmit={(event) => { event.preventDefault(); void uploadPaymentReceipt(order.id, new FormData(event.currentTarget).get('receipt')); }}><label htmlFor={`receipt-${order.id}`}>If an owner requested payment proof<input id={`receipt-${order.id}`} type="file" name="receipt" accept="image/jpeg,image/png,image/webp" required /></label><button className="invoice-button" type="submit" disabled={receiptUploadOrder === order.id}>{receiptUploadOrder === order.id ? 'Sending…' : 'Submit for review'}</button><small>Gemini extracts receipt details for owner review only The image is not stored, and AI cannot confirm payment</small>{receiptMessages[order.id] && <small role="status">{receiptMessages[order.id]}</small>}</form>)}</div></article>)}</section><button className="dark-button" onClick={() => void logout()}>Sign out</button></> : <>
+      {accountOpen && <div className={`overlay${accountPageOpen ? ' account-page-overlay' : ''}`} onMouseDown={(event) => { if (event.target === event.currentTarget) { setAccountOpen(false); setAccountPageOpen(false); } }}>
+        <section className={`account-dialog${accountPageOpen ? ' account-page-dialog' : ''}`} role="dialog" aria-modal="true" aria-labelledby="account-title">
+          {accountPageOpen && <button className="account-page-back" type="button" onClick={() => { setAccountOpen(false); setAccountPageOpen(false); }}><ArrowRight size={16} /> Back to store</button>}
+          <button className="icon-button dialog-close" aria-label={accountPageOpen ? 'Close account page' : 'Close account'} onClick={() => { setAccountOpen(false); setAccountPageOpen(false); }}><X size={20} /></button>
+          {customer ? <><p className="eyebrow dark-eyebrow">Your AHUZA account</p><h2 id="account-title">Welcome back</h2><section className="customer-profile" aria-labelledby="customer-profile-title"><h3 id="customer-profile-title">Profile</h3><p className="account-email">{customer.email}</p></section><section className="customer-wishlist" aria-labelledby="wishlist-title"><h3 id="wishlist-title">Wishlist ({wishlist.length})</h3>{wishlist.length === 0 && <p>Tap the heart on any piece to save it here</p>}{wishlist.map((id) => products.find((product) => product.id === id)).filter((product): product is Product => Boolean(product)).map((product) => <div className="wishlist-item" key={product.id}><span>{product.name} · {formatPrice(product.price)}</span>{product.stock < 1 ? <button type="button" className="dark-button" onClick={() => void requestRestockAlert(product)}>Notify me</button> : <button type="button" className="dark-button" onClick={() => addToBag(product)}>{product.sizes?.length ? 'Choose size' : 'Add to cart'}</button>}<button type="button" className="icon-button" aria-label={`Remove ${product.name} from wishlist`} onClick={() => void toggleWishlist(product)}><X size={16} /></button></div>)}</section><section className="customer-order-history" aria-labelledby="order-history-title"><h3 id="order-history-title">Order history</h3>{ordersLoading && <p>Loading your orders…</p>}{ordersError && <p className="order-history-error" role="alert">{ordersError}</p>}{!ordersLoading && !ordersError && orders.length === 0 && <p>Your orders will appear here</p>}{orders.map((order) => <article className="customer-order" key={order.id}><div><strong>{order.id.slice(0, 8)}</strong><span>{new Date(order.createdAt).toLocaleDateString('en-IN')} · {order.status.replaceAll('_', ' ')} · payment {order.paymentStatus || 'pending'}</span><span>{order.items.map((item) => `${item.name}${item.size ? ` (Size ${item.size})` : ''} × ${item.quantity}`).join(', ')}</span>{order.trackingNumber && <span>Tracking number: {order.trackingNumber}</span>}{order.trackingUrl && <a className="customer-track-link" href={order.trackingUrl} target="_blank" rel="noopener noreferrer">Track package <ArrowRight size={14} /></a>}{order.status === 'out_for_delivery' && <strong className="delivery-update">Your parcel is out for delivery</strong>}</div><div className="customer-order-actions"><button className="invoice-button" type="button" onClick={() => void downloadInvoice(order)} disabled={!order.paymentVerifiedAt || !['paid', 'shipped', 'out_for_delivery', 'delivered'].includes(order.status)}>{order.paymentVerifiedAt && ['paid', 'shipped', 'out_for_delivery', 'delivered'].includes(order.status) ? 'Download invoice' : 'Invoice after payment'}</button>{order.review ? <p className="order-review-result" aria-label={`Your rating: ${order.review.rating} out of 5`}>{'★'.repeat(order.review.rating)}{'☆'.repeat(5 - order.review.rating)}{order.review.comment ? ` · ${order.review.comment}` : ''}</p> : order.status === 'delivered' ? <form className="order-review-form" onSubmit={(event) => { event.preventDefault(); void submitOrderReview(order.id, new FormData(event.currentTarget)); }}><label>Rate this order<select name="rating" defaultValue="5"><option value="5">★★★★★ · Loved it</option><option value="4">★★★★ · Great</option><option value="3">★★★ · Good</option><option value="2">★★ · Could be better</option><option value="1">★ · Not satisfied</option></select></label><label>Review (optional)<textarea name="comment" maxLength={1000} rows={2} placeholder="Share your experience" /></label><button className="invoice-button" type="submit" disabled={reviewBusy === order.id}>{reviewBusy === order.id ? 'Sending…' : 'Submit review'}</button>{reviewMessages[order.id] && <small role="status">{reviewMessages[order.id]}</small>}</form> : null}{['pending_payment', 'cancelled'].includes(order.status) && (order.hasPendingReceiptReview ? <small>Receipt waiting for owner review This does not confirm payment</small> : <form className="receipt-upload-form" onSubmit={(event) => { event.preventDefault(); void uploadPaymentReceipt(order.id, new FormData(event.currentTarget).get('receipt')); }}><label htmlFor={`receipt-${order.id}`}>If an owner requested payment proof<input id={`receipt-${order.id}`} type="file" name="receipt" accept="image/jpeg,image/png,image/webp" required /></label><button className="invoice-button" type="submit" disabled={receiptUploadOrder === order.id}>{receiptUploadOrder === order.id ? 'Sending…' : 'Submit for review'}</button><small>Gemini extracts receipt details for owner review only The image is not stored, and AI cannot confirm payment</small>{receiptMessages[order.id] && <small role="status">{receiptMessages[order.id]}</small>}</form>)}</div></article>)}</section><button className="dark-button" onClick={() => void logout()}>Sign out</button></> : <>
             <p className="eyebrow dark-eyebrow">Your AHUZA account</p><h2 id="account-title">{authMode === 'login' ? 'A good thing to come back to' : 'Make yourself at home'}</h2>
             <form className="auth-form" onSubmit={(event) => void handleAuth(event)}><label>Email address<input name="email" type="email" autoComplete="email" required /></label><label>Password<input name="password" type="password" minLength={authMode === 'signup' ? 12 : 1} autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'} required />{authMode === 'signup' && <small>Use at least 12 characters</small>}</label><button className="dark-button" disabled={busy}>{busy ? 'One moment…' : authMode === 'login' ? 'Sign in' : 'Create account'} <ArrowRight size={16} /></button></form>
             <button className="mode-switch" onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}>{authMode === 'login' ? 'New here? Create an account' : 'Already with us? Sign in'}</button>
