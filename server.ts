@@ -38,6 +38,13 @@ app.use(helmet({
     },
   },
 }));
+app.use((request, response, next) => {
+  if (request.hostname === 'ahuzawear.com') {
+    response.redirect(308, `https://www.ahuzawear.com${request.originalUrl}`);
+    return;
+  }
+  next();
+});
 if (process.env.FRONTEND_ORIGIN || !isProduction) app.use(cors({
   origin(origin, callback) {
     const allowed = process.env.FRONTEND_ORIGIN;
