@@ -76,6 +76,14 @@ GitHub Pages cannot host this application because it needs the Express API for t
 
 Configure a Railway volume and stable secrets before treating the deployment as production-ready.
 
+## Custom domain and search indexing
+
+The canonical storefront URL is `https://www.ahuzawear.com/`. The built page declares this canonical URL, and `/robots.txt` points crawlers to `/sitemap.xml`. The Express server redirects requests for `ahuzawear.com` to the `www` hostname after the apex is routed to the app.
+
+In Railway, attach both `www.ahuzawear.com` and `ahuzawear.com` to the production service. Use `railway domain status ahuzawear.com` to see the current required DNS records. Add those records in the domain DNS provider and wait for DNS and certificate validation. If the provider cannot flatten an apex CNAME or changing apex records would interfere with email, configure a permanent HTTPS redirect from `ahuzawear.com` to `https://www.ahuzawear.com/` instead; preserve existing MX and email-related TXT records.
+
+After DNS is correct, add `https://www.ahuzawear.com/` as a URL-prefix property in Google Search Console, submit `https://www.ahuzawear.com/sitemap.xml`, and request indexing for the homepage. DNS propagation and Google's recrawl can take time; a code deployment alone cannot change DNS or guarantee when a search result updates.
+
 ## API overview
 
 - `GET /api/products`, `GET /api/products/:id`
