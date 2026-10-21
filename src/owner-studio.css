@@ -36,3 +36,7 @@
 .studio-slot-banner{width:100%;aspect-ratio:16/7;border-radius:8px}
 .studio-slot-circle img,.studio-slot-banner img{width:100%;height:100%;object-fit:cover}
 .studio-link-button{border:0;background:none;padding:0;color:var(--studio-rust);font:inherit;font-size:11px;text-decoration:underline;cursor:pointer}
+.studio-copy-group{min-width:0;margin:18px 0 0;padding:14px 0 0;border:0;border-top:1px solid var(--studio-line)}
+.studio-copy-group legend{padding:0 10px 0 0;color:var(--studio-green);font:500 15px 'Playfair Display',serif}
+.studio-copy-group .studio-form-grid{margin-top:10px}
+.studio-copy-group textarea{min-height:48px}

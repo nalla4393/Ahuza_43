@@ -11,6 +11,7 @@ import { createRule, listAutomations, runAutomations, validateRule } from './ser
 import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, getMarketingWebhookUrls, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail, testMarketingWebhooks, triggerAutomations } from './services/integrations.js';
 import { createUpiIntent, getUpiConfiguration } from './services/upi.js';
+import { storefrontCopyFields } from '../shared/storefrontCopy.js';
 
 export const api = Router();
 const authLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false });
@@ -731,10 +732,20 @@ api.put('/owner/image-settings', requireOwner, ownerLimit, async (request, respo
 api.patch('/owner/content', requireOwner, ownerLimit, async (request, response) => {
   const patch = request.body;
   const allowed: (keyof StorefrontContent)[] = ['announcement', 'heroEyebrow', 'heroTitle', 'heroDescription', 'heroImageUrl', 'storyHeading', 'storyBody', 'storyImageUrl', 'circleImages', 'bannerImages'];
+  const copyFields = new Set<string>(storefrontCopyFields.map(({ id }) => id));
   if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).length === 0) { response.status(400).json({ error: 'Provide at least one storefront field' }); return; }
   const imageMaps: Record<string, string[]> = { circleImages: circleImageKeys, bannerImages: bannerImageKeys };
   const cleaned: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(patch)) {
+    if (key === 'copy') {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) { response.status(400).json({ error: 'Invalid storefront copy' }); return; }
+      const entries = Object.entries(value as Record<string, unknown>);
+      if (entries.length === 0 || entries.some(([name, text]) => !copyFields.has(name) || !stringValue(text, 500))) {
+        response.status(400).json({ error: 'Invalid storefront copy field' }); return;
+      }
+      cleaned.copy = Object.fromEntries(entries);
+      continue;
+    }
     if (key in imageMaps) {
       if (!value || typeof value !== 'object' || Array.isArray(value)) { response.status(400).json({ error: `Invalid value for ${key}` }); return; }
       const entries = Object.entries(value as Record<string, unknown>);
@@ -748,7 +759,9 @@ api.patch('/owner/content', requireOwner, ownerLimit, async (request, response) 
     cleaned[key] = value;
   }
   const content = await mutateDatabase((database) => {
-    database.content = { ...database.content, ...cleaned };
+    const { copy, ...fields } = cleaned;
+    database.content = { ...database.content, ...fields };
+    if (copy) database.content.copy = { ...database.content.copy, ...(copy as StorefrontContent['copy']) };
     return database.content;
   });
   response.json({ content });

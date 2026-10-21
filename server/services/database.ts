@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { defaultStorefrontCopy, mergeStorefrontCopy, type StorefrontCopy } from '../../shared/storefrontCopy.js';
 
 export type Product = {
   id: string;
@@ -174,6 +175,7 @@ export type StorefrontContent = {
   storyImageUrl: string;
   circleImages: Record<string, string>;
   bannerImages: Record<string, string>;
+  copy: StorefrontCopy;
 };
 
 export const circleImageKeys = ['Women', 'Men', 'Kurtis', 'Frocks', 'Kurta Sets', 'Lehengas', 'Night Suits', 'Track Suits', 'New Arrivals', 'Bestsellers', 'Sale'];
@@ -190,6 +192,7 @@ export const defaultStorefrontContent: StorefrontContent = {
   storyImageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1200&q=85',
   circleImages: {},
   bannerImages: {},
+  copy: structuredClone(defaultStorefrontCopy),
 };
 
 export type AutomationTrigger = 'order_placed' | 'order_delivered' | 'win_back';
@@ -281,7 +284,13 @@ async function loadDatabase(): Promise<Database> {
       paymentReceiptReviews: Array.isArray(parsed.paymentReceiptReviews) ? parsed.paymentReceiptReviews : [],
       sitePublished: parsed.sitePublished !== false,
       ...(parsed.integrationWebhooks && typeof parsed.integrationWebhooks === 'object' ? { integrationWebhooks: parsed.integrationWebhooks } : {}),
-      content: { ...structuredClone(defaultStorefrontContent), ...(parsed.content && typeof parsed.content === 'object' ? parsed.content : {}) },
+      content: {
+        ...structuredClone(defaultStorefrontContent),
+        ...(parsed.content && typeof parsed.content === 'object' ? parsed.content : {}),
+        circleImages: { ...defaultStorefrontContent.circleImages, ...(parsed.content?.circleImages || {}) },
+        bannerImages: { ...defaultStorefrontContent.bannerImages, ...(parsed.content?.bannerImages || {}) },
+        copy: mergeStorefrontCopy(parsed.content?.copy),
+      },
       imageSettings: mergeImageSettings(parsed.imageSettings),
       imageLibrary: Array.isArray(parsed.imageLibrary) ? parsed.imageLibrary : [],
       automations: Array.isArray(parsed.automations) ? parsed.automations : [],

@@ -1,0 +1,77 @@
+export const storefrontCopyFields = [
+  { id: 'newBannerEyebrow', label: 'New arrivals banner eyebrow', group: 'Campaign banners', defaultValue: 'Just landed' },
+  { id: 'newBannerTitle', label: 'New arrivals banner title', group: 'Campaign banners', defaultValue: 'New Arrivals' },
+  { id: 'newBannerDescription', label: 'New arrivals banner description', group: 'Campaign banners', defaultValue: 'Fresh silhouettes for every occasion, added this week' },
+  { id: 'newBannerCta', label: 'New arrivals banner button', group: 'Campaign banners', defaultValue: 'Shop new in' },
+  { id: 'saleBannerEyebrow', label: 'Sale banner eyebrow', group: 'Campaign banners', defaultValue: 'Season sale' },
+  { id: 'saleBannerTitle', label: 'Sale banner title', group: 'Campaign banners', defaultValue: 'Up to 50% off' },
+  { id: 'saleBannerDescription', label: 'Sale banner description', group: 'Campaign banners', defaultValue: 'Your favourites at limited-time prices While stocks last' },
+  { id: 'saleBannerCta', label: 'Sale banner button', group: 'Campaign banners', defaultValue: 'Shop the sale' },
+  { id: 'festiveBannerEyebrow', label: 'Festive banner eyebrow', group: 'Campaign banners', defaultValue: 'Festive edit' },
+  { id: 'festiveBannerTitle', label: 'Festive banner title', group: 'Campaign banners', defaultValue: 'Kurta Sets & Lehengas' },
+  { id: 'festiveBannerDescription', label: 'Festive banner description', group: 'Campaign banners', defaultValue: 'Celebrate in handcrafted ethnic wear' },
+  { id: 'festiveBannerCta', label: 'Festive banner button', group: 'Campaign banners', defaultValue: 'Explore the edit' },
+  { id: 'newPromoEyebrow', label: 'New arrivals promo eyebrow', group: 'Homepage sections', defaultValue: 'Just in' },
+  { id: 'newPromoTitle', label: 'New arrivals promo title', group: 'Homepage sections', defaultValue: 'New arrivals' },
+  { id: 'newPromoLink', label: 'New arrivals promo link', group: 'Homepage sections', defaultValue: 'Shop now' },
+  { id: 'allPromoEyebrow', label: 'Shop all promo eyebrow', group: 'Homepage sections', defaultValue: 'The full edit' },
+  { id: 'allPromoTitle', label: 'Shop all promo title', group: 'Homepage sections', defaultValue: 'Shop all women’s wear' },
+  { id: 'allPromoLink', label: 'Shop all promo link', group: 'Homepage sections', defaultValue: 'Browse' },
+  { id: 'categoryEyebrow', label: 'Category section eyebrow', group: 'Homepage sections', defaultValue: 'Shop by category' },
+  { id: 'categoryTitle', label: 'Category section title', group: 'Homepage sections', defaultValue: 'Find your everyday edit' },
+  { id: 'categoryLink', label: 'Category section link', group: 'Homepage sections', defaultValue: 'Shop all' },
+  { id: 'arrivalsEyebrow', label: 'New arrivals section eyebrow', group: 'Homepage sections', defaultValue: 'Just in' },
+  { id: 'arrivalsTitle', label: 'New arrivals section title', group: 'Homepage sections', defaultValue: 'New arrivals' },
+  { id: 'arrivalsLink', label: 'New arrivals section link', group: 'Homepage sections', defaultValue: 'Shop all' },
+  { id: 'readyEyebrow', label: 'Ready to ship section eyebrow', group: 'Homepage sections', defaultValue: 'In stock now' },
+  { id: 'readyTitle', label: 'Ready to ship section title', group: 'Homepage sections', defaultValue: 'Ready to ship' },
+  { id: 'readyLink', label: 'Ready to ship section link', group: 'Homepage sections', defaultValue: 'View collection' },
+  { id: 'trustDeliveryTitle', label: 'Delivery promise title', group: 'Service promises', defaultValue: 'Thoughtful delivery' },
+  { id: 'trustDeliveryBody', label: 'Delivery promise description', group: 'Service promises', defaultValue: 'Shipping details are shown clearly at checkout' },
+  { id: 'trustCheckoutTitle', label: 'Checkout promise title', group: 'Service promises', defaultValue: 'Secure checkout' },
+  { id: 'trustCheckoutBody', label: 'Checkout promise description', group: 'Service promises', defaultValue: 'Your payment is handled through the existing AHUZA flow' },
+  { id: 'trustHelpTitle', label: 'Support promise title', group: 'Service promises', defaultValue: 'Here to help' },
+  { id: 'trustHelpBody', label: 'Support promise description', group: 'Service promises', defaultValue: 'Contact us for support with your order or fit' },
+  { id: 'contactEyebrow', label: 'Contact section eyebrow', group: 'Contact and newsletter', defaultValue: 'Contact us' },
+  { id: 'contactTitle', label: 'Contact section title', group: 'Contact and newsletter', defaultValue: 'Let’s build your next favourite fit' },
+  { id: 'contactBody', label: 'Contact section description', group: 'Contact and newsletter', defaultValue: 'From styling advice to bulk orders and partnerships, we’d love to hear from you' },
+  { id: 'contactEmailLabel', label: 'Email contact label', group: 'Contact and newsletter', defaultValue: 'Email' },
+  { id: 'contactEmail', label: 'Contact email address', group: 'Contact and newsletter', defaultValue: 'Info@ahuzawear.com' },
+  { id: 'contactPhoneLabel', label: 'Phone contact label', group: 'Contact and newsletter', defaultValue: 'Phone' },
+  { id: 'contactPhone', label: 'Contact phone number', group: 'Contact and newsletter', defaultValue: '+91 95505 82277' },
+  { id: 'contactLocationLabel', label: 'Location contact label', group: 'Contact and newsletter', defaultValue: 'Location' },
+  { id: 'contactLocation', label: 'Contact location', group: 'Contact and newsletter', defaultValue: 'Telangana, India' },
+  { id: 'newsletterEyebrow', label: 'Newsletter eyebrow', group: 'Contact and newsletter', defaultValue: 'Ahuza updates' },
+  { id: 'newsletterTitle', label: 'Newsletter title', group: 'Contact and newsletter', defaultValue: 'Stay in style' },
+  { id: 'newsletterBody', label: 'Newsletter description', group: 'Contact and newsletter', defaultValue: 'New collections, thoughtful notes and offers from AHUZA' },
+  { id: 'newsletterPlaceholder', label: 'Newsletter email placeholder', group: 'Contact and newsletter', defaultValue: 'Your email address' },
+  { id: 'newsletterConsent', label: 'Newsletter consent label', group: 'Contact and newsletter', defaultValue: 'I agree to receive AHUZA news and offers by email' },
+  { id: 'newsletterSubmit', label: 'Newsletter button', group: 'Contact and newsletter', defaultValue: 'Subscribe' },
+  { id: 'footerShopTitle', label: 'Footer shop heading', group: 'Footer', defaultValue: 'Shop' },
+  { id: 'footerAllWear', label: 'Footer all-wear link', group: 'Footer', defaultValue: 'All women’s wear' },
+  { id: 'footerNewArrivals', label: 'Footer new arrivals link', group: 'Footer', defaultValue: 'New arrivals' },
+  { id: 'footerCustomerTitle', label: 'Footer customer service heading', group: 'Footer', defaultValue: 'Customer service' },
+  { id: 'footerContact', label: 'Footer contact link', group: 'Footer', defaultValue: 'Contact us' },
+  { id: 'footerBrandTagline', label: 'Footer brand tagline', group: 'Footer', defaultValue: 'Where Fashion Meets Passion' },
+  { id: 'footerLocation', label: 'Footer location', group: 'Footer', defaultValue: 'Telangana, India' },
+  { id: 'footerBackToTop', label: 'Back to top link', group: 'Footer', defaultValue: 'Back to top ↑' },
+  { id: 'headerBrandTagline', label: 'Header brand tagline', group: 'Footer', defaultValue: 'Celebrations start at Ahuza' },
+] as const;
+
+export type StorefrontCopyId = (typeof storefrontCopyFields)[number]['id'];
+export type StorefrontCopy = Record<StorefrontCopyId, string>;
+
+export const defaultStorefrontCopy = Object.fromEntries(
+  storefrontCopyFields.map(({ id, defaultValue }) => [id, defaultValue]),
+) as StorefrontCopy;
+
+export function mergeStorefrontCopy(value: unknown): StorefrontCopy {
+  const copy = { ...defaultStorefrontCopy };
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const { id } of storefrontCopyFields) {
+      const entry = (value as Record<string, unknown>)[id];
+      if (typeof entry === 'string') copy[id] = entry;
+    }
+  }
+  return copy;
+}

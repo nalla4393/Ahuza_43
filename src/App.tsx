@@ -6,7 +6,7 @@ import CustomerSupportChat from './CustomerSupportChat';
 import ProductRail from './ProductRail';
 import HeroCarousel, { type BannerSlide } from './HeroCarousel';
 import { defaultImageSettings, imageSettingsVars, mainImage, srcSet, type ImageSettings, type ProductImage } from './imageTypes';
-import { removeSentenceFullStops } from './siteCopy';
+import { defaultStorefrontCopy, type StorefrontCopyId } from '../shared/storefrontCopy';
 
 type Product = {
   id: string;
@@ -38,7 +38,7 @@ const formatPrice = (price: number) => new Intl.NumberFormat('en-IN', {
 
 type Customer = { id: string; email: string };
 type CustomerOrder = { id: string; amount: number; currency: string; status: string; paymentMethod?: 'upi' | 'cod'; paymentStatus?: string; paymentVerifiedAt?: string; hasPendingReceiptReview?: boolean; createdAt: string; trackingNumber?: string; trackingUrl?: string; review?: { rating: number; comment?: string; createdAt: string }; items: { name: string; quantity: number; size?: string }[] };
-type StorefrontContent = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string; circleImages?: Record<string, string>; bannerImages?: Record<string, string> };
+type StorefrontContent = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string; circleImages?: Record<string, string>; bannerImages?: Record<string, string>; copy?: Record<StorefrontCopyId, string> };
 type CartLine = { productId: string; quantity: number; size?: string };
 type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; paymentReference?: string; upiIntent?: string; merchantVpa?: string; merchantName?: string; amount: number; currency: string; expiresAt?: string; status?: string };
 type PaymentConfiguration = { configured: boolean; upiVpa: string | null; merchantName: string; automaticVerification: false };
@@ -61,7 +61,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
   let result: T;
   try {
-    result = removeSentenceFullStops(JSON.parse(text) as T);
+    result = JSON.parse(text) as T;
   } catch {
     throw new Error(response.ok ? 'The server returned an unreadable response' : `Request failed (${response.status})`);
   }
@@ -76,6 +76,7 @@ export default function App() {
     storyHeading: 'Wear what feels like you',
     storyBody: 'We make pieces to live in, not just look at Easy silhouettes, tactile fabrics, and the quiet confidence of getting dressed without overthinking it',
     storyImageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1200&q=85',
+    copy: defaultStorefrontCopy,
   });
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -130,6 +131,7 @@ export default function App() {
   const cartCount = cart.reduce((count, item) => count + item.quantity, 0);
   const cartLines = cart.map((line) => ({ ...line, product: products.find((product) => product.id === line.productId) })).filter((line): line is CartLine & { product: Product } => Boolean(line.product));
   const cartTotal = cartLines.reduce((total, line) => total + line.product.price * line.quantity, 0);
+  const storefrontText = (id: StorefrontCopyId) => storeContent.copy?.[id] ?? defaultStorefrontCopy[id];
   const estimatedShipping = cartTotal < 2500 ? 100 : 0;
   const categories = ['All', ...Array.from(new Set(products.map((product) => product.category)))];
   const sizes = ['All', ...Array.from(new Set(products.flatMap((product) => product.sizes || [])))];
@@ -166,9 +168,9 @@ export default function App() {
   });
   const bannerSlides: BannerSlide[] = [
     { id: 'collection', eyebrow: storeContent.heroEyebrow, title: storeContent.heroTitle, description: storeContent.heroDescription, cta: 'Shop the collection', desktopImage: storeContent.heroImageUrl, onSelect: () => openCollection('All', 'All') },
-    { id: 'new', eyebrow: 'Just landed', title: 'New Arrivals', description: 'Fresh silhouettes for every occasion, added this week', cta: 'Shop new in', desktopImage: storeContent.bannerImages?.new || 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=2200&q=80', mobileImage: storeContent.bannerImages?.new || 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=900&h=1100&q=80', onSelect: () => openNavItem('New Arrivals') },
-    { id: 'sale', eyebrow: 'Season sale', title: 'Up to 50% off', description: 'Your favourites at limited-time prices While stocks last', cta: 'Shop the sale', desktopImage: storeContent.bannerImages?.sale || 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=2200&q=80', mobileImage: storeContent.bannerImages?.sale || 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&h=1100&q=80', onSelect: () => openNavItem('Sale') },
-    { id: 'festive', eyebrow: 'Festive edit', title: 'Kurta Sets & Lehengas', description: 'Celebrate in handcrafted ethnic wear', cta: 'Explore the edit', desktopImage: storeContent.bannerImages?.festive || 'https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=2200&q=80', mobileImage: storeContent.bannerImages?.festive || 'https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=900&h=1100&q=80', onSelect: () => openNavItem('Kurta Sets') },
+    { id: 'new', eyebrow: storefrontText('newBannerEyebrow'), title: storefrontText('newBannerTitle'), description: storefrontText('newBannerDescription'), cta: storefrontText('newBannerCta'), desktopImage: storeContent.bannerImages?.new || 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=2200&q=80', mobileImage: storeContent.bannerImages?.new || 'https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=900&h=1100&q=80', onSelect: () => openNavItem('New Arrivals') },
+    { id: 'sale', eyebrow: storefrontText('saleBannerEyebrow'), title: storefrontText('saleBannerTitle'), description: storefrontText('saleBannerDescription'), cta: storefrontText('saleBannerCta'), desktopImage: storeContent.bannerImages?.sale || 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=2200&q=80', mobileImage: storeContent.bannerImages?.sale || 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&h=1100&q=80', onSelect: () => openNavItem('Sale') },
+    { id: 'festive', eyebrow: storefrontText('festiveBannerEyebrow'), title: storefrontText('festiveBannerTitle'), description: storefrontText('festiveBannerDescription'), cta: storefrontText('festiveBannerCta'), desktopImage: storeContent.bannerImages?.festive || 'https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=2200&q=80', mobileImage: storeContent.bannerImages?.festive || 'https://images.unsplash.com/photo-1469334031218-e382a71b716b?auto=format&fit=crop&w=900&h=1100&q=80', onSelect: () => openNavItem('Kurta Sets') },
   ];
   const shownProducts = matchingProducts.slice(0, visibleCount);
   const newArrivals = products.slice().sort((a, b) => b.id.localeCompare(a.id)).slice(0, 12);
@@ -648,7 +650,7 @@ export default function App() {
             </div>
             : <button key={label} type="button" onClick={() => openNavItem(label)}>{label}</button>)}
         </nav>
-        <a className="wordmark" href="#home" aria-label="AHUZA home"><span className="wordmark-star" aria-hidden="true">☆</span><span className="wordmark-stack"><span className="wordmark-text">AHUZA</span><span className="wordmark-tagline">Celebrations start at Ahuza</span></span><span className="wordmark-sparkles" aria-hidden="true"><i>✦</i><i>★</i><i>✦</i><i>✧</i><i>✦</i></span></a>
+        <a className="wordmark" href="#home" aria-label="AHUZA home"><span className="wordmark-star" aria-hidden="true">☆</span><span className="wordmark-stack"><span className="wordmark-text">AHUZA</span><span className="wordmark-tagline">{storefrontText('headerBrandTagline')}</span></span><span className="wordmark-sparkles" aria-hidden="true"><i>✦</i><i>★</i><i>✦</i><i>✧</i><i>✦</i></span></a>
         <form className="header-search" role="search" onSubmit={(event) => { event.preventDefault(); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>
           <label className="sr-only" htmlFor="header-search-input">Search AHUZA</label>
           <input id="header-search-input" type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); if (event.target.value) setCatalogOpen(true); }} placeholder="Search for products, categories or fabrics" autoComplete="off" />
@@ -691,11 +693,11 @@ export default function App() {
       <HeroCarousel slides={bannerSlides} />
 
       <section className="promo-tiles" aria-label="Featured">
-        <button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}><span>Just in</span><strong>New arrivals</strong><em>Shop now <ArrowRight size={14} /></em></button>
-        <button type="button" onClick={() => openCollection('All', 'All')}><span>The full edit</span><strong>Shop all women’s wear</strong><em>Browse <ArrowRight size={14} /></em></button>
+        <button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}><span>{storefrontText('newPromoEyebrow')}</span><strong>{storefrontText('newPromoTitle')}</strong><em>{storefrontText('newPromoLink')} <ArrowRight size={14} /></em></button>
+        <button type="button" onClick={() => openCollection('All', 'All')}><span>{storefrontText('allPromoEyebrow')}</span><strong>{storefrontText('allPromoTitle')}</strong><em>{storefrontText('allPromoLink')} <ArrowRight size={14} /></em></button>
       </section>
 
-      <ProductRail id="shop-by-category" className="circle-rail" eyebrow="Shop by category" title="Find your everyday edit" linkLabel="Shop all" onLink={() => openCollection('All', 'All')}>
+      <ProductRail id="shop-by-category" className="circle-rail" eyebrow={storefrontText('categoryEyebrow')} title={storefrontText('categoryTitle')} linkLabel={storefrontText('categoryLink')} onLink={() => openCollection('All', 'All')}>
         {circleItems.map((item) => <button type="button" className="category-circle" key={item.label} onClick={() => openNavItem(item.label)}>
           <span className="circle-img"><img src={item.image} alt="" loading="lazy" /></span>
           <span className="circle-label">{item.label}</span>
@@ -703,10 +705,10 @@ export default function App() {
       </ProductRail>
 
       {!catalogOpen && <>
-        <ProductRail id="new-arrivals" eyebrow="Just in" title="New arrivals" linkLabel="Shop all" onLink={() => { setSortOrder('newest'); openCollection('All', 'All'); }} style={imageSettingsVars(imageSettings) as CSSProperties}>
+        <ProductRail id="new-arrivals" eyebrow={storefrontText('arrivalsEyebrow')} title={storefrontText('arrivalsTitle')} linkLabel={storefrontText('arrivalsLink')} onLink={() => { setSortOrder('newest'); openCollection('All', 'All'); }} style={imageSettingsVars(imageSettings) as CSSProperties}>
           {newArrivals.map((product, index) => renderProductCard(product, index))}
         </ProductRail>
-        {readyToShip.length > 0 && <ProductRail id="ready-to-ship" eyebrow="In stock now" title="Ready to ship" linkLabel="View collection" onLink={() => { setInStockOnly(true); openCollection('All', 'All'); }} style={imageSettingsVars(imageSettings) as CSSProperties}>
+        {readyToShip.length > 0 && <ProductRail id="ready-to-ship" eyebrow={storefrontText('readyEyebrow')} title={storefrontText('readyTitle')} linkLabel={storefrontText('readyLink')} onLink={() => { setInStockOnly(true); openCollection('All', 'All'); }} style={imageSettingsVars(imageSettings) as CSSProperties}>
           {readyToShip.map((product, index) => renderProductCard(product, index))}
         </ProductRail>}
       </>}
@@ -733,40 +735,40 @@ export default function App() {
       </section>
 
       <section className="trust-strip" aria-label="AHUZA service promises">
-        <div><strong>Thoughtful delivery</strong><span>Shipping details are shown clearly at checkout</span></div>
-        <div><strong>Secure checkout</strong><span>Your payment is handled through the existing AHUZA flow</span></div>
-        <div><strong>Here to help</strong><span>Contact us for support with your order or fit</span></div>
+        <div><strong>{storefrontText('trustDeliveryTitle')}</strong><span>{storefrontText('trustDeliveryBody')}</span></div>
+        <div><strong>{storefrontText('trustCheckoutTitle')}</strong><span>{storefrontText('trustCheckoutBody')}</span></div>
+        <div><strong>{storefrontText('trustHelpTitle')}</strong><span>{storefrontText('trustHelpBody')}</span></div>
       </section>
 
       <section className="contact-section" id="contact">
         <div className="contact-copy">
-          <p className="eyebrow">Contact us</p>
-          <h2>Let’s build your next favourite fit</h2>
-          <p>From styling advice to bulk orders and partnerships, we’d love to hear from you</p>
+          <p className="eyebrow">{storefrontText('contactEyebrow')}</p>
+          <h2>{storefrontText('contactTitle')}</h2>
+          <p>{storefrontText('contactBody')}</p>
         </div>
         <address className="contact-grid">
-          <a className="contact-card" href="mailto:Info@ahuzawear.com">
+          <a className="contact-card" href={`mailto:${storefrontText('contactEmail')}`}>
             <Mail className="contact-icon" size={20} aria-hidden="true" />
-            <div className="contact-card-copy"><h3>Email</h3><span className="contact-value">Info@ahuzawear.com</span></div>
+            <div className="contact-card-copy"><h3>{storefrontText('contactEmailLabel')}</h3><span className="contact-value">{storefrontText('contactEmail')}</span></div>
           </a>
-          <a className="contact-card" href="tel:+919550582277">
+          <a className="contact-card" href={`tel:${storefrontText('contactPhone').replace(/\s+/g, '')}`}>
             <Phone className="contact-icon" size={20} aria-hidden="true" />
-          <div className="contact-card-copy"><h3>Phone</h3><span className="contact-value">+91 95505 82277</span></div>
+          <div className="contact-card-copy"><h3>{storefrontText('contactPhoneLabel')}</h3><span className="contact-value">{storefrontText('contactPhone')}</span></div>
           </a>
           <div className="contact-card">
             <MapPin className="contact-icon" size={20} aria-hidden="true" />
-            <div className="contact-card-copy"><h3>Location</h3><span className="contact-value">Telangana, India</span></div>
+            <div className="contact-card-copy"><h3>{storefrontText('contactLocationLabel')}</h3><span className="contact-value">{storefrontText('contactLocation')}</span></div>
           </div>
         </address>
       </section>
 
-      <section className="newsletter" id="journal"><div><p className="eyebrow">Ahuza updates</p><h2>Stay in style</h2><p className="newsletter-copy">New collections, thoughtful notes and offers from AHUZA</p></div><form onSubmit={(event) => void subscribeToNewsletter(event)}><label className="sr-only" htmlFor="newsletter-email">Email address</label><input id="newsletter-email" name="email" type="email" autoComplete="email" placeholder="Your email address" maxLength={254} required disabled={newsletterBusy} /><label className="newsletter-consent"><input name="consent" type="checkbox" required disabled={newsletterBusy} /> I agree to receive AHUZA news and offers by email</label><button type="submit" disabled={newsletterBusy}>{newsletterBusy ? 'Subscribing…' : 'Subscribe'} <ArrowRight size={16} /></button>{newsletterMessage && <p className="newsletter-message" role="status">{newsletterMessage}</p>}</form></section>
+      <section className="newsletter" id="journal"><div><p className="eyebrow">{storefrontText('newsletterEyebrow')}</p><h2>{storefrontText('newsletterTitle')}</h2><p className="newsletter-copy">{storefrontText('newsletterBody')}</p></div><form onSubmit={(event) => void subscribeToNewsletter(event)}><label className="sr-only" htmlFor="newsletter-email">Email address</label><input id="newsletter-email" name="email" type="email" autoComplete="email" placeholder={storefrontText('newsletterPlaceholder')} maxLength={254} required disabled={newsletterBusy} /><label className="newsletter-consent"><input name="consent" type="checkbox" required disabled={newsletterBusy} /> {storefrontText('newsletterConsent')}</label><button type="submit" disabled={newsletterBusy}>{newsletterBusy ? 'Subscribing…' : storefrontText('newsletterSubmit')} <ArrowRight size={16} /></button>{newsletterMessage && <p className="newsletter-message" role="status">{newsletterMessage}</p>}</form></section>
       <footer className="site-footer">
-        <div className="footer-top"><button type="button" className="back-to-top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Back to top ↑</button></div>
+        <div className="footer-top"><button type="button" className="back-to-top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>{storefrontText('footerBackToTop')}</button></div>
         <div className="footer-columns">
-          <div><h3>Shop</h3><ul><li><button type="button" onClick={() => openCollection('All', 'All')}>All women’s wear</button></li>{categories.slice(1).map((category) => <li key={category}><button type="button" onClick={() => openCollection(category, 'All')}>{category}</button></li>)}<li><button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}>New arrivals</button></li></ul></div>
-          <div><h3>Customer service</h3><ul><li><a href="#contact">Contact us</a></li><li><a href="mailto:Info@ahuzawear.com">Info@ahuzawear.com</a></li><li><a href="tel:+919550582277">+91 95505 82277</a></li></ul></div>
-          <div><h3>AHUZA</h3><p className="footer-tagline">Where Fashion Meets Passion</p><p className="footer-loc">Telangana, India</p></div>
+          <div><h3>{storefrontText('footerShopTitle')}</h3><ul><li><button type="button" onClick={() => openCollection('All', 'All')}>{storefrontText('footerAllWear')}</button></li>{categories.slice(1).map((category) => <li key={category}><button type="button" onClick={() => openCollection(category, 'All')}>{category}</button></li>)}<li><button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}>{storefrontText('footerNewArrivals')}</button></li></ul></div>
+          <div><h3>{storefrontText('footerCustomerTitle')}</h3><ul><li><a href="#contact">{storefrontText('footerContact')}</a></li><li><a href={`mailto:${storefrontText('contactEmail')}`}>{storefrontText('contactEmail')}</a></li><li><a href={`tel:${storefrontText('contactPhone').replace(/\s+/g, '')}`}>{storefrontText('contactPhone')}</a></li></ul></div>
+          <div><h3>AHUZA</h3><p className="footer-tagline">{storefrontText('footerBrandTagline')}</p><p className="footer-loc">{storefrontText('footerLocation')}</p></div>
         </div>
         <div className="footer-bottom"><a className="wordmark" href="#home">AHUZA</a><span>© AHUZA Apparel 2026</span><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
       </footer>
