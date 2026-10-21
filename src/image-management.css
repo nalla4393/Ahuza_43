@@ -63,6 +63,11 @@
 @media(max-width:760px){
   .product-grid{gap:26px var(--pi-gap-mobile,11px)}
   .product-image{width:var(--pi-size-mobile,100%);aspect-ratio:var(--pi-ratio-mobile,3/4)}
+  .product{min-width:0}
+  .product-meta{min-width:0;align-items:stretch;overflow:hidden}
+  .product-meta>span{width:100%;min-width:0;white-space:normal;overflow:hidden}
+  .product-meta strong{display:block;overflow-wrap:anywhere}
+  .product-meta small{white-space:normal;overflow-wrap:anywhere;line-height:1.4;-webkit-line-clamp:2}
   .product-detail{grid-template-columns:1fr;padding:48px 14px 18px}
   .pd-main{aspect-ratio:var(--pi-ratio-mobile,3/4)}
   .product-detail.thumbs-left .pd-gallery,.product-detail.thumbs-right .pd-gallery{flex-direction:column}
