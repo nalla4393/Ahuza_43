@@ -643,9 +643,9 @@ export default function App() {
             ? <div className="nav-item" key={label} onMouseEnter={() => setMegaOpen(label)}>
               <button type="button" aria-haspopup="true" aria-expanded={megaOpen === label} onFocus={() => setMegaOpen(label)} onClick={() => openNavItem(label)}>{label}</button>
               {megaOpen === label && <div className="mega-menu" role="region" aria-label={`${label} menu`}>
-                <div className="mega-column"><strong>Shop by category</strong>{categories.slice(1).map((category) => <button key={category} type="button" onClick={() => { setMegaOpen(null); openCollection(category, 'All'); }}>{category}</button>)}</div>
-                <div className="mega-column"><strong>Featured</strong>{['New Arrivals', 'Bestsellers', 'Sale'].map((item) => <button key={item} type="button" onClick={() => openNavItem(item)}>{item}</button>)}</div>
-                <button type="button" className="mega-campaign" onClick={() => openNavItem(label === 'Sale' ? 'Sale' : 'New Arrivals')}><img src="https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=600&q=70" alt="" loading="lazy" /><span>{label === 'Sale' ? 'Up to 50% off' : 'New season edit'}</span></button>
+                <div className="mega-column"><strong>{storefrontText('megaCategoryTitle')}</strong>{categories.slice(1).map((category) => <button key={category} type="button" onClick={() => { setMegaOpen(null); openCollection(category, 'All'); }}>{category}</button>)}</div>
+                <div className="mega-column"><strong>{storefrontText('megaFeaturedTitle')}</strong>{['New Arrivals', 'Bestsellers', 'Sale'].map((item) => <button key={item} type="button" onClick={() => openNavItem(item)}>{item}</button>)}</div>
+                <button type="button" className="mega-campaign" onClick={() => openNavItem(label === 'Sale' ? 'Sale' : 'New Arrivals')}><img src="https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?auto=format&fit=crop&w=600&q=70" alt="" loading="lazy" /><span>{label === 'Sale' ? storefrontText('megaSaleCampaign') : storefrontText('megaNewCampaign')}</span></button>
               </div>}
             </div>
             : <button key={label} type="button" onClick={() => openNavItem(label)}>{label}</button>)}
@@ -653,42 +653,42 @@ export default function App() {
         <a className="wordmark" href="#home" aria-label="AHUZA home"><span className="wordmark-star" aria-hidden="true">☆</span><span className="wordmark-stack"><span className="wordmark-text">AHUZA</span><span className="wordmark-tagline">{storefrontText('headerBrandTagline')}</span></span><span className="wordmark-sparkles" aria-hidden="true"><i>✦</i><i>★</i><i>✦</i><i>✧</i><i>✦</i></span></a>
         <form className="header-search" role="search" onSubmit={(event) => { event.preventDefault(); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>
           <label className="sr-only" htmlFor="header-search-input">Search AHUZA</label>
-          <input id="header-search-input" type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); if (event.target.value) setCatalogOpen(true); }} placeholder="Search for products, categories or fabrics" autoComplete="off" />
+          <input id="header-search-input" type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); if (event.target.value) setCatalogOpen(true); }} placeholder={storefrontText('searchPlaceholder')} autoComplete="off" />
           {searchTerm && <button type="button" className="header-search-clear" aria-label="Clear search" onClick={() => setSearchTerm('')}><X size={16} /></button>}
           <button type="submit" className="header-search-submit" aria-label="Search"><Search size={18} /></button>
         </form>
-        <div className="header-actions"><button className="header-icon chat-link" type="button" aria-label="Ask Ahuza" onClick={() => window.dispatchEvent(new Event('ahuza:toggle-support'))}><MessageCircle size={18} /><span className="chat-label">Ask Ahuza</span></button><button className={`header-icon wishlist-link${savedOnly ? ' active' : ''}`} type="button" aria-label={`Wishlist, ${wishlist.length} saved`} aria-pressed={savedOnly} onClick={() => { if (!customer) { setAuthMode('login'); setAccountOpen(true); return; } setSavedOnly(true); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}><Heart size={18} fill={wishlist.length ? 'currentColor' : 'none'} />{wishlist.length > 0 && <span className="count-badge">{wishlist.length}</span>}</button><button className="account-link" aria-label={customer ? 'My account' : 'Account'} onClick={() => setAccountOpen(true)}><User size={18} aria-hidden="true" /><span>{customer ? 'My account' : 'Account'}</span></button><button className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
+        <div className="header-actions"><button className="header-icon chat-link" type="button" aria-label="Ask Ahuza" onClick={() => window.dispatchEvent(new Event('ahuza:toggle-support'))}><MessageCircle size={18} /><span className="chat-label">{storefrontText('askAhuzaLabel')}</span></button><button className={`header-icon wishlist-link${savedOnly ? ' active' : ''}`} type="button" aria-label={`Wishlist, ${wishlist.length} saved`} aria-pressed={savedOnly} onClick={() => { if (!customer) { setAuthMode('login'); setAccountOpen(true); return; } setSavedOnly(true); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}><Heart size={18} fill={wishlist.length ? 'currentColor' : 'none'} />{wishlist.length > 0 && <span className="count-badge">{wishlist.length}</span>}</button><button className="account-link" aria-label={customer ? 'My account' : 'Account'} onClick={() => setAccountOpen(true)}><User size={18} aria-hidden="true" /><span>{customer ? 'My account' : 'Account'}</span></button><button className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
       </header>
       {mobileMenuOpen && <div className="menu-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setMobileMenuOpen(false); }}>
         <aside className="menu-drawer" id="collection-drawer" role="dialog" aria-modal="true" aria-labelledby="menu-title">
-          <div className="menu-drawer-head"><h2 id="menu-title">Women’s Collection</h2><button type="button" className="icon-button" aria-label="Close menu" onClick={() => setMobileMenuOpen(false)}><X size={22} /></button></div>
+          <div className="menu-drawer-head"><h2 id="menu-title">{storefrontText('menuTitle')}</h2><button type="button" className="icon-button" aria-label="Close menu" onClick={() => setMobileMenuOpen(false)}><X size={22} /></button></div>
           <div className="menu-section">
-            <h3>Shop by clothing type</h3>
+            <h3>{storefrontText('menuTypeTitle')}</h3>
             <ul>
-              <li><button type="button" onClick={() => openCollection('All', 'All')}>All women’s wear <span>{products.length}</span></button></li>
+              <li><button type="button" onClick={() => openCollection('All', 'All')}>{storefrontText('menuAllWear')} <span>{products.length}</span></button></li>
               {categories.slice(1).map((category) => <li key={category}><button type="button" onClick={() => openCollection(category, 'All')}>{category} <span>{products.filter((product) => product.category === category).length}</span></button></li>)}
             </ul>
           </div>
           {sizes.length > 1 && <div className="menu-section">
-            <h3>Shop by size</h3>
+            <h3>{storefrontText('menuSizeTitle')}</h3>
             <div className="menu-sizes">{sizes.slice(1).map((size) => <button key={size} type="button" onClick={() => openCollection('All', size)}>{size}</button>)}</div>
           </div>}
           {categories.length > 1 && sizes.length > 1 && <div className="menu-section">
-            <h3>Type &amp; size</h3>
+            <h3>{storefrontText('menuTypeSizeTitle')}</h3>
             {categories.slice(1).map((category) => {
               const available = Array.from(new Set(products.filter((product) => product.category === category).flatMap((product) => product.sizes || [])));
               return available.length ? <div className="menu-type-sizes" key={category}><strong>{category}</strong><div className="menu-sizes">{available.map((size) => <button key={size} type="button" onClick={() => openCollection(category, size)}>{size}</button>)}</div></div> : null;
             })}
           </div>}
           <div className="menu-section menu-links">
-            <button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}>New Arrivals</button>
-            <button type="button" onClick={() => openCustomerPage('profile')}>My account</button>
-            <button type="button" onClick={() => openCustomerPage('orders')}>My orders</button>
-            <a href="#contact" onClick={() => setMobileMenuOpen(false)}>Contact</a>
+            <button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}>{storefrontText('menuNewArrivals')}</button>
+            <button type="button" onClick={() => openCustomerPage('profile')}>{storefrontText('menuAccount')}</button>
+            <button type="button" onClick={() => openCustomerPage('orders')}>{storefrontText('menuOrders')}</button>
+            <a href="#contact" onClick={() => setMobileMenuOpen(false)}>{storefrontText('menuContact')}</a>
           </div>
         </aside>
       </div>}
-      <nav className="category-strip" aria-label="Shop categories"><button type="button" className={selectedCategory === 'All' && !catalogOpen ? 'active' : ''} onClick={() => { setSelectedCategory('All'); setCatalogOpen(true); }}>Shop all</button>{categories.slice(1).map((category) => <button key={category} type="button" className={selectedCategory === category && catalogOpen ? 'active' : ''} onClick={() => { setSelectedCategory(category); setCatalogOpen(true); }}>{category}</button>)}<button type="button" onClick={() => { setSortOrder('newest'); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>New arrivals</button></nav>
+      <nav className="category-strip" aria-label="Shop categories"><button type="button" className={selectedCategory === 'All' && !catalogOpen ? 'active' : ''} onClick={() => { setSelectedCategory('All'); setCatalogOpen(true); }}>{storefrontText('stripShopAll')}</button>{categories.slice(1).map((category) => <button key={category} type="button" className={selectedCategory === category && catalogOpen ? 'active' : ''} onClick={() => { setSelectedCategory(category); setCatalogOpen(true); }}>{category}</button>)}<button type="button" onClick={() => { setSortOrder('newest'); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>{storefrontText('stripNewArrivals')}</button></nav>
 
       <HeroCarousel slides={bannerSlides} />
 
@@ -719,15 +719,15 @@ export default function App() {
           {!catalogOpen && <button className="text-link" type="button" onClick={() => setCatalogOpen(true)}>Shop all <ArrowUpRight size={15} /></button>}
         </div>
         {catalogOpen && <div className="catalog-toolbar">
-          <label className="catalog-search"><Search size={17} /><span className="sr-only">Search products</span><input id="catalog-search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search by name, category or fabric" /><button type="button" aria-label="Clear search" onClick={() => setSearchTerm('')}><X size={15} /></button></label>
-          <button className="filter-toggle" type="button" onClick={() => setFiltersOpen((open) => !open)}><SlidersHorizontal size={16} /> Filters</button>
+          <label className="catalog-search"><Search size={17} /><span className="sr-only">Search products</span><input id="catalog-search" value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder={storefrontText('catalogSearchPlaceholder')} /><button type="button" aria-label="Clear search" onClick={() => setSearchTerm('')}><X size={15} /></button></label>
+          <button className="filter-toggle" type="button" onClick={() => setFiltersOpen((open) => !open)}><SlidersHorizontal size={16} /> {storefrontText('catalogFilters')}</button>
           <label className="sort-control">Sort by <select value={sortOrder} onChange={(event) => setSortOrder(event.target.value as typeof sortOrder)}><option value="recommended">Recommended</option><option value="newest">Newest</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option></select></label>
         </div>}
         {catalogOpen && <div className={`catalog-filters${filtersOpen ? ' is-open' : ''}`}><label>Category<select value={selectedCategory} onChange={(event) => setSelectedCategory(event.target.value)}>{categories.map((category) => <option key={category}>{category}</option>)}</select></label><label>Size<select value={selectedSizeFilter} onChange={(event) => setSelectedSizeFilter(event.target.value)}>{sizes.map((size) => <option key={size}>{size}</option>)}</select></label><label>Min price (₹)<input type="number" inputMode="numeric" min="0" value={minPrice} onChange={(event) => setMinPrice(event.target.value)} placeholder="0" /></label><label>Max price (₹)<input type="number" inputMode="numeric" min="0" value={maxPrice} onChange={(event) => setMaxPrice(event.target.value)} placeholder="Any" /></label><label className="check-filter"><input type="checkbox" checked={inStockOnly} onChange={(event) => setInStockOnly(event.target.checked)} /> In stock only</label><label className="check-filter"><input type="checkbox" checked={savedOnly} onChange={(event) => setSavedOnly(event.target.checked)} /> Saved to wishlist</label><button type="button" onClick={resetFilters}>Clear filters</button></div>}
         {notice && <p className="notice" role="status">{notice}</p>}
-        {products.length === 0 && !notice ? <p className="loading">Gathering the collection…</p> : null}
+        {products.length === 0 && !notice ? <p className="loading">{storefrontText('catalogLoading')}</p> : null}
         {catalogOpen && products.length > 0 && <p className="result-count" role="status" aria-live="polite">{matchingProducts.length} {matchingProducts.length === 1 ? 'product' : 'products'}</p>}
-        {catalogOpen && matchingProducts.length === 0 && <div className="empty-catalog"><Search size={24} /><h3>{savedOnly ? 'No saved pieces match' : 'Nothing matched that search'}</h3><p>{savedOnly ? 'Tap the heart on any product to save it here' : 'Try another category, size, price or search term'}</p><button className="dark-button" type="button" onClick={resetFilters}>View all products</button></div>}
+        {catalogOpen && matchingProducts.length === 0 && <div className="empty-catalog"><Search size={24} /><h3>{savedOnly ? 'No saved pieces match' : storefrontText('catalogEmptyTitle')}</h3><p>{savedOnly ? 'Tap the heart on any product to save it here' : storefrontText('catalogEmptyBody')}</p><button className="dark-button" type="button" onClick={resetFilters}>{storefrontText('catalogViewAll')}</button></div>}
         <div className="product-grid" style={imageSettingsVars(imageSettings) as CSSProperties}>
           {(catalogOpen ? shownProducts : newArrivals).map((product, index) => renderProductCard(product, index))}
         </div>
@@ -775,7 +775,7 @@ export default function App() {
 
       {cartOpen && <div className="overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setCartOpen(false); }}>
         <aside className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="bag-title">
-          <div className="drawer-heading"><div><p className="eyebrow dark-eyebrow">AHUZA Apparel</p><h2 id="bag-title">Your bag <span>({cartCount})</span></h2></div><button className="icon-button" aria-label="Close bag" onClick={() => setCartOpen(false)}><X size={21} /></button></div>
+          <div className="drawer-heading"><div><p className="eyebrow dark-eyebrow">AHUZA Apparel</p><h2 id="bag-title">{storefrontText('bagTitle')} <span>({cartCount})</span></h2></div><button className="icon-button" aria-label="Close bag" onClick={() => setCartOpen(false)}><X size={21} /></button></div>
           {paymentOrder ? <section className="payment-panel" aria-live="polite">
             <p className="eyebrow dark-eyebrow">{paymentOrder.paymentMethod === 'cod' ? 'Cash on delivery' : 'Custom UPI checkout'}</p>
             <h3>{paymentOrder.paymentMethod === 'cod' ? 'Order confirmed' : paymentStatus === 'paid' ? 'Payment confirmed' : paymentStatus === 'failed' ? 'UPI attempt reported failed' : paymentStatus === 'expired' || paymentStatus === 'cancelled' ? 'Payment request closed' : paymentStatus === 'pending' ? 'UPI payment pending' : 'Payment pending'}</h3>
@@ -785,7 +785,7 @@ export default function App() {
             {paymentStatus === 'failed' && <p>The failure status is customer-reported only If money was debited, contact AHUZA with the bank reference before retrying</p>}
             {(paymentOrder.paymentMethod === 'cod' || paymentStatus === 'paid' || paymentStatus === 'cancelled' || paymentStatus === 'expired') && <button className="dark-button" type="button" onClick={() => { setPaymentOrder(null); setPaymentStatus('pending'); setCartOpen(false); }}>{paymentStatus === 'cancelled' ? 'Return to bag' : 'Done'}</button>}
             {paymentOrder.paymentMethod === 'upi' && <small>No gateway or bank verification API is connected A UPI callback, screenshot, receipt or customer claim is never treated as proof An authorized AHUZA owner must match the settled transaction in the bank account before confirming the order The payment link expires after 20 minutes</small>}
-          </section> : cartLines.length === 0 ? <div className="empty-bag"><ShoppingBag size={25} /><p>Your bag is taking a quiet moment</p><button className="dark-button" onClick={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>Explore the collection</button></div> : <>
+          </section> : cartLines.length === 0 ? <div className="empty-bag"><ShoppingBag size={25} /><p>{storefrontText('bagEmpty')}</p><button className="dark-button" onClick={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>{storefrontText('bagExplore')}</button></div> : <>
             <div className="bag-lines">{cartLines.map(({ product, quantity, size }) => <div className="bag-line" key={`${product.id}-${size || 'standard'}`}><img src={mainImage(product)?.variants[0]?.url || product.imageUrl} alt="" /><div className="bag-line-copy"><h3>{product.name}</h3><p>{formatPrice(product.price)}{size ? ` · Size ${size}` : ''}</p><div className="quantity-control"><button type="button" aria-label={`Remove one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, -1)}><Minus size={13} /></button><span>{quantity}</span><button type="button" aria-label={`Add one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, 1)} disabled={cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0) >= Math.min(product.stock, 10)}><Plus size={13} /></button></div></div><span className="line-total">{formatPrice(product.price * quantity)}</span></div>)}</div>
             <div className="bag-footer"><div className="subtotal"><span>Subtotal</span><strong>{formatPrice(cartTotal)}</strong></div><div className="subtotal"><span>Shipping</span><strong>{estimatedShipping ? formatPrice(estimatedShipping) : 'Complimentary'}</strong></div><div className="subtotal"><span>Total</span><strong>{formatPrice(cartTotal + estimatedShipping)}</strong></div><p>₹100 shipping below ₹2,500 Complimentary shipping at or above ₹2,500 No discounts or additional taxes are currently applied</p><form className="checkout-details" onSubmit={(event) => { event.preventDefault(); void checkout(); }}>
               <p className="address-title">Billing address · India</p>
@@ -813,8 +813,8 @@ export default function App() {
       </div>}
       </> : <section className="store-maintenance">
         <p className="eyebrow">AHUZA APPAREL</p>
-        <h1>We’ll be back soon</h1>
-        <p>Our storefront is temporarily closed while we make a few updates Please check back soon</p>
+        <h1>{storefrontText('maintenanceTitle')}</h1>
+        <p>{storefrontText('maintenanceBody')}</p>
         <button className="dark-button" type="button" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button>
       </section>}
       {detailProduct && (() => {

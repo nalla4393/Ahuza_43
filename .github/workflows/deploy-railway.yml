@@ -47,4 +47,4 @@ jobs:
             echo "Missing GitHub Actions variable RAILWAY_SERVICE. Set it to the Railway web service name or ID."
             exit 1
           fi
-          railway up . --service "$RAILWAY_SERVICE" --environment production --ci
+          railway up --service "$RAILWAY_SERVICE" --environment production --ci
