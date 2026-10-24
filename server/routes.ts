@@ -1139,8 +1139,11 @@ api.post('/owner/ads/image', requireOwner, adLimit, async (request, response) =>
   if (!adImageStyles.includes(style) || !['Square', 'Portrait', 'Landscape'].includes(format) || (notes !== undefined && notes !== '' && !stringValue(notes, 300))) { response.status(400).json({ error: 'Choose a valid style and format' }); return; }
   const reference = await loadAdReference(product.images?.find((image) => image.id === product.mainImageId)?.url || product.imageUrl);
   const prompt = `Create a ${format.toLowerCase()} advertising photograph for an Indian fashion brand called Ahuza Apparel. Style: ${style}. Product: ${product.name} (${product.category})${reference ? ' Keep the garment from the attached photo exactly as it is: same colours, pattern and shape' : ''}. ${typeof notes === 'string' ? notes : ''} Show a model wearing the garment, with clean natural lighting. Do not add any text, logos, watermarks or prices to the image.`;
-  try { response.json({ image: await generateAdImage(prompt, reference) }); }
-  catch (error) { asyncError(response, error); }
+  try { response.json({ image: await generateAdImage(prompt, format, reference) }); }
+  catch (error) {
+    if (error instanceof Error && error.message === 'AD_IMAGE_UNAVAILABLE') { response.status(503).json({ error: 'Image generation is not available on your AI plan yet Enable billing for your Gemini or OpenAI key, then try again' }); return; }
+    asyncError(response, error);
+  }
 });
 
 api.post('/owner/social-post', requireOwner, ownerLimit, async (request, response) => {

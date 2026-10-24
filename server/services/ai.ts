@@ -247,18 +247,40 @@ Reply with JSON only and this exact shape: {"headlines":["up to 30 characters ea
   };
 }
 
-export async function generateAdImage(prompt: string, reference?: { data: Buffer; mimeType: string }): Promise<{ mimeType: string; data: string }> {
-  const parts: ({ text: string } | { inlineData: { mimeType: string; data: string } })[] = [];
-  if (reference) parts.push({ inlineData: { mimeType: reference.mimeType, data: reference.data.toString('base64') } });
-  parts.push({ text: prompt });
-  const models = [process.env.GEMINI_IMAGE_MODEL?.trim(), 'gemini-2.5-flash-image'].filter((model, index, all): model is string => Boolean(model) && all.indexOf(model) === index);
+async function generateAdImageWithOpenAi(prompt: string, format: string): Promise<{ mimeType: string; data: string }> {
+  const size = format === 'Portrait' ? '1024x1536' : format === 'Landscape' ? '1536x1024' : '1024x1024';
+  const response = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.OPENAI_API_KEY?.trim()}` },
+    body: JSON.stringify({ model: process.env.OPENAI_IMAGE_MODEL?.trim() || 'gpt-image-1', prompt, size, n: 1 }),
+    signal: AbortSignal.timeout(110000),
+  });
+  const result = await response.json().catch(() => ({})) as { data?: { b64_json?: string }[]; error?: { message?: string } };
+  if (!response.ok) throw new Error(result.error?.message || `OpenAI image request failed (HTTP ${response.status})`);
+  const data = result.data?.[0]?.b64_json;
+  if (!data) throw new Error('AD_IMAGE_EMPTY');
+  return { mimeType: 'image/png', data };
+}
+
+export async function generateAdImage(prompt: string, format: string, reference?: { data: Buffer; mimeType: string }): Promise<{ mimeType: string; data: string }> {
   let lastError: unknown;
-  for (const model of models) {
-    try {
-      const response = await getAiClient().models.generateContent({ model, contents: [{ role: 'user', parts }], config: { responseModalities: ['IMAGE', 'TEXT'] } });
-      const image = response.candidates?.[0]?.content?.parts?.find((part) => part.inlineData?.data);
-      if (image?.inlineData?.data) return { mimeType: image.inlineData.mimeType || 'image/png', data: image.inlineData.data };
-    } catch (error) { lastError = error; console.error('Ad image generation failed:', error instanceof Error ? error.message : error); }
+  if (process.env.GEMINI_API_KEY?.trim()) {
+    const parts: ({ text: string } | { inlineData: { mimeType: string; data: string } })[] = [];
+    if (reference) parts.push({ inlineData: { mimeType: reference.mimeType, data: reference.data.toString('base64') } });
+    parts.push({ text: prompt });
+    const models = [process.env.GEMINI_IMAGE_MODEL?.trim(), 'gemini-2.5-flash-image'].filter((model, index, all): model is string => Boolean(model) && all.indexOf(model) === index);
+    for (const model of models) {
+      try {
+        const response = await getAiClient().models.generateContent({ model, contents: [{ role: 'user', parts }], config: { responseModalities: ['IMAGE', 'TEXT'] } });
+        const image = response.candidates?.[0]?.content?.parts?.find((part) => part.inlineData?.data);
+        if (image?.inlineData?.data) return { mimeType: image.inlineData.mimeType || 'image/png', data: image.inlineData.data };
+      } catch (error) { lastError = error; console.error('Gemini ad image failed:', error instanceof Error ? error.message.slice(0, 300) : error); }
+    }
   }
-  throw lastError instanceof Error ? lastError : new Error('AD_IMAGE_EMPTY');
+  if (process.env.OPENAI_API_KEY?.trim()) {
+    try { return await generateAdImageWithOpenAi(prompt, format); }
+    catch (error) { lastError = error; console.error('OpenAI ad image failed:', error instanceof Error ? error.message.slice(0, 300) : error); }
+  }
+  if (!lastError) throw new Error('AI_NOT_CONFIGURED');
+  throw new Error('AD_IMAGE_UNAVAILABLE');
 }
