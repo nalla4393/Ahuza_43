@@ -28,7 +28,8 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "session-file-store": "^1.5.0",
-    "sharp": "^0.35.5"
+    "sharp": "^0.35.5",
+    "three": "^0.169.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.11",
@@ -41,6 +42,7 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.7",
     "@types/session-file-store": "^1.2.6",
+    "@types/three": "^0.169.0",
     "@vitejs/plugin-react": "^4.7.0",
     "concurrently": "^9.2.0",
     "esbuild": "^0.25.8",

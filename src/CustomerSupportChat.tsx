@@ -1,7 +1,14 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { LoaderCircle, MessageCircle, Send, X } from 'lucide-react';
+import { lazy, Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
+import { LoaderCircle, MessageCircle, Send, Volume2, VolumeX, X } from 'lucide-react';
 import './customer-support.css';
 import { removeSentenceFullStops } from './siteCopy';
+import type { BeulahAvatarHandle } from './avatar/BeulahAvatar';
+import { gestureForText, speak, stopSpeaking } from './avatar/speech';
+
+// Three.js is only downloaded when a customer opens the support panel.
+const BeulahAvatar = lazy(() => import('./avatar/BeulahAvatar'));
+
+const WELCOME_SPOKEN = 'Welcome to AHUZA! I am Beulah. What problem can I help you with today?';
 
 type ChatMessage = { role: 'assistant' | 'customer'; text: string };
 type Choice = { label: string; value: string };
@@ -10,7 +17,7 @@ type SupportTask = 'tracking' | 'return-status' | 'return-order' | 'return-reaso
 type ReturnDetails = { orderId: string; action: 'return' | 'replacement' };
 
 const menus: Record<string, { prompt: string; choices: Choice[] }> = {
-  home: { prompt: 'Hi! How can we help you today? Please select the type of issue you’re facing:', choices: [
+  home: { prompt: 'Welcome to AHUZA! I’m Beulah What problem can I help you with today? Please select the type of issue you’re facing:', choices: [
     { label: 'Billing / Order', value: 'billing' }, { label: 'Product Related', value: 'product-menu' },
     { label: 'Enquiry', value: 'enquiry' }, { label: 'Other', value: 'other' },
   ] },
@@ -112,6 +119,56 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     { role: 'assistant', text: menus.home.prompt },
   ]);
+
+  const avatar = useRef<BeulahAvatarHandle>(null);
+  const welcomed = useRef(false);
+  const spokenCount = useRef(1);
+  const [muted, setMuted] = useState(() => localStorage.getItem('ahuza-beulah-muted') === '1');
+
+  // Speak with the avatar: gesture and audio start together, jaw follows the audio.
+  function say(text: string) {
+    avatar.current?.play(gestureForText(text), Math.max(2, text.length * 0.06) + 0.5);
+    if (muted) {
+      avatar.current?.setSpeaking(true);
+      window.setTimeout(() => avatar.current?.setSpeaking(false), Math.min(text.length * 60, 6000));
+      return;
+    }
+    speak(text, {
+      onStart: () => avatar.current?.setSpeaking(true),
+      onBoundary: () => avatar.current?.pulse(),
+      onEnd: () => avatar.current?.setSpeaking(false),
+    });
+  }
+
+  // Greet the customer the first time the panel opens; silence everything when it closes.
+  useEffect(() => {
+    if (!open) {
+      stopSpeaking();
+      avatar.current?.setSpeaking(false);
+      return;
+    }
+    if (welcomed.current) return;
+    welcomed.current = true;
+    avatar.current?.play('wave', 3.5);
+    say(WELCOME_SPOKEN);
+    avatar.current?.play('wave', 3.5);
+  }, [open]);
+
+  // Read out each new assistant reply.
+  useEffect(() => {
+    if (messages.length <= spokenCount.current) return;
+    const fresh = messages.slice(spokenCount.current);
+    spokenCount.current = messages.length;
+    const last = fresh.at(-1);
+    if (open && last?.role === 'assistant') say(last.text);
+  }, [messages]);
+
+  function toggleMute() {
+    const next = !muted;
+    setMuted(next);
+    localStorage.setItem('ahuza-beulah-muted', next ? '1' : '0');
+    if (next) stopSpeaking();
+  }
 
   useEffect(() => {
     const toggle = () => setOpen((current) => !current);
@@ -329,7 +386,12 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
 
   return <div className="customer-support">
     {open && <section className="customer-support-panel" role="dialog" aria-label="AHUZA customer support">
-      <header className="customer-support-header"><div><strong>Beulah · AHUZA Support</strong><span className={supportAvailable ? 'support-status is-open' : 'support-status'}><i />{supportAvailable ? 'Available now' : 'Replies 10:00 AM–9:00 PM IST'}</span></div><button type="button" onClick={() => setOpen(false)} aria-label="Close support chat"><X size={18} /></button></header>
+      <header className="customer-support-header">
+        <Suspense fallback={<div className="beulah-avatar" />}><BeulahAvatar ref={avatar} /></Suspense>
+        <div><strong>Beulah · AHUZA Support</strong><span className={supportAvailable ? 'support-status is-open' : 'support-status'}><i />{supportAvailable ? 'Available now' : 'Replies 10:00 AM–9:00 PM IST'}</span></div>
+        <button type="button" onClick={toggleMute} aria-label={muted ? 'Turn Beulah’s voice on' : 'Mute Beulah’s voice'} title={muted ? 'Voice off' : 'Voice on'}>{muted ? <VolumeX size={17} /> : <Volume2 size={17} />}</button>
+        <button type="button" onClick={() => setOpen(false)} aria-label="Close support chat"><X size={18} /></button>
+      </header>
       <div className="customer-support-messages" aria-live="polite">
         {messages.map((message, index) => <div className={`support-message ${message.role}`} key={`${message.role}-${index}`}><p>{message.text}</p></div>)}
         {busy && <div className="support-thinking"><LoaderCircle size={15} className="support-spin" /> Checking…</div>}
