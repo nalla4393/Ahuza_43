@@ -158,9 +158,10 @@ api.post('/newsletter/subscribe', newsletterLimit, async (request, response) => 
 api.post('/customer-support/chat', supportLimit, async (request, response) => {
   const message = request.body?.message;
   if (!stringValue(message, 1000)) { response.status(400).json({ error: 'A message is required (up to 1,000 characters)' }); return; }
-  const deliveryIssue = /\b(?:delivery|shipping|shipment)\b.{0,40}\b(?:issue|problem|late|delay|delayed|missing|lost|not received)\b|\b(?:late delivery|delayed|missing parcel|lost parcel|not received|never arrived|wrong item|damaged|complaint|complain|refund request|replacement request)\b/i.test(message);
-  if (deliveryIssue) {
-    response.json({ reply: 'We’re sorry for the inconvenience Please create a support ticket and our team will follow up within 48 working hours Support hours are 10:00 AM–9:00 PM IST', requiresHumanSupport: true });
+  const complaint = /\b(?:delivery|shipping|shipment|order|parcel|package)\b.{0,50}\b(?:issue|problem|late|delay|delayed|delaying|missing|lost|stuck|not received|not delivered|not arrived|yet to)\b|\b(?:late delivery|delayed|delaying|missing parcel|lost parcel|not received|never arrived|wrong item|wrong size|wrong colou?r|damaged|defective|torn|stained|complaint|complain|refund|replacement|return request|cheated|fraud|scam|poor quality|bad quality)\b|\b(?:size|measurement|fit|fitting)\b.{0,40}\b(?:issue|problem|wrong|mismatch|small|tight|loose|too big|too small|not right|does ?n[o']?t fit)\b|\b(?:does ?n[o']?t|did ?n[o']?t|not)\s+fit\b/i.test(message);
+  const asksAboutDelayCauses = /\b(?:why|reason|cause|causes|what (?:makes|causes))\b.{0,60}\b(?:delay|delayed|late|take so long)\b|\b(?:delay|delayed|late)\b.{0,40}\b(?:reason|cause|causes|why)\b/i.test(message);
+  if (complaint && !asksAboutDelayCauses) {
+    response.json({ reply: 'I’m really sorry about this Our support team will look into it personally Please create a support ticket with your order details and they will respond within 48 working hours Support hours are 10:00 AM–9:00 PM IST', requiresHumanSupport: true });
     return;
   }
   try {
@@ -168,7 +169,7 @@ api.post('/customer-support/chat', supportLimit, async (request, response) => {
     const storeContext = JSON.stringify({
       contact: 'Info@ahuzawear.com, +91 95505 82277, Telangana, India',
       returns: 'Returns and replacements may be requested within 7 days after delivery',
-      products: database.products.filter((product) => product.active).map(({ name, description, price, stock, category }) => ({ name, description, price, stock, category })),
+      products: database.products.filter((product) => product.active).map(({ name, description, price, stock, category, sizes }) => ({ name, description, price, stock, category, sizes: sizes || [] })),
     });
     const history = Array.isArray(request.body?.history)
       ? request.body.history.slice(-8).filter((turn: unknown): turn is { role: 'assistant' | 'customer'; text: string } => {
@@ -176,7 +177,9 @@ api.post('/customer-support/chat', supportLimit, async (request, response) => {
         return (entry?.role === 'assistant' || entry?.role === 'customer') && typeof entry.text === 'string';
       })
       : [];
-    response.json({ reply: await generateCustomerSupportReply(message, storeContext, history), requiresHumanSupport: false });
+    const raw = await generateCustomerSupportReply(message, storeContext, history);
+    const escalate = /\[ESCALATE\]/i.test(raw);
+    response.json({ reply: raw.replace(/\s*\[ESCALATE\]\s*/gi, ' ').trim(), requiresHumanSupport: escalate });
   } catch (error) {
     if (error instanceof Error && error.message === 'AI_NOT_CONFIGURED') {
       response.json({ reply: 'I’m sorry, I can’t answer that just now Customer support is available from 10:00 AM to 9:00 PM IST You can create a support ticket or email Info@ahuzawear.com for help', requiresHumanSupport: false });
