@@ -1,0 +1,31 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; background: #f4f6fa; color: #1c2230; }
+.app { display: grid; grid-template-columns: 1.2fr 1fr; height: 100vh; }
+@media (max-width: 800px) { .app { grid-template-columns: 1fr; grid-template-rows: 55vh 1fr; } }
+.stage { display: flex; flex-direction: column; min-height: 0; }
+.viewport { flex: 1; min-height: 0; }
+.viewport canvas { display: block; width: 100%; height: 100%; }
+.customize { padding: 10px 14px; background: #fff; border-top: 1px solid #dde; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.customize .row { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+.customize .hint { flex-basis: 100%; margin: 0; font-size: 12px; color: #667; }
+.upload, button { cursor: pointer; border: 0; border-radius: 8px; padding: 8px 12px; background: #3b6fd8; color: #fff; font-size: 14px; }
+.side { display: flex; flex-direction: column; padding: 16px; min-height: 0; }
+h1 { margin: 0 0 10px; font-size: 20px; }
+.error { background: #fde8e8; color: #a11; padding: 8px; border-radius: 8px; margin-bottom: 8px; }
+.chat { flex: 1; display: flex; flex-direction: column; min-height: 0; background: #fff; border-radius: 12px; box-shadow: 0 2px 10px #0001; }
+.messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.msg { max-width: 85%; padding: 9px 12px; border-radius: 14px; line-height: 1.4; }
+.msg.user { align-self: flex-end; background: #3b6fd8; color: #fff; }
+.msg.assistant { align-self: flex-start; background: #eef1f7; }
+.inputbar { display: flex; gap: 6px; padding: 10px; border-top: 1px solid #eee; }
+.inputbar input { flex: 1; padding: 9px 12px; border: 1px solid #ccd; border-radius: 8px; font-size: 14px; }
+.inputbar button.active { background: #d33; }
+button:disabled { opacity: 0.5; }
+.view { position: relative; flex: 1; min-height: 0; display: flex; }
+.view .viewport { flex: 1; }
+.viewport.picking canvas { cursor: crosshair; }
+.overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; gap: 4px; }
+.overlay h2 { margin: 0; }
+.upload.big { font-size: 16px; padding: 12px 20px; margin-top: 8px; }
+.banner { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: #1c2230; color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 14px; box-shadow: 0 2px 10px #0004; }
+.alt { background: #6b7690; }
