@@ -226,3 +226,39 @@ export async function generateMarketingEmail(goal: string, customerContext: stri
   } catch { /* fall through */ }
   throw new Error('AI returned an unusable draft.');
 }
+
+export type AdCopy = { headlines: string[]; primaryText: string; description: string; callToAction: string; hashtags: string[] };
+
+export async function generateAdCopy(input: { productName: string; details: string; platform: string; goal: string; tone: string; audience: string }): Promise<AdCopy> {
+  const prompt = `You are an advertising copywriter for Ahuza Apparel, an Indian women's ethnic and everyday wear brand. Write ad copy for ${input.platform.slice(0, 40)}. Goal: ${input.goal.slice(0, 120)}. Tone: ${input.tone.slice(0, 60)}. Audience: ${input.audience.slice(0, 120) || 'Indian women looking for stylish, comfortable outfits'}. Product: ${input.productName.slice(0, 120)}. Verified details: ${input.details.slice(0, 500)}.
+Do not invent discounts, materials, certifications or other claims that are not in the verified details. Do not end sentences with full stops.
+Reply with JSON only and this exact shape: {"headlines":["up to 30 characters each","","" ],"primaryText":"under 125 words","description":"under 90 characters","callToAction":"2 to 4 words","hashtags":["#a","#b","#c"]}`;
+  const text = await completeText(prompt, { json: true });
+  const cleaned = text.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+  let parsed: Partial<AdCopy>;
+  try { parsed = JSON.parse(cleaned) as Partial<AdCopy>; } catch { throw new Error('AD_COPY_INVALID'); }
+  const list = (value: unknown, max: number) => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim() !== '').map((item) => item.trim().slice(0, 200)).slice(0, max) : [];
+  return {
+    headlines: list(parsed.headlines, 5),
+    primaryText: typeof parsed.primaryText === 'string' ? parsed.primaryText.trim().slice(0, 1200) : '',
+    description: typeof parsed.description === 'string' ? parsed.description.trim().slice(0, 200) : '',
+    callToAction: typeof parsed.callToAction === 'string' ? parsed.callToAction.trim().slice(0, 40) : '',
+    hashtags: list(parsed.hashtags, 6),
+  };
+}
+
+export async function generateAdImage(prompt: string, reference?: { data: Buffer; mimeType: string }): Promise<{ mimeType: string; data: string }> {
+  const parts: ({ text: string } | { inlineData: { mimeType: string; data: string } })[] = [];
+  if (reference) parts.push({ inlineData: { mimeType: reference.mimeType, data: reference.data.toString('base64') } });
+  parts.push({ text: prompt });
+  const models = [process.env.GEMINI_IMAGE_MODEL?.trim(), 'gemini-2.5-flash-image'].filter((model, index, all): model is string => Boolean(model) && all.indexOf(model) === index);
+  let lastError: unknown;
+  for (const model of models) {
+    try {
+      const response = await getAiClient().models.generateContent({ model, contents: [{ role: 'user', parts }], config: { responseModalities: ['IMAGE', 'TEXT'] } });
+      const image = response.candidates?.[0]?.content?.parts?.find((part) => part.inlineData?.data);
+      if (image?.inlineData?.data) return { mimeType: image.inlineData.mimeType || 'image/png', data: image.inlineData.data };
+    } catch (error) { lastError = error; console.error('Ad image generation failed:', error instanceof Error ? error.message : error); }
+  }
+  throw lastError instanceof Error ? lastError : new Error('AD_IMAGE_EMPTY');
+}

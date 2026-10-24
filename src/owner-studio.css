@@ -40,3 +40,6 @@
 .studio-copy-group legend{padding:0 10px 0 0;color:var(--studio-green);font:500 15px 'Playfair Display',serif}
 .studio-copy-group .studio-form-grid{margin-top:10px}
 .studio-copy-group textarea{min-height:48px}
+
+.studio-slot-name{display:block;width:100%}
+.studio-slot-name input{width:100%;text-align:center;font-weight:600;padding:6px 8px;border:1px solid var(--studio-line,#d8d4c8);border-radius:6px;background:#fff}

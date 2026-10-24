@@ -1,15 +1,17 @@
+import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import express, { Router, type Request, type Response, type NextFunction } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import PDFDocument from 'pdfkit';
 import { hashPassword, verifyPassword } from './services/auth.js';
-import { extractPaymentReceipt, generateCustomerEmailBody, generateCustomerSupportReply, generateOwnerAgentPlan, generateSocialPost, isTextAiConfigured, type CustomerEmailKind, type OwnerAgentIntent } from './services/ai.js';
+import { extractPaymentReceipt, generateAdCopy, generateAdImage, generateCustomerEmailBody, generateCustomerSupportReply, generateOwnerAgentPlan, generateSocialPost, isTextAiConfigured, type CustomerEmailKind, type OwnerAgentIntent } from './services/ai.js';
 import { bannerImageKeys, circleImageKeys, getDatabase, mergeImageSettings, mutateDatabase, type Database, type Order, type PaymentReceiptReview, type Product, type ShippingAddress, type StorefrontContent, type SupportTicket } from './services/database.js';
 import { sendRestockAlerts } from './services/stock-alerts.js';
-import { deleteProductImageFiles, detectImageType, maxUploadBytes, sanitizeImageSettings, saveProductImage } from './services/images.js';
+import { deleteProductImageFiles, detectImageType, maxUploadBytes, sanitizeImageSettings, saveProductImage, uploadRoot } from './services/images.js';
 import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
 import { generateMarketingEmail } from './services/ai.js';
-import { enqueueOrderEmail, expirePendingOrders, getMarketingWebhookUrls, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail, testMarketingWebhooks, triggerAutomations } from './services/integrations.js';
+import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
 import { createUpiIntent, getUpiConfiguration } from './services/upi.js';
 import { storefrontCopyFields } from '../shared/storefrontCopy.js';
 
@@ -18,6 +20,7 @@ api.use('/owner', (request, response, next) => ownerFailLimit(request, response,
 const authLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false });
 const ownerLimit = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false });
 const ownerFailLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, skipSuccessfulRequests: true, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Too many failed attempts' } });
+const adLimit = rateLimit({ windowMs: 60 * 1000, limit: 8, standardHeaders: 'draft-8', legacyHeaders: false });
 const uploadLimit = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false });
 const analyticsLimit = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false });
 const supportLimit = rateLimit({ windowMs: 60 * 1000, limit: 12, standardHeaders: 'draft-8', legacyHeaders: false });
@@ -148,7 +151,6 @@ api.post('/newsletter/subscribe', newsletterLimit, async (request, response) => 
   });
   if (!result.alreadySubscribed) {
     void recordMarketingEvent({ name: 'newsletter_signup', page: 'newsletter' }).catch((error) => console.error('Newsletter event recording failed:', error));
-    void triggerAutomations({ name: 'newsletter_signup', email, consent: true }).catch((error) => console.error('Newsletter Zapier event failed:', error));
   }
   response.status(result.alreadySubscribed ? 200 : 201).json(result);
 });
@@ -569,11 +571,10 @@ api.post('/orders/:id/returns', requireCustomer, async (request, response) => {
 });
 
 api.post('/marketing/events', analyticsLimit, async (request, response) => {
-  const { name, page, campaign, consent } = request.body || {};
+  const { name, page, campaign } = request.body || {};
   if (!stringValue(name, 64) || !/^[a-z0-9_]+$/i.test(name)) { response.status(400).json({ error: 'A valid event name is required' }); return; }
   const event = { name, ...(stringValue(page, 200) ? { page } : {}), ...(stringValue(campaign, 100) ? { campaign } : {}) };
   await recordMarketingEvent(event);
-  if (consent === true) void triggerAutomations(event);
   response.status(202).json({ accepted: true });
 });
 
@@ -749,6 +750,14 @@ api.patch('/owner/content', requireOwner, ownerLimit, async (request, response) 
       cleaned.copy = Object.fromEntries(entries);
       continue;
     }
+    if (key === 'circleLabels') {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) { response.status(400).json({ error: 'Invalid category names' }); return; }
+      const entries = Object.entries(value as Record<string, unknown>);
+      // An empty string clears an override so the original name is shown.
+      if (entries.some(([name, text]) => !circleImageKeys.includes(name) || typeof text !== 'string' || text.trim().length > 40)) { response.status(400).json({ error: 'Category names can be up to 40 characters' }); return; }
+      cleaned.circleLabels = Object.fromEntries(entries.map(([name, text]) => [name, (text as string).trim()]).filter(([, text]) => text !== ''));
+      continue;
+    }
     if (key in imageMaps) {
       if (!value || typeof value !== 'object' || Array.isArray(value)) { response.status(400).json({ error: `Invalid value for ${key}` }); return; }
       const entries = Object.entries(value as Record<string, unknown>);
@@ -797,35 +806,11 @@ api.patch('/owner/payment-receipts/:id', requireOwner, ownerLimit, async (reques
 });
 
 api.get('/owner/integrations', requireOwner, ownerLimit, async (_request, response) => {
-  const urls = await getMarketingWebhookUrls();
   response.json({ integrations: {
-    googleAds: Boolean(urls.googleAds),
-    zapier: Boolean(urls.zapier),
     email: isEmailConfigured(),
     followUps: isEmailConfigured(),
     ai: isTextAiConfigured(),
   } });
-});
-
-api.patch('/owner/integrations', requireOwner, ownerLimit, async (request, response) => {
-  const settings = request.body;
-  const allowed = ['googleAds', 'zapier'];
-  if (!settings || typeof settings !== 'object' || Array.isArray(settings) || Object.keys(settings).length === 0 || Object.keys(settings).some((key) => !allowed.includes(key))) {
-    response.status(400).json({ error: 'Provide a Google Ads and/or Zapier webhook URL' }); return;
-  }
-  for (const key of allowed) {
-    const value = settings[key];
-    if (value !== undefined && value !== '' && !httpsUrl(value)) { response.status(400).json({ error: `${key === 'googleAds' ? 'Google Ads' : 'Zapier'} webhook URL must use HTTPS` }); return; }
-    if (value !== undefined && typeof value === 'string' && value.length > 2000) { response.status(400).json({ error: 'Webhook URLs must be at most 2,000 characters' }); return; }
-  }
-  await mutateDatabase((database) => {
-    database.integrationWebhooks ||= {};
-    for (const key of allowed as ('googleAds' | 'zapier')[]) {
-      if (settings[key] !== undefined) database.integrationWebhooks[key] = settings[key].trim();
-    }
-  });
-  const urls = await getMarketingWebhookUrls();
-  response.json({ integrations: { googleAds: Boolean(urls.googleAds), zapier: Boolean(urls.zapier) } });
 });
 
 api.get('/owner/support-tickets', requireOwner, ownerLimit, async (_request, response) => {
@@ -885,7 +870,6 @@ api.patch('/owner/orders/:id/status', requireOwner, ownerLimit, async (request, 
   const email = (await getDatabase()).customers.find((entry) => entry.id === result.order.userId)?.email;
   const notificationKind = status === 'shipped' || status === 'out_for_delivery' || status === 'delivered' ? status : null;
   if (result.changed && email && notificationKind) void enqueueOrderEmail(result.order.id, notificationKind).catch((error) => console.error(`${status} email queue failed:`, error));
-  if (result.changed) void triggerAutomations({ name: `order_${status}`, orderId: result.order.id, amount: result.order.amount / 100, currency: result.order.currency });
   response.json({ order: result.order });
 });
 
@@ -901,9 +885,6 @@ api.patch('/owner/orders/:id/cod-payment', requireOwner, ownerLimit, async (requ
       return { order, changed: true };
   });
   if (!result) { response.status(409).json({ error: 'Only a delivered, unpaid cash-on-delivery order can be marked paid' }); return; }
-  if (result.order.marketingConsent) {
-    void triggerAutomations({ name: 'purchase', orderId: result.order.id, amount: result.order.amount / 100, currency: result.order.currency, consent: true });
-  }
   response.json({ order: result.order });
 });
 
@@ -944,7 +925,6 @@ api.patch('/owner/orders/:id/upi-payment', requireOwner, ownerLimit, async (requ
   if (order === 'stock_unavailable') { response.status(409).json({ error: 'The payment must be manually reconciled, but the original items are no longer in stock Contact the customer before fulfillment' }); return; }
   if (!order) { response.status(409).json({ error: 'Only an unpaid, pending UPI order can be confirmed Check the order and bank settlement' }); return; }
   void enqueueOrderEmail(order.id, 'payment_confirmed').catch((error) => console.error('Payment confirmation email queue failed:', error));
-  if (order.marketingConsent) void triggerAutomations({ name: 'purchase', orderId: order.id, amount: order.amount / 100, currency: order.currency, consent: true });
   response.json({ order });
 });
 
@@ -1028,7 +1008,6 @@ api.post('/owner/agent/execute', requireOwner, ownerLimit, async (request, respo
     });
     if (!product) { response.status(409).json({ error: 'Inventory changed since this proposal Refresh and ask the agent again' }); return; }
     if (product.stock > 0) void sendRestockAlerts().catch((error) => console.error('Restock alert scan failed:', error));
-    void triggerAutomations({ name: 'inventory_updated', orderId: product.id });
     response.json({ completed: true, message: `Updated ${product.name} (${product.sku}) stock to ${product.stock}` });
     return;
   }
@@ -1048,7 +1027,6 @@ api.post('/owner/agent/execute', requireOwner, ownerLimit, async (request, respo
     });
     if (!result) { response.status(409).json({ error: 'Order status changed or this transition is not allowed Refresh and ask the agent again' }); return; }
     if (result.changed) void enqueueOrderEmail(result.order.id, action.status === 'shipped' ? 'shipped' : 'delivered').catch((error) => console.error(`${action.status} email queue failed:`, error));
-    if (result.changed) void triggerAutomations({ name: `order_${action.status}`, orderId: result.order.id, amount: result.order.amount / 100, currency: result.order.currency });
     response.json({ completed: true, message: `Marked order ${result.order.id} ${action.status}` });
     return;
   }
@@ -1113,6 +1091,58 @@ api.post('/owner/email-agent/send', requireOwner, ownerLimit, async (request, re
   } catch (error) { asyncError(response, error); }
 });
 
+const adPlatforms = ['Instagram', 'Facebook', 'Google Search', 'WhatsApp'];
+const adGoals = ['Drive sales', 'Promote a new arrival', 'Festive offer', 'Build brand awareness'];
+const adTones = ['Warm and elegant', 'Playful', 'Premium', 'Festive'];
+const adImageStyles = ['Studio product shot', 'Lifestyle outdoor', 'Festive celebration', 'Minimal colour backdrop'];
+
+function adProductFromRequest(body: unknown, database: Database): Product | null {
+  const productId = (body as { productId?: unknown } | undefined)?.productId;
+  return database.products.find((entry) => entry.id === productId && entry.active) ?? null;
+}
+
+api.post('/owner/ads/copy', requireOwner, adLimit, async (request, response) => {
+  const { platform, goal, tone, audience } = request.body || {};
+  const product = adProductFromRequest(request.body, await getDatabase());
+  if (!product) { response.status(404).json({ error: 'Active product not found' }); return; }
+  if (!adPlatforms.includes(platform) || !adGoals.includes(goal) || !adTones.includes(tone) || (audience !== undefined && !stringValue(audience, 120) && audience !== '')) { response.status(400).json({ error: 'Choose a valid platform, goal and tone' }); return; }
+  try {
+    const copy = await generateAdCopy({ productName: product.name, details: `${product.description} Category: ${product.category} Price: INR ${product.price}`, platform, goal, tone, audience: typeof audience === 'string' ? audience : '' });
+    if (!copy.primaryText) { response.status(502).json({ error: 'The ad copy came back empty Please try again' }); return; }
+    response.json({ copy });
+  } catch (error) { asyncError(response, error); }
+});
+
+async function loadAdReference(imageUrl: string): Promise<{ data: Buffer; mimeType: string } | undefined> {
+  try {
+    let buffer: Buffer;
+    if (/^\/uploads\/[0-9a-f-]{36}\/[\w.-]+$/i.test(imageUrl)) {
+      const file = path.resolve(uploadRoot, imageUrl.replace(/^\/uploads\//, ''));
+      if (!file.startsWith(uploadRoot + path.sep)) return undefined;
+      buffer = await readFile(file);
+    } else if (httpsUrl(imageUrl)) {
+      const result = await fetch(imageUrl, { signal: AbortSignal.timeout(8000) });
+      const length = Number(result.headers.get('content-length') || 0);
+      if (!result.ok || length > 8 * 1024 * 1024) return undefined;
+      buffer = Buffer.from(await result.arrayBuffer());
+      if (buffer.length > 8 * 1024 * 1024) return undefined;
+    } else return undefined;
+    const mimeType = detectImageType(buffer);
+    return mimeType ? { data: buffer, mimeType } : undefined;
+  } catch { return undefined; }
+}
+
+api.post('/owner/ads/image', requireOwner, adLimit, async (request, response) => {
+  const { style, format, notes } = request.body || {};
+  const product = adProductFromRequest(request.body, await getDatabase());
+  if (!product) { response.status(404).json({ error: 'Active product not found' }); return; }
+  if (!adImageStyles.includes(style) || !['Square', 'Portrait', 'Landscape'].includes(format) || (notes !== undefined && notes !== '' && !stringValue(notes, 300))) { response.status(400).json({ error: 'Choose a valid style and format' }); return; }
+  const reference = await loadAdReference(product.images?.find((image) => image.id === product.mainImageId)?.url || product.imageUrl);
+  const prompt = `Create a ${format.toLowerCase()} advertising photograph for an Indian fashion brand called Ahuza Apparel. Style: ${style}. Product: ${product.name} (${product.category})${reference ? ' Keep the garment from the attached photo exactly as it is: same colours, pattern and shape' : ''}. ${typeof notes === 'string' ? notes : ''} Show a model wearing the garment, with clean natural lighting. Do not add any text, logos, watermarks or prices to the image.`;
+  try { response.json({ image: await generateAdImage(prompt, reference) }); }
+  catch (error) { asyncError(response, error); }
+});
+
 api.post('/owner/social-post', requireOwner, ownerLimit, async (request, response) => {
   const productId = request.body?.productId;
   const database = await getDatabase();
@@ -1160,10 +1190,6 @@ api.post('/owner/marketing-automations/preview', requireOwner, ownerLimit, async
 
 api.post('/owner/marketing-automations/run', requireOwner, ownerLimit, async (_request, response) => {
   try { response.json({ sent: await runAutomations() }); } catch (error) { asyncError(response, error); }
-});
-
-api.post('/owner/automations/test', requireOwner, ownerLimit, async (_request, response) => {
-  response.json({ results: await testMarketingWebhooks() });
 });
 
 export async function expireReservationsOnStartup(): Promise<void> {

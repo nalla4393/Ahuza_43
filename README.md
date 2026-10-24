@@ -16,7 +16,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Vite serves the storefront at `http://localhost:5173` and proxies `/api` to the Express server using `PORT` (defaults to `3001`). The store is usable without third-party credentials; payments, AI, email, ads, and Zapier integrations activate when configured.
+Vite serves the storefront at `http://localhost:5173` and proxies `/api` to the Express server using `PORT` (defaults to `3001`). The store is usable without third-party credentials; payments, AI and email integrations activate when configured.
 
 Set `OWNER_API_KEY` in `.env` before using owner-only APIs. Set a long random `SESSION_SECRET` outside development. Never commit `.env` or `.data/`.
 
@@ -30,7 +30,7 @@ Owner Studio has a **Publish site / Unpublish site** control in its header. Unpu
 
 The chat menus, preloaded options and messages are unchanged. Typed questions are answered by the AI agent. Set `OPENAI_API_KEY` (server-side only; optional `OPENAI_MODEL`, default `gpt-4o-mini`) and replies are written in a natural, human tone using the last few messages of the conversation. Without it, the bot falls back to `GEMINI_API_KEY`, then to the existing "contact support" message. Delivery problems and complaints are still routed to a human support ticket, and the bot only uses store details it is given.
 
-The AI owner agent reads current store data and can propose inventory updates, order-status changes, and customer-email drafts. Write actions require owner approval; email drafts must still be reviewed before sending. Exact inventory commands such as `set stock AH-SFS-001 to 20` work without Gemini and produce an approval proposal. Set `GEMINI_API_KEY` for natural-language planning and email drafting. Configure `RESEND_API_KEY`, `ZAPIER_WEBHOOK_URL`, and `GOOGLE_ADS_WEBHOOK_URL` in `.env` to enable those integrations.
+The AI owner agent reads current store data and can propose inventory updates, order-status changes, and customer-email drafts. Write actions require owner approval; email drafts must still be reviewed before sending. Exact inventory commands such as `set stock AH-SFS-001 to 20` work without Gemini and produce an approval proposal. Set `GEMINI_API_KEY` for natural-language planning and email drafting. Configure `RESEND_API_KEY` in `.env` to enable Resend email.
 
 ## Direct UPI payments
 
@@ -115,6 +115,6 @@ This starter uses a JSON-file database and supports only a single server process
 
 Order received, payment confirmed, shipped and 7-day follow-up emails are drafted by OpenAI (`OPENAI_API_KEY`) and sent automatically; a plain template is used if the AI call fails. Sending needs `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` (Gmail: use an app password) or `RESEND_API_KEY`. UPI orders are only described as "received, payment pending" until the owner records the bank reference.
 
-## Newsletter and Zapier
+## Newsletter
 
-The storefront footer newsletter form saves the normalized email address, consent text and timestamp in the persistent JSON database. Subscribing requires explicit consent, and new signups are recorded in Owner Studio event activity and sent to the configured Zapier webhook as `newsletter_signup`. This webhook can trigger a Zap but does not create or edit Zaps. An embedded Zapier editor and in-app Zap management require Zapier Partner API approval and OAuth access.
+The storefront footer newsletter form saves the normalized email address, consent text and timestamp in the persistent JSON database. Subscribing requires explicit consent, and new signups are recorded in Owner Studio event activity.

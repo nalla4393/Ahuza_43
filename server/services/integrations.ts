@@ -4,58 +4,9 @@ import nodemailer from 'nodemailer';
 import { runAutomations } from './automations.js';
 import { generateOrderEmailBody } from './ai.js';
 
-type IntegrationEvent = { name: string; orderId?: string; amount?: number; currency?: string; page?: string; campaign?: string; email?: string; consent?: boolean };
-
 async function postJson(url: string, body: unknown, headers: Record<string, string> = {}): Promise<void> {
   const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) });
   if (!response.ok) throw new Error(`Integration returned HTTP ${response.status}`);
-}
-
-type WebhookTestResult = { configured: boolean; accepted: boolean; status?: number };
-
-export async function getMarketingWebhookUrls(): Promise<{ zapier?: string; googleAds?: string }> {
-  const database = await getDatabase();
-  return {
-    zapier: (database.integrationWebhooks?.zapier ?? process.env.ZAPIER_WEBHOOK_URL) || undefined,
-    googleAds: (database.integrationWebhooks?.googleAds ?? process.env.GOOGLE_ADS_WEBHOOK_URL) || undefined,
-  };
-}
-
-async function testWebhook(url: string | undefined, body: unknown): Promise<WebhookTestResult> {
-  if (!url) return { configured: false, accepted: false };
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(8000),
-    });
-    return { configured: true, accepted: response.ok, status: response.status };
-  } catch {
-    return { configured: true, accepted: false };
-  }
-}
-
-export async function testMarketingWebhooks(): Promise<{ zapier: WebhookTestResult; googleAds: WebhookTestResult }> {
-  const occurredAt = new Date().toISOString();
-  const urls = await getMarketingWebhookUrls();
-  const [zapier, googleAds] = await Promise.all([
-    testWebhook(urls.zapier, { name: 'owner_integration_test', testMode: true, occurredAt }),
-    testWebhook(urls.googleAds, { eventName: 'integration_test', testMode: true, source: 'ahuza_owner_studio', occurredAt }),
-  ]);
-  return { zapier, googleAds };
-}
-
-export async function triggerAutomations(event: IntegrationEvent): Promise<void> {
-  const urls = await getMarketingWebhookUrls();
-  if (urls.zapier) {
-    try { await postJson(urls.zapier, { ...event, occurredAt: new Date().toISOString() }); }
-    catch (error) { console.error('Zapier webhook failed:', error); }
-  }
-  if (event.name === 'purchase' && event.consent === true && urls.googleAds) {
-    try { await postJson(urls.googleAds, { eventName: event.name, transactionId: event.orderId, value: event.amount, currency: event.currency }); }
-    catch (error) { console.error('Google Ads conversion hook failed:', error); }
-  }
 }
 
 export async function notifySupportTicket(ticket: SupportTicket): Promise<void> {

@@ -174,6 +174,7 @@ export type StorefrontContent = {
   storyBody: string;
   storyImageUrl: string;
   circleImages: Record<string, string>;
+  circleLabels: Record<string, string>;
   bannerImages: Record<string, string>;
   copy: StorefrontCopy;
 };
@@ -191,6 +192,7 @@ export const defaultStorefrontContent: StorefrontContent = {
   storyBody: 'We make pieces to live in, not just look at Easy silhouettes, tactile fabrics, and the quiet confidence of getting dressed without overthinking it',
   storyImageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1200&q=85',
   circleImages: {},
+  circleLabels: {},
   bannerImages: {},
   copy: structuredClone(defaultStorefrontCopy),
 };
@@ -215,7 +217,6 @@ export type Database = {
   supportTickets: SupportTicket[];
   newsletterSubscribers?: NewsletterSubscriber[];
   paymentReceiptReviews?: PaymentReceiptReview[];
-  integrationWebhooks?: { googleAds?: string; zapier?: string };
   sitePublished?: boolean;
   seededProductIds?: string[];
   content: StorefrontContent;
@@ -283,11 +284,11 @@ async function loadDatabase(): Promise<Database> {
       newsletterSubscribers: Array.isArray(parsed.newsletterSubscribers) ? parsed.newsletterSubscribers : [],
       paymentReceiptReviews: Array.isArray(parsed.paymentReceiptReviews) ? parsed.paymentReceiptReviews : [],
       sitePublished: parsed.sitePublished !== false,
-      ...(parsed.integrationWebhooks && typeof parsed.integrationWebhooks === 'object' ? { integrationWebhooks: parsed.integrationWebhooks } : {}),
       content: {
         ...structuredClone(defaultStorefrontContent),
         ...(parsed.content && typeof parsed.content === 'object' ? parsed.content : {}),
         circleImages: { ...defaultStorefrontContent.circleImages, ...(parsed.content?.circleImages || {}) },
+        circleLabels: { ...defaultStorefrontContent.circleLabels, ...(parsed.content?.circleLabels || {}) },
         bannerImages: { ...defaultStorefrontContent.bannerImages, ...(parsed.content?.bannerImages || {}) },
         copy: mergeStorefrontCopy(parsed.content?.copy),
       },

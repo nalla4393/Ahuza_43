@@ -38,7 +38,7 @@ const formatPrice = (price: number) => new Intl.NumberFormat('en-IN', {
 
 type Customer = { id: string; email: string };
 type CustomerOrder = { id: string; amount: number; currency: string; status: string; paymentMethod?: 'upi' | 'cod'; paymentStatus?: string; paymentVerifiedAt?: string; hasPendingReceiptReview?: boolean; createdAt: string; trackingNumber?: string; trackingUrl?: string; review?: { rating: number; comment?: string; createdAt: string }; items: { name: string; quantity: number; size?: string }[] };
-type StorefrontContent = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string; circleImages?: Record<string, string>; bannerImages?: Record<string, string>; copy?: Record<StorefrontCopyId, string> };
+type StorefrontContent = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string; circleImages?: Record<string, string>; circleLabels?: Record<string, string>; bannerImages?: Record<string, string>; copy?: Record<StorefrontCopyId, string> };
 type CartLine = { productId: string; quantity: number; size?: string };
 type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; paymentReference?: string; upiIntent?: string; merchantVpa?: string; merchantName?: string; amount: number; currency: string; expiresAt?: string; status?: string };
 type PaymentConfiguration = { configured: boolean; upiVpa: string | null; merchantName: string; automaticVerification: false };
@@ -133,11 +133,12 @@ export default function App() {
   const cartTotal = cartLines.reduce((total, line) => total + line.product.price * line.quantity, 0);
   const storefrontText = (id: StorefrontCopyId) => storeContent.copy?.[id] ?? defaultStorefrontCopy[id];
   const estimatedShipping = cartTotal < 2500 ? 100 : 0;
+  const looseText = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/s$/, '');
   const categories = ['All', ...Array.from(new Set(products.map((product) => product.category)))];
   const sizes = ['All', ...Array.from(new Set(products.flatMap((product) => product.sizes || [])))];
   const matchingProducts = products.filter((product) => {
-    const term = searchTerm.trim().toLowerCase();
-    const searchable = `${product.name} ${product.category} ${product.description} ${product.ghostMannequin?.tags?.join(' ') || ''}`.toLowerCase();
+    const term = looseText(searchTerm);
+    const searchable = looseText(`${product.name} ${product.category} ${product.description} ${product.ghostMannequin?.tags?.join(' ') || ''}`);
     return (!term || searchable.includes(term))
       && (selectedCategory === 'All' || product.category === selectedCategory)
       && (selectedSizeFilter === 'All' || product.sizes?.includes(selectedSizeFilter))
@@ -153,18 +154,24 @@ export default function App() {
   };
   const navItems = ['Women', 'Men', 'Kurtis', 'Frocks', 'Kurta Sets', 'Lehengas', 'Night Suits', 'Track Suits', 'New Arrivals', 'Bestsellers', 'Sale'];
   const megaItems = ['Women', 'Men', 'Sale'];
+  const showAllLabels = ['Women', 'New Arrivals', 'Bestsellers', 'Sale'];
+  const productsForNavItem = (label: string) => {
+    if (showAllLabels.includes(label)) return products;
+    if (label === 'Men') return products.filter((product) => /\bmen('s)?\b/i.test(`${product.name} ${product.category}`));
+    const term = looseText(label);
+    return products.filter((product) => looseText(`${product.name} ${product.category}`).includes(term));
+  };
   const openNavItem = (label: string) => {
     setMegaOpen(null);
-    const category = categories.find((item) => item.toLowerCase() === label.toLowerCase());
     if (label === 'New Arrivals') setSortOrder('newest');
-    openCollection(category || 'All', 'All');
-    if (!category && !['New Arrivals', 'Bestsellers', 'Sale'].includes(label)) setSearchTerm(label);
+    openCollection('All', 'All');
+    if (!showAllLabels.includes(label)) setSearchTerm(label === 'Men' ? 'Men' : label);
   };
   const circleFallbacks = ['photo-1515886657613-9f3515b0c78f', 'photo-1483985988355-763728e1935b', 'photo-1469334031218-e382a71b716b', 'photo-1539109136881-3be0616acf4b'];
-  const circleItems = navItems.map((label, position) => {
-    const product = products.find((entry) => entry.category.toLowerCase() === label.toLowerCase());
+  const circleItems = navItems.filter((label) => productsForNavItem(label).length > 0).map((label, position) => {
+    const product = productsForNavItem(label)[0];
     const image = storeContent.circleImages?.[label] || (product ? (galleryImages(product)[0]?.url || product.imageUrl) : `https://images.unsplash.com/${circleFallbacks[position % circleFallbacks.length]}?auto=format&fit=crop&w=400&h=400&q=70`);
-    return { label, image };
+    return { label, image, display: storeContent.circleLabels?.[label] || label };
   });
   const bannerSlides: BannerSlide[] = [
     { id: 'collection', eyebrow: storeContent.heroEyebrow, title: storeContent.heroTitle, description: storeContent.heroDescription, cta: 'Shop the collection', desktopImage: storeContent.heroImageUrl, onSelect: () => openCollection('All', 'All') },
@@ -700,7 +707,7 @@ export default function App() {
       <ProductRail id="shop-by-category" className="circle-rail" eyebrow={storefrontText('categoryEyebrow')} title={storefrontText('categoryTitle')} linkLabel={storefrontText('categoryLink')} onLink={() => openCollection('All', 'All')}>
         {circleItems.map((item) => <button type="button" className="category-circle" key={item.label} onClick={() => openNavItem(item.label)}>
           <span className="circle-img"><img src={item.image} alt="" loading="lazy" /></span>
-          <span className="circle-label">{item.label}</span>
+          <span className="circle-label">{item.display}</span>
         </button>)}
       </ProductRail>
 
