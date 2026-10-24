@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import express, { Router, type Request, type Response, type NextFunction } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import PDFDocument from 'pdfkit';
@@ -14,8 +14,10 @@ import { createUpiIntent, getUpiConfiguration } from './services/upi.js';
 import { storefrontCopyFields } from '../shared/storefrontCopy.js';
 
 export const api = Router();
+api.use('/owner', (request, response, next) => ownerFailLimit(request, response, next));
 const authLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false });
 const ownerLimit = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false });
+const ownerFailLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, skipSuccessfulRequests: true, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Too many failed attempts' } });
 const uploadLimit = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false });
 const analyticsLimit = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false });
 const supportLimit = rateLimit({ windowMs: 60 * 1000, limit: 12, standardHeaders: 'draft-8', legacyHeaders: false });
@@ -31,7 +33,8 @@ function requireCustomer(request: Request, response: Response, next: NextFunctio
 function requireOwner(request: Request, response: Response, next: NextFunction): void {
   const expected = process.env.OWNER_API_KEY || '';
   const supplied = request.get('x-owner-key') || '';
-  const valid = expected.length > 0 && supplied.length === expected.length && timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
+  const digest = (value: string) => createHash('sha256').update(value).digest();
+  const valid = expected.length > 0 && timingSafeEqual(digest(supplied), digest(expected));
   if (!valid) { response.status(403).json({ error: 'Owner access required' }); return; }
   next();
 }

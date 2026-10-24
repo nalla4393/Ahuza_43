@@ -252,3 +252,5 @@ html,body,body *{font-family:var(--site-font) !important}
   .customer-account-nav{gap:7px}
   .customer-account-nav a{min-height:36px;padding:0 11px}
 }
+
+.footer-terms { color: inherit; text-decoration: underline; }
