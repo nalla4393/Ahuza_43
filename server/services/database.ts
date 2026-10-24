@@ -209,6 +209,35 @@ export type AutomationRule = {
 };
 export type AutomationRun = { key: string; ruleId: string; ruleName: string; to: string; status: 'sent' | 'failed' | 'skipped'; detail?: string; at: string };
 
+export type SocialPlatform = 'facebook' | 'instagram';
+export type SocialSchedule = {
+  id: string;
+  name: string;
+  platforms: SocialPlatform[];
+  days: number[];
+  time: string;
+  productMode: 'rotate' | 'newest';
+  tone: string;
+  autoPublish: boolean;
+  enabled: boolean;
+  lastRunDate?: string;
+  createdAt: string;
+};
+export type SocialPost = {
+  id: string;
+  scheduleId?: string;
+  productId: string;
+  productName: string;
+  caption: string;
+  imageUrl: string;
+  platform: SocialPlatform;
+  status: 'draft' | 'posted' | 'failed';
+  detail?: string;
+  externalId?: string;
+  createdAt: string;
+  postedAt?: string;
+};
+
 export type Database = {
   products: Product[];
   customers: Customer[];
@@ -224,6 +253,8 @@ export type Database = {
   imageLibrary?: ProductImage[];
   automations?: AutomationRule[];
   automationRuns?: AutomationRun[];
+  socialSchedules?: SocialSchedule[];
+  socialPosts?: SocialPost[];
   stockAlerts?: StockAlert[];
   orderEmailNotifications?: OrderEmailNotification[];
 };
@@ -296,6 +327,8 @@ async function loadDatabase(): Promise<Database> {
       imageLibrary: Array.isArray(parsed.imageLibrary) ? parsed.imageLibrary : [],
       automations: Array.isArray(parsed.automations) ? parsed.automations : [],
       automationRuns: Array.isArray(parsed.automationRuns) ? parsed.automationRuns : [],
+      socialSchedules: Array.isArray(parsed.socialSchedules) ? parsed.socialSchedules : [],
+      socialPosts: Array.isArray(parsed.socialPosts) ? parsed.socialPosts : [],
       stockAlerts: Array.isArray(parsed.stockAlerts) ? parsed.stockAlerts : [],
       orderEmailNotifications: Array.isArray(parsed.orderEmailNotifications) ? parsed.orderEmailNotifications : [],
     };

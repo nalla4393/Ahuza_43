@@ -9,6 +9,7 @@ import { existsSync } from 'node:fs';
 import { uploadRoot } from './server/services/images.js';
 import { api, expireReservationsOnStartup } from './server/routes.js';
 import { expirePendingOrders, startFollowUpScheduler } from './server/services/integrations.js';
+import { startSocialScheduler } from './server/services/social.js';
 import { sendRestockAlerts } from './server/services/stock-alerts.js';
 
 const app = express();
@@ -96,6 +97,7 @@ void expireReservationsOnStartup().catch((error) => console.error('Reservation c
 const reservationTimer = setInterval(() => void expirePendingOrders().catch((error) => console.error('Reservation cleanup failed:', error)), 60 * 1000);
 reservationTimer.unref();
 startFollowUpScheduler();
+startSocialScheduler();
 const stockAlertTimer = setInterval(() => void sendRestockAlerts().catch((error) => console.error('Restock alert scan failed:', error)), 15 * 60 * 1000);
 stockAlertTimer.unref();
 

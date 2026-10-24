@@ -9,6 +9,7 @@ import { extractPaymentReceipt, generateAdCopy, generateAdImage, generateCustome
 import { bannerImageKeys, circleImageKeys, getDatabase, mergeImageSettings, mutateDatabase, type Database, type Order, type PaymentReceiptReview, type Product, type ShippingAddress, type StorefrontContent, type SupportTicket } from './services/database.js';
 import { sendRestockAlerts } from './services/stock-alerts.js';
 import { deleteProductImageFiles, detectImageType, maxUploadBytes, sanitizeImageSettings, saveProductImage, uploadRoot } from './services/images.js';
+import { publishSocialPost, runSchedule, socialStatus, validateSchedule } from './services/social.js';
 import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
 import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
@@ -178,7 +179,7 @@ api.post('/customer-support/chat', supportLimit, async (request, response) => {
       })
       : [];
     const raw = await generateCustomerSupportReply(message, storeContext, history);
-    const escalate = /\[ESCALATE\]/i.test(raw);
+    const escalate = /\[ESCALATE\]/i.test(raw) || asksAboutDelayCauses && complaint;
     response.json({ reply: raw.replace(/\s*\[ESCALATE\]\s*/gi, ' ').trim(), requiresHumanSupport: escalate });
   } catch (error) {
     if (error instanceof Error && error.message === 'AI_NOT_CONFIGURED') {
@@ -1147,6 +1148,75 @@ api.post('/owner/ads/image', requireOwner, adLimit, async (request, response) =>
     if (error instanceof Error && error.message === 'AD_IMAGE_UNAVAILABLE') { response.status(503).json({ error: 'Image generation is not available on your AI plan yet Enable billing for your Gemini or OpenAI key, then try again' }); return; }
     asyncError(response, error);
   }
+});
+
+api.get('/owner/social/schedules', requireOwner, ownerLimit, async (_request, response) => {
+  const database = await getDatabase();
+  response.json({ schedules: database.socialSchedules || [], posts: [...(database.socialPosts || [])].reverse().slice(0, 40), connected: socialStatus() });
+});
+
+api.post('/owner/social/schedules', requireOwner, ownerLimit, async (request, response) => {
+  const rule = validateSchedule(request.body);
+  if (typeof rule === 'string') { response.status(400).json({ error: rule }); return; }
+  const schedule = await mutateDatabase((database) => {
+    database.socialSchedules ||= [];
+    if (database.socialSchedules.length >= 20) return null;
+    const created = { ...rule, id: randomUUID(), createdAt: new Date().toISOString() };
+    database.socialSchedules.push(created);
+    return created;
+  });
+  if (!schedule) { response.status(400).json({ error: 'You can have up to 20 schedules' }); return; }
+  response.status(201).json({ schedule });
+});
+
+api.patch('/owner/social/schedules/:id', requireOwner, ownerLimit, async (request, response) => {
+  if (typeof request.body?.enabled !== 'boolean') { response.status(400).json({ error: 'Provide enabled as true or false' }); return; }
+  const schedule = await mutateDatabase((database) => {
+    const current = database.socialSchedules?.find((entry) => entry.id === request.params.id);
+    if (current) current.enabled = request.body.enabled;
+    return current ? structuredClone(current) : null;
+  });
+  if (!schedule) { response.status(404).json({ error: 'Schedule not found' }); return; }
+  response.json({ schedule });
+});
+
+api.delete('/owner/social/schedules/:id', requireOwner, ownerLimit, async (request, response) => {
+  const removed = await mutateDatabase((database) => {
+    const before = database.socialSchedules?.length || 0;
+    database.socialSchedules = (database.socialSchedules || []).filter((entry) => entry.id !== request.params.id);
+    return database.socialSchedules.length < before;
+  });
+  if (!removed) { response.status(404).json({ error: 'Schedule not found' }); return; }
+  response.status(204).end();
+});
+
+api.post('/owner/social/schedules/:id/run', requireOwner, adLimit, async (request, response) => {
+  try { response.json({ posts: await runSchedule(String(request.params.id)) }); }
+  catch (error) {
+    if (error instanceof Error && error.message === 'SCHEDULE_NOT_FOUND') { response.status(404).json({ error: 'Schedule not found' }); return; }
+    if (error instanceof Error && error.message === 'NO_PRODUCT_AVAILABLE') { response.status(409).json({ error: 'No in-stock product with a public image is available' }); return; }
+    asyncError(response, error);
+  }
+});
+
+api.post('/owner/social/posts/:id/publish', requireOwner, adLimit, async (request, response) => {
+  const caption = request.body?.caption;
+  if (caption !== undefined && !stringValue(caption, 2000)) { response.status(400).json({ error: 'Caption must be up to 2,000 characters' }); return; }
+  try { response.json({ post: await publishSocialPost(String(request.params.id), caption) }); }
+  catch (error) {
+    if (error instanceof Error && error.message === 'POST_NOT_FOUND') { response.status(404).json({ error: 'Post not found' }); return; }
+    asyncError(response, error);
+  }
+});
+
+api.delete('/owner/social/posts/:id', requireOwner, ownerLimit, async (request, response) => {
+  const removed = await mutateDatabase((database) => {
+    const before = database.socialPosts?.length || 0;
+    database.socialPosts = (database.socialPosts || []).filter((entry) => entry.id !== request.params.id || entry.status === 'posted');
+    return database.socialPosts.length < before;
+  });
+  if (!removed) { response.status(404).json({ error: 'Draft or failed post not found' }); return; }
+  response.status(204).end();
 });
 
 api.post('/owner/social-post', requireOwner, ownerLimit, async (request, response) => {
