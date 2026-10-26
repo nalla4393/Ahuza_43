@@ -37,5 +37,7 @@ services:
         sync: false
       - key: EMAIL_FROM
         sync: false
-      - key: UPI_VPA
+      - key: AHUZA_PAY_BASE_URL
+        sync: false
+      - key: AHUZA_PAY_API_KEY
         sync: false
