@@ -102,7 +102,8 @@ export type Order = {
   paymentReference?: string;
   paymentVerifiedAt?: string;
   manualPaymentReference?: string;
-  paymentVerificationMethod?: 'manual_bank_reconciliation';
+  paymentVerificationMethod?: 'manual_bank_reconciliation' | 'ahuza_pay';
+  ahuzaPayUrl?: string;
   reservationExpiresAt?: string;
   createdAt: string;
   deliveredAt?: string;

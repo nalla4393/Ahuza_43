@@ -40,7 +40,7 @@ type Customer = { id: string; email: string };
 type CustomerOrder = { id: string; amount: number; currency: string; status: string; paymentMethod?: 'upi' | 'cod'; paymentStatus?: string; paymentVerifiedAt?: string; hasPendingReceiptReview?: boolean; createdAt: string; trackingNumber?: string; trackingUrl?: string; review?: { rating: number; comment?: string; createdAt: string }; items: { name: string; quantity: number; size?: string }[] };
 type StorefrontContent = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string; circleImages?: Record<string, string>; circleLabels?: Record<string, string>; bannerImages?: Record<string, string>; copy?: Record<StorefrontCopyId, string> };
 type CartLine = { productId: string; quantity: number; size?: string };
-type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; paymentReference?: string; upiIntent?: string; merchantVpa?: string; merchantName?: string; amount: number; currency: string; expiresAt?: string; status?: string };
+type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; paymentReference?: string; upiIntent?: string; redirectUrl?: string; merchantVpa?: string; merchantName?: string; amount: number; currency: string; expiresAt?: string; status?: string };
 type PaymentConfiguration = { configured: boolean; upiVpa: string | null; merchantName: string; automaticVerification: false };
 
 type AddressValues = { name: string; addressLine1: string; addressLine2: string; city: string; state: string; postalCode: string; phone: string };
@@ -438,6 +438,13 @@ export default function App() {
       const order = await parseResponse<PaymentOrder & { error?: string }>(response);
       if (!response.ok || !order.orderId || order.paymentMethod !== paymentMethod || typeof order.amount !== 'number') {
         throw new Error(order.error || 'Could not start checkout');
+      }
+      if (paymentMethod === 'upi' && order.redirectUrl) {
+        const target = new URL(order.redirectUrl);
+        if (target.protocol !== 'https:' && target.hostname !== 'localhost') throw new Error('Invalid payment link');
+        setCart([]);
+        window.location.assign(target.toString());
+        return;
       }
       if (paymentMethod === 'upi' && (!order.paymentReference || !order.upiIntent || !order.merchantVpa)) {
         throw new Error('The server returned an incomplete direct UPI payment request');
