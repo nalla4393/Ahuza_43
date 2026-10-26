@@ -60,6 +60,7 @@ export type Customer = {
   passwordHash: string;
   createdAt: string;
   wishlist?: string[];
+  upiId?: string;
 };
 
 export type StockAlert = {
@@ -144,27 +145,6 @@ export type NewsletterSubscriber = {
   source: 'storefront';
 };
 
-export type PaymentReceiptReview = {
-  id: string;
-  orderId: string;
-  userId: string;
-  expectedAmount: number;
-  extraction: {
-    utrNumber: string | null;
-    amountPaid: number | null;
-    receiverUpiId: string | null;
-    date: string | null;
-    isSuccessful: boolean;
-  };
-  flags: string[];
-  status: 'pending_admin_review' | 'reviewed';
-  createdAt: string;
-  reviewedAt?: string;
-  reviewNote?: string;
-};
-
-
-
 export type StorefrontContent = {
   announcement: string;
   heroEyebrow: string;
@@ -246,7 +226,6 @@ export type Database = {
   events: StoreEvent[];
   supportTickets: SupportTicket[];
   newsletterSubscribers?: NewsletterSubscriber[];
-  paymentReceiptReviews?: PaymentReceiptReview[];
   sitePublished?: boolean;
   seededProductIds?: string[];
   content: StorefrontContent;
@@ -286,7 +265,7 @@ let writeQueue: Promise<void> = Promise.resolve();
 let loaded: Database | undefined;
 
 function emptyDatabase(): Database {
-  return { products: structuredClone(seedProducts), seededProductIds: seedProducts.map((product) => product.id), customers: [], orders: [], events: [], supportTickets: [], paymentReceiptReviews: [], sitePublished: true, content: structuredClone(defaultStorefrontContent), imageSettings: structuredClone(defaultImageSettings) };
+  return { products: structuredClone(seedProducts), seededProductIds: seedProducts.map((product) => product.id), customers: [], orders: [], events: [], supportTickets: [], sitePublished: true, content: structuredClone(defaultStorefrontContent), imageSettings: structuredClone(defaultImageSettings) };
 }
 
 export function mergeImageSettings(value: unknown): ImageSettings {
@@ -314,7 +293,6 @@ async function loadDatabase(): Promise<Database> {
       events: Array.isArray(parsed.events) ? parsed.events : [],
       supportTickets: Array.isArray(parsed.supportTickets) ? parsed.supportTickets : [],
       newsletterSubscribers: Array.isArray(parsed.newsletterSubscribers) ? parsed.newsletterSubscribers : [],
-      paymentReceiptReviews: Array.isArray(parsed.paymentReceiptReviews) ? parsed.paymentReceiptReviews : [],
       sitePublished: parsed.sitePublished !== false,
       content: {
         ...structuredClone(defaultStorefrontContent),

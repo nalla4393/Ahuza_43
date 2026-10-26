@@ -50,3 +50,17 @@ export async function createAhuzaPayOrder(order: Order, email: string, address: 
 export async function getAhuzaPayStatus(orderId: string): Promise<AhuzaPayResult> {
   return toResult(await call(`/orders/${encodeURIComponent(orderId)}`, { method: 'GET' }));
 }
+
+export type AhuzaPayPayee = { vpa: string; payee_name: string; source: 'database' | 'environment' };
+
+export async function getAhuzaPayPayee(): Promise<AhuzaPayPayee> {
+  return call('/payee', { method: 'GET' });
+}
+
+export async function updateAhuzaPayPayee(body: { vpa?: string; payee_name?: string }): Promise<AhuzaPayPayee> {
+  return call('/payee', { method: 'PUT', body });
+}
+
+export async function resetAhuzaPayPayee(): Promise<AhuzaPayPayee> {
+  return call('/payee', { method: 'DELETE' });
+}

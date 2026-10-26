@@ -24,7 +24,6 @@
     "lucide-react": "^0.468.0",
     "nodemailer": "^10.1.0",
     "pdfkit": "^0.20.2",
-    "qrcode.react": "^4.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "session-file-store": "^1.5.0",
