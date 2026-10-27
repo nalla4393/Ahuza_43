@@ -3,7 +3,6 @@ import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import express, { Router, type Request, type Response, type NextFunction } from 'express';
 import { rateLimit } from 'express-rate-limit';
-import PDFDocument from 'pdfkit';
 import { hashPassword, verifyPassword } from './services/auth.js';
 import { extractPaymentReceipt, generateAdCopy, generateAdImage, generateCustomerEmailBody, generateCustomerSupportReply, generateOwnerAgentPlan, generateSocialPost, isTextAiConfigured, type CustomerEmailKind, type OwnerAgentIntent } from './services/ai.js';
 import { bannerImageKeys, circleImageKeys, getDatabase, mergeImageSettings, mutateDatabase, type Database, type Order, type PaymentReceiptReview, type Product, type ShippingAddress, type StorefrontContent, type SupportTicket } from './services/database.js';
@@ -15,6 +14,7 @@ import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
 import { buildAhuzaPayOrder, createAhuzaPayOrder, getAhuzaPayConfiguration, getAhuzaPayPayee, getAhuzaPayStatus, resetAhuzaPayPayee, updateAhuzaPayPayee } from './services/ahuzaPay.js';
 import { customerDataConfigured, decryptCustomerValue, encryptCustomerValue, isValidUpiId } from './services/customerData.js';
+import { buildInvoicePdf } from './services/invoice.js';
 import { storefrontCopyFields } from '../shared/storefrontCopy.js';
 
 export const api = Router();
@@ -610,37 +610,11 @@ api.get('/orders/:id/invoice', requireCustomer, async (request, response) => {
     response.status(409).json({ error: 'An invoice is available only after payment is confirmed' }); return;
   }
   const customerEmail = database.customers.find((customer) => customer.id === order.userId)?.email || 'Not available';
-  const safePdfText = (value: string) => value.normalize('NFKD').replace(/[^\x20-\x7e]/g, '?');
-
-  const document = new PDFDocument({ size: 'A4', margin: 48 });
+  const invoice = await buildInvoicePdf(order, customerEmail);
   response.setHeader('Content-Type', 'application/pdf');
-  response.setHeader('Content-Disposition', `attachment; filename="ahuza-invoice-${order.id}pdf"`);
-  document.pipe(response);
-  document.fontSize(22).font('Helvetica-Bold').text('AHUZA APPAREL');
-  document.moveDown(0.5).fontSize(18).text('INVOICE');
-  document.moveDown(0.5).fontSize(10).font('Helvetica')
-    .text(`Invoice / order reference: ${order.id}`)
-    .text(`Order date: ${new Date(order.createdAt).toLocaleDateString('en-IN')}`)
-    .text(`Payment status: ${order.status}`);
-  document.moveDown().font('Helvetica-Bold').text('Bill to');
-  document.font('Helvetica')
-    .text(safePdfText(order.shippingAddress.name))
-    .text(safePdfText(order.shippingAddress.addressLine1))
-    .text(safePdfText(order.shippingAddress.addressLine2 || ''))
-    .text(safePdfText(`${order.shippingAddress.city}, ${order.shippingAddress.state} ${order.shippingAddress.postalCode}`))
-    .text(order.shippingAddress.country)
-    .text(`Email: ${safePdfText(customerEmail)}`);
-  document.moveDown().font('Helvetica-Bold').text('Items');
-  document.moveDown(0.4);
-  for (const item of order.items) {
-    const lineTotal = item.unitPrice * item.quantity;
-    document.font('Helvetica-Bold').text(safePdfText(`${item.name}${item.size ? ` · Size ${item.size}` : ''}`));
-    document.font('Helvetica').fontSize(9).text(`SKU: ${safePdfText(item.sku)}  |  Quantity: ${item.quantity}  |  Unit price: INR ${item.unitPrice.toFixed(2)}  |  Line total: INR ${lineTotal.toFixed(2)}`);
-    document.moveDown(0.6);
-  }
-  document.moveDown().fontSize(12).font('Helvetica-Bold').text(`Total paid: ${order.currency} ${(order.amount / 100).toFixed(2)}`, { align: 'right' });
-  document.moveDown(2).fontSize(9).font('Helvetica').text('Thank you for shopping with AHUZA Apparel');
-  document.end();
+  response.setHeader('Content-Disposition', `attachment; filename="ahuza-invoice-${order.id}.pdf"`);
+  response.setHeader('Content-Length', invoice.length);
+  response.send(invoice);
 });
 
 api.post('/orders/:id/returns', requireCustomer, async (request, response) => {
@@ -1005,6 +979,8 @@ api.patch('/owner/orders/:id/cod-payment', requireOwner, ownerLimit, async (requ
       return { order, changed: true };
   });
   if (!result) { response.status(409).json({ error: 'Only a delivered, unpaid cash-on-delivery order can be marked paid' }); return; }
+  const email = (await getDatabase()).customers.find((entry) => entry.id === result.order.userId)?.email;
+  if (email) void enqueueOrderEmail(result.order.id, 'payment_confirmed').catch((error) => console.error('COD payment confirmation email queue failed:', error));
   response.json({ order: result.order });
 });
 

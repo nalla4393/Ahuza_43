@@ -45,3 +45,15 @@ test('delivery notification invites the customer to rate and review the order', 
   assert.match(body, /rate and review your order/i);
   assert.match(body, /order-reference-123/);
 });
+
+test('payment confirmation email tells the customer where to get the invoice and receipt', () => {
+  const paid: Order = { ...order, status: 'paid', paymentStatus: 'paid', paymentVerifiedAt: '2026-10-14T12:00:00.000Z' };
+  const body = appendOrderEmailDetails('payment_confirmed', paid, 'Your payment is confirmed.');
+  assert.match(body, /invoice and payment receipt are attached as a PDF/i);
+  assert.match(body, /Account > Order history/);
+});
+
+test('unverified payment email never claims an invoice receipt is attached', () => {
+  const body = appendOrderEmailDetails('payment_confirmed', order, 'Your payment update.');
+  assert.doesNotMatch(body, /invoice and payment receipt are attached/i);
+});
