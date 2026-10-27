@@ -3,6 +3,9 @@ import { randomUUID } from 'node:crypto';
 import nodemailer from 'nodemailer';
 import { runAutomations } from './automations.js';
 import { generateOrderEmailBody } from './ai.js';
+import { buildInvoicePdf } from './invoice.js';
+
+type EmailAttachment = { filename: string; content: Buffer; contentType: 'application/pdf' };
 
 async function postJson(url: string, body: unknown, headers: Record<string, string> = {}): Promise<void> {
   const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) });
@@ -25,12 +28,15 @@ export function isEmailConfigured(): boolean {
   return Boolean(process.env.RESEND_API_KEY?.trim() || (process.env.SMTP_HOST?.trim() && process.env.SMTP_USER?.trim() && process.env.SMTP_PASS));
 }
 
-export async function sendEmail(to: string, subject: string, text: string): Promise<void> {
+export async function sendEmail(to: string, subject: string, text: string, attachments: EmailAttachment[] = []): Promise<void> {
   const from = process.env.EMAIL_FROM || (process.env.SMTP_USER ? `Ahuza Apparel <${process.env.SMTP_USER}>` : 'Ahuza Apparel <onboarding@resend.dev>');
   if (process.env.SMTP_HOST?.trim() && process.env.SMTP_USER?.trim() && process.env.SMTP_PASS) {
     const port = Number(process.env.SMTP_PORT) || 465;
     const transport = nodemailer.createTransport({ host: process.env.SMTP_HOST.trim(), port, secure: port === 465, auth: { user: process.env.SMTP_USER.trim(), pass: process.env.SMTP_PASS }, connectionTimeout: 10000, socketTimeout: 15000 });
-    await transport.sendMail({ from, to, subject, text });
+    await transport.sendMail({
+      from, to, subject, text,
+      attachments: attachments.map(({ filename, content, contentType }) => ({ filename, content, contentType })),
+    });
     return;
   }
   const apiKey = process.env.RESEND_API_KEY?.trim();
@@ -38,7 +44,14 @@ export async function sendEmail(to: string, subject: string, text: string): Prom
     console.info(`[email not configured] ${subject} -> ${to}`);
     return;
   }
-  await postJson('https://api.resend.com/emails', { from, to: [to], subject, text }, { Authorization: 'Bearer ' + apiKey });
+  await postJson('https://api.resend.com/emails', {
+    from, to: [to], subject, text,
+    ...(attachments.length ? {
+      attachments: attachments.map(({ filename, content, contentType }) => ({
+        filename, content: content.toString('base64'), content_type: contentType,
+      })),
+    } : {}),
+  }, { Authorization: 'Bearer ' + apiKey });
 }
 
 const orderEmailSubjects: Record<OrderEmailKind, (id: string) => string> = {
@@ -64,6 +77,7 @@ function fallbackOrderEmail(kind: OrderEmailKind, order: Order): string {
 
 export async function sendOrderEmail(kind: OrderEmailKind | 'follow_up', order: Order, email: string): Promise<void> {
   if (!isEmailConfigured()) return;
+  if (kind === 'payment_confirmed' && (order.paymentStatus !== 'paid' || !order.paymentVerifiedAt)) return;
   const details = JSON.stringify({
     customerName: order.shippingAddress.name,
     orderReference: order.id,
@@ -80,7 +94,10 @@ export async function sendOrderEmail(kind: OrderEmailKind | 'follow_up', order: 
   try { body = await generateOrderEmailBody(kind, details); }
   catch (error) { console.error('AI email draft failed; using template:', error instanceof Error ? error.message : error); body = fallbackOrderEmail(kind, order); }
   body = appendOrderEmailDetails(kind, order, body);
-  await sendEmail(email, orderEmailSubjects[kind](order.id), body);
+  const attachments = kind === 'payment_confirmed' && order.paymentStatus === 'paid' && order.paymentVerifiedAt
+    ? [{ filename: `ahuza-invoice-${order.id}.pdf`, content: await buildInvoicePdf(order, email), contentType: 'application/pdf' as const }]
+    : [];
+  await sendEmail(email, orderEmailSubjects[kind](order.id), body, attachments);
 }
 
 export function appendOrderEmailDetails(kind: OrderEmailKind, order: Order, body: string): string {
@@ -90,6 +107,10 @@ export function appendOrderEmailDetails(kind: OrderEmailKind, order: Order, body
   ].filter(Boolean).join('\n');
   const details = kind === 'order_placed'
     ? `Order reference: ${order.id}\nPayment reference: ${order.paymentReference || order.id}\nTrack progress by signing in at www.ahuzawear.com and opening Account > Order history.`
+    : kind === 'payment_confirmed' && order.paymentStatus === 'paid' && order.paymentVerifiedAt
+      ? `Order reference: ${order.id}\nYour invoice and payment receipt are attached as a PDF. You can also download them from Account > Order history after signing in at www.ahuzawear.com.`
+      : kind === 'payment_confirmed'
+        ? `Order reference: ${order.id}`
     : `Order reference: ${order.id}${tracking ? `\n${tracking}` : ''}${kind === 'delivered' ? '\nPlease sign in at www.ahuzawear.com and open Account > Order history to rate and review your order.' : ''}`;
   return `${body.trim()}\n\n${details}`;
 }

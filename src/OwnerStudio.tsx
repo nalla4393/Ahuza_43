@@ -2,7 +2,7 @@ import AdStudio from './AdStudio';
 import SocialScheduler from './SocialScheduler';
 import MarketingAutomations from './MarketingAutomations';
 import { useState, type ChangeEvent, type FormEvent } from 'react';
-import { ArrowLeft, BarChart3, Box, Check, Headphones, Image, LoaderCircle, Mail, MessageCircle, Megaphone, PackageCheck, Plus, Send, Settings2, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, BarChart3, Box, Check, CreditCard, Headphones, Image, LoaderCircle, Mail, MessageCircle, Megaphone, PackageCheck, Plus, Send, Settings2, Sparkles, X } from 'lucide-react';
 import { removeSentenceFullStops } from './siteCopy';
 import ProductImageManager from './ProductImageManager';
 import ImageSettingsPanel from './ImageSettingsPanel';
@@ -12,7 +12,7 @@ import { defaultStorefrontCopy, storefrontCopyFields, type StorefrontCopyId } fr
 
 type Product = { id: string; name: string; description: string; price: number; sku: string; stock: number; category: string; imageUrl: string; active: boolean; ghostMannequin: { imageUrl?: string; tags: string[]; background?: string }; images?: ProductImage[]; mainImageId?: string; sizes?: string[] };
 type Content = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string; circleImages?: Record<string, string>; circleLabels?: Record<string, string>; bannerImages?: Record<string, string>; copy: Record<StorefrontCopyId, string> };
-type Order = { id: string; status: string; amount: number; currency: string; createdAt: string; paymentMethod?: 'upi' | 'cod'; paymentReference?: string; trackingNumber?: string; trackingUrl?: string; paymentVerifiedAt?: string; paymentStatus?: string; manualPaymentReference?: string; paymentVerificationMethod?: string; shippingAddress: { name: string; addressLine1: string; addressLine2?: string; city: string; state: string; postalCode: string; phone: string }; items: { name: string; sku: string; quantity: number; size?: string }[]; review?: { rating: number; comment?: string; createdAt: string }; returnRequest?: { action: string; reason: string; status: string } };
+type Order = { id: string; status: string; amount: number; currency: string; createdAt: string; paymentMethod?: 'upi' | 'cod'; paymentReference?: string; payerUpiId?: string; trackingNumber?: string; trackingUrl?: string; paymentVerifiedAt?: string; paymentStatus?: string; manualPaymentReference?: string; paymentVerificationMethod?: string; shippingAddress: { name: string; addressLine1: string; addressLine2?: string; city: string; state: string; postalCode: string; phone: string }; items: { name: string; sku: string; quantity: number; size?: string }[]; review?: { rating: number; comment?: string; createdAt: string }; returnRequest?: { action: string; reason: string; status: string } };
 type PaymentReceiptReview = { id: string; orderId: string; userId: string; expectedAmount: number; extraction: { utrNumber: string | null; amountPaid: number | null; receiverUpiId: string | null; date: string | null; isSuccessful: boolean }; flags: string[]; status: 'pending_admin_review' | 'reviewed'; createdAt: string; reviewedAt?: string; reviewNote?: string };
 type Analytics = { eventCounts: Record<string, number>; orderCount: number; paidRevenue: number; currency: string; lowStock: { id: string; name: string; sku: string; stock: number }[] };
 type IntegrationStatus = { email: boolean; followUps: boolean; ai: boolean };
@@ -23,7 +23,7 @@ type AgentAction =
   | { type: 'update_stock'; productId: string; productName: string; sku: string; previousStock: number; stock: number }
   | { type: 'update_order_status'; orderId: string; previousStatus: string; status: 'shipped' | 'delivered' }
   | { type: 'draft_email'; orderId: string; kind: EmailKind };
-type Tab = 'overview' | 'products' | 'imageSettings' | 'content' | 'orders' | 'support' | 'marketing' | 'ads' | 'email' | 'assistant' | 'social';
+type Tab = 'overview' | 'products' | 'imageSettings' | 'content' | 'orders' | 'support' | 'marketing' | 'ads' | 'email' | 'assistant' | 'social' | 'payments';
 const circleLabels = ['Women', 'Men', 'Kurtis', 'Frocks', 'Kurta Sets', 'Lehengas', 'Night Suits', 'Track Suits', 'New Arrivals', 'Bestsellers', 'Sale'];
 const bannerSlots = [{ key: 'new', label: 'New Arrivals banner' }, { key: 'sale', label: 'Season sale banner' }, { key: 'festive', label: 'Festive edit banner' }];
 type Props = { onClose: () => void; onProductsChange: (products: Product[]) => void; onContentChange: (content: Content) => void; onSiteStatusChange: (published: boolean) => void; onImageSettingsChange: (settings: ImageSettings) => void };
@@ -31,7 +31,7 @@ type Props = { onClose: () => void; onProductsChange: (products: Product[]) => v
 const emptyContent: Content = { announcement: '', heroEyebrow: '', heroTitle: '', heroDescription: '', heroImageUrl: '', storyHeading: '', storyBody: '', storyImageUrl: '', circleImages: {}, circleLabels: {}, bannerImages: {}, copy: defaultStorefrontCopy };
 const tabs: { id: Tab; label: string; icon: typeof BarChart3 }[] = [
   { id: 'overview', label: 'Overview', icon: BarChart3 }, { id: 'products', label: 'Products & stock', icon: Box },
-  { id: 'imageSettings', label: 'Image Settings', icon: Image }, { id: 'content', label: 'Storefront', icon: Image }, { id: 'orders', label: 'Orders & receipts', icon: PackageCheck },
+  { id: 'imageSettings', label: 'Image Settings', icon: Image }, { id: 'content', label: 'Storefront', icon: Image }, { id: 'orders', label: 'Orders & receipts', icon: PackageCheck }, { id: 'payments', label: 'UPI payee', icon: CreditCard },
   { id: 'support', label: 'Support tickets', icon: Headphones }, { id: 'marketing', label: 'Marketing', icon: Megaphone }, { id: 'ads', label: 'Ad agent', icon: Sparkles },
   { id: 'email', label: 'Email agent', icon: Mail }, { id: 'assistant', label: 'AI agent', icon: MessageCircle },
   { id: 'social', label: 'Social posting', icon: Sparkles },
@@ -152,6 +152,10 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
   const [socialProductId, setSocialProductId] = useState('');
   const [busyAction, setBusyAction] = useState(false);
   const [sitePublished, setSitePublished] = useState(true);
+  const [payee, setPayee] = useState<{ vpa: string; payeeName: string; source: string } | null>(null);
+  const [payeeError, setPayeeError] = useState('');
+  const [payeeVpaInput, setPayeeVpaInput] = useState('');
+  const [payeeNameInput, setPayeeNameInput] = useState('');
   const [bankReferences, setBankReferences] = useState<Record<string, string>>({});
   const [imageSettings, setImageSettings] = useState<ImageSettings | null>(null);
   const [maxUploadMb, setMaxUploadMb] = useState(10);
@@ -190,9 +194,47 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
       onSiteStatusChange(siteStatusResult.published);
       setIntegrations(integrationResult.integrations);
       setReady(true);
+      void loadPayee(ownerKey);
       setSocialProductId(inventoryResult.products.find((product) => product.active)?.id || '');
     } catch (reason) { fail(reason); }
     finally { setLoading(false); }
+  }
+
+  async function loadPayee(ownerKey: string) {
+    try {
+      const result = await ownerRequest<{ payee: { vpa: string; payeeName: string; source: string } }>(ownerKey, '/api/owner/payee');
+      setPayee(result.payee);
+      setPayeeVpaInput(result.payee.vpa);
+      setPayeeNameInput(result.payee.payeeName);
+      setPayeeError('');
+    } catch (reason) { setPayee(null); setPayeeError(reason instanceof Error ? reason.message : 'Could not load the UPI payee'); }
+  }
+
+  async function savePayee() {
+    setBusyAction(true);
+    try {
+      const result = await ownerRequest<{ payee: { vpa: string; payeeName: string; source: string } }>(key, '/api/owner/payee', { method: 'PUT', body: JSON.stringify({ vpa: payeeVpaInput.trim(), payeeName: payeeNameInput.trim() }) });
+      setPayee(result.payee);
+      setPayeeVpaInput(result.payee.vpa);
+      setPayeeNameInput(result.payee.payeeName);
+      setPayeeError('');
+      notify('Receiving UPI ID saved New payments use it immediately');
+    } catch (reason) { fail(reason); }
+    finally { setBusyAction(false); }
+  }
+
+  async function removePayee() {
+    if (!window.confirm('Remove the saved UPI ID? Checkout will fall back to the server default, and will stop working if none is configured.')) return;
+    setBusyAction(true);
+    try {
+      const result = await ownerRequest<{ payee: { vpa: string; payeeName: string; source: string } }>(key, '/api/owner/payee', { method: 'DELETE' });
+      setPayee(result.payee);
+      setPayeeVpaInput(result.payee.vpa);
+      setPayeeNameInput(result.payee.payeeName);
+      setPayeeError('');
+      notify('Saved UPI ID removed');
+    } catch (reason) { fail(reason); }
+    finally { setBusyAction(false); }
   }
 
   async function toggleSitePublication() {
@@ -465,6 +507,23 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
           </section>
           <button className="studio-primary studio-publish" disabled={busyAction}>{busyAction ? 'Publishing…' : 'Publish storefront text'} <Check size={16} /></button>
         </form>}
+        {tab === 'payments' && <section className="studio-section">
+          <section className="studio-panel studio-payee">
+            <div className="studio-panel-heading"><div><h2>Receiving UPI ID</h2><span>Customers pay this UPI ID through Ahuza Pay Changes apply to new payments immediately</span></div></div>
+            {payeeError && <p className="studio-payment-caution" role="alert">{payeeError}</p>}
+            {payee && <p className="studio-payment-caution">{payee.vpa ? `Currently receiving at ${payee.vpa} (${payee.source === 'database' ? 'saved in Owner Studio' : 'server default'})` : 'No UPI ID is configured, so online payment cannot start'}</p>}
+            <div className="studio-form-grid">
+              <label>UPI ID<input value={payeeVpaInput} onChange={(event) => setPayeeVpaInput(event.target.value)} placeholder="name@bank" autoComplete="off" maxLength={256} /></label>
+              <label>Payee name shown in the UPI app<input value={payeeNameInput} onChange={(event) => setPayeeNameInput(event.target.value)} placeholder="AHUZA Apparel" maxLength={60} /></label>
+            </div>
+            <div className="studio-payee-actions">
+              <button className="studio-primary" type="button" disabled={busyAction || !payeeVpaInput.trim() || !payeeNameInput.trim() || (payee?.vpa === payeeVpaInput.trim() && payee?.payeeName === payeeNameInput.trim())} onClick={() => void savePayee()}>Save UPI ID</button>
+              <button className="studio-secondary" type="button" disabled={busyAction || !payee || payee.source !== 'database'} onClick={() => void removePayee()}>Remove saved UPI ID</button>
+              <button className="studio-secondary" type="button" disabled={busyAction} onClick={() => void loadPayee(key)}>Reload</button>
+            </div>
+            <p className="studio-payment-caution">Use only a UPI ID you own and have verified with a small test payment Unpaid orders already created will also pay to the new ID</p>
+          </section>
+        </section>}
         {tab === 'orders' && <section className="studio-section studio-orders">
           <section className="studio-panel">
             <div className="studio-panel-heading"><div><h2>UPI receipt review queue</h2><span>Gemini extracts details only; independently verify any transfer</span></div></div>
@@ -484,7 +543,7 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
           </section>
           {orders.length === 0 && <section className="studio-panel"><p className="studio-muted">There are no orders yet</p></section>}
           {orders.map((order) => <article className="studio-panel studio-order" key={order.id}>
-            <div className="studio-order-heading"><div><span className="studio-eyebrow">{order.id}</span><h2>{order.shippingAddress.name}</h2><p>{new Date(order.createdAt).toLocaleString()} · {money(order.amount / 100)}</p><p>{order.paymentMethod === 'cod' ? 'Cash on delivery' : 'UPI'} · payment {order.paymentStatus || 'pending'}{order.paymentReference ? ` · reference ${order.paymentReference}` : ''}</p></div><span className={`order-status status-${order.status}`}>{order.status.replaceAll('_', ' ')}</span></div>
+            <div className="studio-order-heading"><div><span className="studio-eyebrow">{order.id}</span><h2>{order.shippingAddress.name}</h2><p>{new Date(order.createdAt).toLocaleString()} · {money(order.amount / 100)}</p><p>{order.paymentMethod === 'cod' ? 'Cash on delivery' : 'UPI'} · payment {order.paymentStatus || 'pending'}{order.paymentReference ? ` · reference ${order.paymentReference}` : ''}</p>{order.payerUpiId && <p>Customer UPI ID (to match the bank credit): {order.payerUpiId}</p>}</div><span className={`order-status status-${order.status}`}>{order.status.replaceAll('_', ' ')}</span></div>
             <div className="studio-order-details"><div><h3>Delivery</h3><p>{order.shippingAddress.addressLine1}{order.shippingAddress.addressLine2 ? `, ${order.shippingAddress.addressLine2}` : ''}<br />{order.shippingAddress.city}, {order.shippingAddress.state} {order.shippingAddress.postalCode}<br />{order.shippingAddress.phone}</p><label>Tracking number<input value={order.trackingNumber || ''} onChange={(event) => setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, trackingNumber: event.target.value } : entry))} placeholder="Carrier tracking reference" maxLength={100} /></label><label>Carrier tracking link<input type="url" value={order.trackingUrl || ''} onChange={(event) => setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, trackingUrl: event.target.value } : entry))} placeholder="https://carrier.example/track/…" maxLength={2000} onBlur={(event) => { if (event.target.value && !event.target.value.startsWith('https://')) fail(new Error('Tracking link must start with https://')); }} /></label></div><div><h3>Items</h3>{order.items.map((item, index) => <p key={`${item.sku}-${index}`}>{item.quantity} × {item.name}{item.size ? ` · Size ${item.size}` : ''} <small>({item.sku})</small></p>)}{order.review && <div className="owner-order-review"><strong>Customer rating: {'★'.repeat(order.review.rating)}{'☆'.repeat(5 - order.review.rating)}</strong>{order.review.comment && <p>{order.review.comment}</p>}<small>{new Date(order.review.createdAt).toLocaleString()}</small></div>}</div></div>
                         {order.returnRequest && <div className="studio-return"><div><strong>{order.returnRequest.action} requested · {order.returnRequest.status}</strong><p>{order.returnRequest.reason}</p></div>{order.returnRequest.status === 'requested' && <div className="studio-return-actions"><button onClick={() => void resolveReturn(order, 'approved')} disabled={busyAction}>Approve</button><button onClick={() => void resolveReturn(order, 'rejected')} disabled={busyAction}>Decline</button></div>}</div>}
             {order.paymentMethod === 'upi' && ((order.status === 'pending_payment' && ['pending', 'failed', 'cancelled'].includes(order.paymentStatus || 'pending')) || (order.status === 'cancelled' && order.paymentStatus === 'expired')) && <div className="studio-payment-verification"><label>Bank UTR/reference (owner only)<input value={bankReferences[order.id] || ''} onChange={(event) => setBankReferences((current) => ({ ...current, [order.id]: event.target.value }))} minLength={6} maxLength={80} pattern="[A-Za-z0-9-]{6,80}" placeholder="Enter after checking settled bank credit" /></label><button className="studio-secondary" type="button" onClick={() => void confirmUpiPayment(order)} disabled={busyAction}>Confirm after bank verification <Check size={15} /></button><small>Never confirm from a customer claim, receipt, screenshot or UPI app screen Match the settled amount, merchant VPA and order reference in the bank account Expired payments can only be confirmed if all original items remain in stock</small></div>}

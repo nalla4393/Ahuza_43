@@ -3,7 +3,6 @@ import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import express, { Router, type Request, type Response, type NextFunction } from 'express';
 import { rateLimit } from 'express-rate-limit';
-import PDFDocument from 'pdfkit';
 import { hashPassword, verifyPassword } from './services/auth.js';
 import { extractPaymentReceipt, generateAdCopy, generateAdImage, generateCustomerEmailBody, generateCustomerSupportReply, generateOwnerAgentPlan, generateSocialPost, isTextAiConfigured, type CustomerEmailKind, type OwnerAgentIntent } from './services/ai.js';
 import { bannerImageKeys, circleImageKeys, getDatabase, mergeImageSettings, mutateDatabase, type Database, type Order, type PaymentReceiptReview, type Product, type ShippingAddress, type StorefrontContent, type SupportTicket } from './services/database.js';
@@ -13,7 +12,9 @@ import { publishSocialPost, runSchedule, socialStatus, validateSchedule } from '
 import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
 import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
-import { createUpiIntent, getUpiConfiguration } from './services/upi.js';
+import { buildAhuzaPayOrder, createAhuzaPayOrder, getAhuzaPayConfiguration, getAhuzaPayPayee, getAhuzaPayStatus, resetAhuzaPayPayee, updateAhuzaPayPayee } from './services/ahuzaPay.js';
+import { customerDataConfigured, decryptCustomerValue, encryptCustomerValue, isValidUpiId } from './services/customerData.js';
+import { buildInvoicePdf } from './services/invoice.js';
 import { storefrontCopyFields } from '../shared/storefrontCopy.js';
 
 export const api = Router();
@@ -261,6 +262,34 @@ api.post('/auth/logout', (request, response, next) => {
 
 api.get('/auth/me', requireCustomer, (request, response) => response.json({ customer: { id: request.session.userId, email: request.session.email } }));
 
+api.get('/account/upi', requireCustomer, paymentLimit, async (request, response) => {
+  const customer = (await getDatabase()).customers.find((entry) => entry.id === request.session.userId);
+  response.json({ upiId: decryptCustomerValue(customer?.savedUpiIdEnc), available: customerDataConfigured() });
+});
+
+api.put('/account/upi', requireCustomer, paymentLimit, async (request, response) => {
+  const upiId = typeof request.body?.upiId === 'string' ? request.body.upiId.trim() : '';
+  if (request.body?.consent !== true) { response.status(400).json({ error: 'Please confirm that you want us to save your UPI ID' }); return; }
+  if (!isValidUpiId(upiId)) { response.status(400).json({ error: 'Enter a valid UPI ID such as name@bank' }); return; }
+  if (!customerDataConfigured()) { response.status(503).json({ error: 'Saving a UPI ID is unavailable right now' }); return; }
+  const saved = await mutateDatabase((database) => {
+    const customer = database.customers.find((entry) => entry.id === request.session.userId);
+    if (!customer) return false;
+    customer.savedUpiIdEnc = encryptCustomerValue(upiId);
+    return true;
+  });
+  if (!saved) { response.status(404).json({ error: 'Account not found' }); return; }
+  response.json({ upiId });
+});
+
+api.delete('/account/upi', requireCustomer, paymentLimit, async (request, response) => {
+  await mutateDatabase((database) => {
+    const customer = database.customers.find((entry) => entry.id === request.session.userId);
+    if (customer) delete customer.savedUpiIdEnc;
+  });
+  response.json({ upiId: null });
+});
+
 api.get('/wishlist', requireCustomer, async (request, response) => {
   const database = await getDatabase();
   const saved = database.customers.find((entry) => entry.id === request.session.userId)?.wishlist || [];
@@ -296,8 +325,12 @@ api.delete('/wishlist/:productId', requireCustomer, async (request, response) =>
 async function createPaymentOrder(request: Request, response: Response): Promise<void> {
   const paymentMethod = request.body?.paymentMethod;
   if (paymentMethod !== 'upi' && paymentMethod !== 'cod') { response.status(400).json({ error: 'Choose UPI or cash on delivery' }); return; }
-  const upi = getUpiConfiguration();
-  if (paymentMethod === 'upi' && !upi.configured) { response.status(503).json({ error: 'Direct UPI is unavailable Configure a valid UPI_VPA on the server' }); return; }
+  if (paymentMethod === 'upi' && !getAhuzaPayConfiguration().configured) { response.status(503).json({ error: 'Online payment is unavailable Configure AHUZA_PAY_URL and AHUZA_PAY_API_KEY on the server' }); return; }
+  const rawPayerUpi = request.body?.payerUpiId;
+  const payerUpiId = typeof rawPayerUpi === 'string' ? rawPayerUpi.trim() : '';
+  if (paymentMethod === 'upi' && payerUpiId && !isValidUpiId(payerUpiId)) { response.status(400).json({ error: 'Enter a valid UPI ID such as name@bank, or leave it blank' }); return; }
+  const saveUpiId = paymentMethod === 'upi' && Boolean(payerUpiId) && request.body?.saveUpiId === true;
+  if (saveUpiId && !customerDataConfigured()) { response.status(503).json({ error: 'Saving a UPI ID is unavailable right now You can still pay without saving it' }); return; }
   const items = request.body?.items;
   if (!Array.isArray(items) || items.length === 0 || items.length > 20) { response.status(400).json({ error: 'Provide one or more cart items' }); return; }
   const parseAddress = (address: any): ShippingAddress | null => {
@@ -348,7 +381,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   if (!Number.isSafeInteger(amount) || amount < 100) { response.status(400).json({ error: 'Order total is invalid' }); return; }
   const localOrderId = randomUUID();
   const paymentReference = `AHUZA-${randomUUID().replaceAll('-', '').slice(0, 20).toUpperCase()}`;
-  const expiresAt = paymentMethod === 'upi' ? new Date(Date.now() + 20 * 60 * 1000) : null;
+  const expiresAt = paymentMethod === 'upi' ? new Date(Date.now() + 60 * 60 * 1000) : null;
   const persisted = await mutateDatabase((database) => {
     const available = orderItems.every((item) => {
       const product = database.products.find((entry) => entry.id === item.productId && entry.active);
@@ -361,36 +394,88 @@ async function createPaymentOrder(request: Request, response: Response): Promise
       amount, subtotalAmount, shippingAmount, discountAmount: 0, taxAmount: 0,
       currency: 'INR', status: paymentMethod === 'cod' ? 'confirmed' : 'pending_payment', paymentStatus: 'pending', paymentMethod,
       ...(paymentMethod === 'upi' ? { paymentReference, reservationExpiresAt: expiresAt!.toISOString() } : {}),
+      ...(paymentMethod === 'upi' && payerUpiId && customerDataConfigured() ? { payerUpiIdEnc: encryptCustomerValue(payerUpiId) } : {}),
       marketingConsent: request.body?.marketingConsent === true,
       createdAt: new Date().toISOString(),
     });
     return true;
   });
   if (!persisted) { response.status(409).json({ error: 'Inventory changed while placing your order Please refresh your bag' }); return; }
+  if (saveUpiId) {
+    await mutateDatabase((database) => {
+      const customer = database.customers.find((entry) => entry.id === request.session.userId);
+      if (customer) customer.savedUpiIdEnc = encryptCustomerValue(payerUpiId);
+    }).catch((error) => console.error('Saving the UPI ID failed:', error));
+  }
   const placed = (await getDatabase()).orders.find((entry) => entry.id === localOrderId);
   const customerEmail = (await getDatabase()).customers.find((entry) => entry.id === request.session.userId)?.email;
-  if (placed && customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
   if (paymentMethod === 'cod') {
+    if (placed && customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
     response.status(201).json({ orderId: localOrderId, paymentMethod, status: 'confirmed', amount, currency: 'INR' });
     return;
   }
-  const upiIntent = createUpiIntent({ vpa: upi.vpa!, merchantName: upi.merchantName, amountPaise: amount, orderReference: paymentReference });
-  response.status(201).json({ orderId: localOrderId, paymentMethod, paymentReference, upiIntent, merchantVpa: upi.vpa, merchantName: upi.merchantName, amount, currency: 'INR', expiresAt: expiresAt!.toISOString(), status: 'pending' });
+  let payUrl: string;
+  try {
+    ({ payUrl } = await createAhuzaPayOrder(buildAhuzaPayOrder(placed!, { name: shippingAddress.name, email: customerEmail || '' }, shippingAddress)));
+  } catch (error) {
+    console.error('Ahuza Pay order creation failed:', error);
+    await mutateDatabase((database) => {
+      const order = database.orders.find((entry) => entry.id === localOrderId && entry.status === 'pending_payment');
+      if (!order) return;
+      for (const item of order.items) {
+        const product = database.products.find((entry) => entry.id === item.productId);
+        if (product) product.stock += item.quantity;
+      }
+      order.status = 'cancelled';
+      order.paymentStatus = 'cancelled';
+      delete order.reservationExpiresAt;
+    });
+    response.status(502).json({ error: 'Could not start the payment Please try again shortly' });
+    return;
+  }
+  if (placed && customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
+  response.status(201).json({ orderId: localOrderId, paymentMethod, paymentReference, payUrl, amount, currency: 'INR', expiresAt: expiresAt!.toISOString(), status: 'pending' });
 }
 
 api.get('/payments/config', (_request, response) => {
-  const config = getUpiConfiguration();
-  response.json({ configured: config.configured, upiVpa: config.vpa, merchantName: config.merchantName, automaticVerification: false });
+  response.json({ configured: getAhuzaPayConfiguration().configured, automaticVerification: true });
 });
+
+// Marks a pending order paid only when Ahuza Pay itself reports a bank-verified payment.
+async function syncAhuzaPayPayment(orderId: string, userId: string): Promise<void> {
+  const order = (await getDatabase()).orders.find((entry) => entry.id === orderId && entry.userId === userId);
+  if (!order || order.paymentMethod !== 'upi' || order.paymentStatus === 'paid' || !getAhuzaPayConfiguration().configured) return;
+  if (!['pending_payment', 'cancelled'].includes(order.status)) return;
+  const remote = await getAhuzaPayStatus(order.id);
+  if (!remote.confirmed) return;
+  const paid = await mutateDatabase((database) => {
+    const current = database.orders.find((entry) => entry.id === orderId && entry.userId === userId);
+    if (!current || current.paymentStatus === 'paid' || !['pending_payment', 'cancelled'].includes(current.status)) return null;
+    if (current.status === 'cancelled') {
+      const available = current.items.every((item) => database.products.find((entry) => entry.id === item.productId)!.stock >= item.quantity);
+      if (!available) return null;
+      for (const item of current.items) database.products.find((entry) => entry.id === item.productId)!.stock -= item.quantity;
+    }
+    current.status = 'paid';
+    current.paymentStatus = 'paid';
+    current.paymentVerificationMethod = 'ahuza_pay';
+    if (remote.transactionReference) current.manualPaymentReference = remote.transactionReference;
+    current.paymentVerifiedAt = new Date().toISOString();
+    delete current.reservationExpiresAt;
+    return true;
+  });
+  if (paid) void enqueueOrderEmail(orderId, 'payment_confirmed').catch((error) => console.error('Payment confirmation email queue failed:', error));
+}
 
 api.post('/payments/orders', requireCustomer, paymentLimit, async (request, response) => {
   await createPaymentOrder(request, response);
 });
 
 api.get('/payments/orders/:id/status', requireCustomer, paymentLimit, async (request, response) => {
+  await syncAhuzaPayPayment(String(request.params.id), request.session.userId!).catch((error) => console.error('Ahuza Pay status sync failed:', error));
   const order = (await getDatabase()).orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
-  response.json({ orderId: order.id, status: order.paymentStatus || 'pending', orderStatus: order.status, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt, verification: 'manual_bank_reconciliation_required' });
+  response.json({ orderId: order.id, status: order.paymentStatus || 'pending', orderStatus: order.status, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt, verification: order.paymentVerificationMethod || 'awaiting_ahuza_pay' });
 });
 
 api.post('/payments/orders/:id/failure', requireCustomer, paymentLimit, async (request, response) => {
@@ -525,37 +610,11 @@ api.get('/orders/:id/invoice', requireCustomer, async (request, response) => {
     response.status(409).json({ error: 'An invoice is available only after payment is confirmed' }); return;
   }
   const customerEmail = database.customers.find((customer) => customer.id === order.userId)?.email || 'Not available';
-  const safePdfText = (value: string) => value.normalize('NFKD').replace(/[^\x20-\x7e]/g, '?');
-
-  const document = new PDFDocument({ size: 'A4', margin: 48 });
+  const invoice = await buildInvoicePdf(order, customerEmail);
   response.setHeader('Content-Type', 'application/pdf');
-  response.setHeader('Content-Disposition', `attachment; filename="ahuza-invoice-${order.id}pdf"`);
-  document.pipe(response);
-  document.fontSize(22).font('Helvetica-Bold').text('AHUZA APPAREL');
-  document.moveDown(0.5).fontSize(18).text('INVOICE');
-  document.moveDown(0.5).fontSize(10).font('Helvetica')
-    .text(`Invoice / order reference: ${order.id}`)
-    .text(`Order date: ${new Date(order.createdAt).toLocaleDateString('en-IN')}`)
-    .text(`Payment status: ${order.status}`);
-  document.moveDown().font('Helvetica-Bold').text('Bill to');
-  document.font('Helvetica')
-    .text(safePdfText(order.shippingAddress.name))
-    .text(safePdfText(order.shippingAddress.addressLine1))
-    .text(safePdfText(order.shippingAddress.addressLine2 || ''))
-    .text(safePdfText(`${order.shippingAddress.city}, ${order.shippingAddress.state} ${order.shippingAddress.postalCode}`))
-    .text(order.shippingAddress.country)
-    .text(`Email: ${safePdfText(customerEmail)}`);
-  document.moveDown().font('Helvetica-Bold').text('Items');
-  document.moveDown(0.4);
-  for (const item of order.items) {
-    const lineTotal = item.unitPrice * item.quantity;
-    document.font('Helvetica-Bold').text(safePdfText(`${item.name}${item.size ? ` · Size ${item.size}` : ''}`));
-    document.font('Helvetica').fontSize(9).text(`SKU: ${safePdfText(item.sku)}  |  Quantity: ${item.quantity}  |  Unit price: INR ${item.unitPrice.toFixed(2)}  |  Line total: INR ${lineTotal.toFixed(2)}`);
-    document.moveDown(0.6);
-  }
-  document.moveDown().fontSize(12).font('Helvetica-Bold').text(`Total paid: ${order.currency} ${(order.amount / 100).toFixed(2)}`, { align: 'right' });
-  document.moveDown(2).fontSize(9).font('Helvetica').text('Thank you for shopping with AHUZA Apparel');
-  document.end();
+  response.setHeader('Content-Disposition', `attachment; filename="ahuza-invoice-${order.id}.pdf"`);
+  response.setHeader('Content-Length', invoice.length);
+  response.send(invoice);
 });
 
 api.post('/orders/:id/returns', requireCustomer, async (request, response) => {
@@ -783,7 +842,38 @@ api.patch('/owner/content', requireOwner, ownerLimit, async (request, response) 
   response.json({ content });
 });
 
-api.get('/owner/orders', requireOwner, ownerLimit, async (_request, response) => response.json({ orders: (await getDatabase()).orders }));
+api.get('/owner/orders', requireOwner, ownerLimit, async (_request, response) => response.json({
+  orders: (await getDatabase()).orders.map(({ payerUpiIdEnc, ...order }) => ({ ...order, ...(payerUpiIdEnc ? { payerUpiId: decryptCustomerValue(payerUpiIdEnc) || undefined } : {}) })),
+}));
+
+function payeeError(response: Response, error: unknown): void {
+  const message = error instanceof Error ? error.message : '';
+  if (message === 'AHUZA_PAY_NOT_CONFIGURED') { response.status(503).json({ error: 'Ahuza Pay is not connected Set AHUZA_PAY_URL and AHUZA_PAY_API_KEY on the server' }); return; }
+  const upstream = /^AHUZA_PAY_(\d{3}): (.+)$/.exec(message);
+  if (upstream && Number(upstream[1]) === 401) { response.status(502).json({ error: 'Ahuza Pay rejected the API key Check AHUZA_PAY_API_KEY matches MERCHANT_API_KEY on Ahuza Pay' }); return; }
+  if (upstream && Number(upstream[1]) >= 400 && Number(upstream[1]) < 500) { response.status(400).json({ error: upstream[2] }); return; }
+  console.error('Ahuza Pay payee request failed:', error);
+  response.status(502).json({ error: 'Could not reach Ahuza Pay Please try again shortly' });
+}
+
+api.get('/owner/payee', requireOwner, ownerLimit, async (_request, response) => {
+  try { response.json({ payee: await getAhuzaPayPayee() }); } catch (error) { payeeError(response, error); }
+});
+
+api.put('/owner/payee', requireOwner, ownerLimit, async (request, response) => {
+  const vpa = request.body?.vpa;
+  const payeeName = request.body?.payeeName;
+  if (vpa !== undefined && (typeof vpa !== 'string' || !isValidUpiId(vpa.trim()))) { response.status(400).json({ error: 'Enter a valid UPI ID such as name@bank' }); return; }
+  if (payeeName !== undefined && (typeof payeeName !== 'string' || payeeName.trim().length < 1 || payeeName.trim().length > 60)) { response.status(400).json({ error: 'Payee name must be 1 to 60 characters' }); return; }
+  if (vpa === undefined && payeeName === undefined) { response.status(400).json({ error: 'Provide a UPI ID or payee name' }); return; }
+  try {
+    response.json({ payee: await updateAhuzaPayPayee({ ...(vpa === undefined ? {} : { vpa: vpa.trim() }), ...(payeeName === undefined ? {} : { payeeName: payeeName.trim() }) }) });
+  } catch (error) { payeeError(response, error); }
+});
+
+api.delete('/owner/payee', requireOwner, ownerLimit, async (_request, response) => {
+  try { response.json({ payee: await resetAhuzaPayPayee() }); } catch (error) { payeeError(response, error); }
+});
 
 api.get('/owner/payment-receipts', requireOwner, ownerLimit, async (_request, response) => {
   const reviews = (await getDatabase()).paymentReceiptReviews || [];
@@ -889,6 +979,8 @@ api.patch('/owner/orders/:id/cod-payment', requireOwner, ownerLimit, async (requ
       return { order, changed: true };
   });
   if (!result) { response.status(409).json({ error: 'Only a delivered, unpaid cash-on-delivery order can be marked paid' }); return; }
+  const email = (await getDatabase()).customers.find((entry) => entry.id === result.order.userId)?.email;
+  if (email) void enqueueOrderEmail(result.order.id, 'payment_confirmed').catch((error) => console.error('COD payment confirmation email queue failed:', error));
   response.json({ order: result.order });
 });
 

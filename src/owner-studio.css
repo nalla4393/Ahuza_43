@@ -43,3 +43,6 @@
 
 .studio-slot-name{display:block;width:100%}
 .studio-slot-name input{width:100%;text-align:center;font-weight:600;padding:6px 8px;border:1px solid var(--studio-line,#d8d4c8);border-radius:6px;background:#fff}
+
+.studio-payee .studio-form-grid{margin:12px 0}
+.studio-payee-actions{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 12px}

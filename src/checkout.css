@@ -37,10 +37,6 @@
 .payment-panel h3,.payment-panel p{margin:0}
 .payment-panel h3{font-size:20px}
 .payment-panel p{max-width:360px;font-size:12px;line-height:1.6;color:var(--muted);overflow-wrap:anywhere}
-.payment-panel .payment-qr{width:min(230px,70vw);aspect-ratio:1;border:8px solid #fff;background:#fff;box-shadow:0 0 0 1px var(--line)}
-.payment-panel .payment-qr+p{color:#282820}
-.upi-qr-fallback{display:none;justify-items:center;gap:8px}
-.upi-qr-fallback p{margin:0}
 .payment-panel>small{max-width:380px;color:var(--muted);font-size:10px;line-height:1.5}
 .payment-pending{display:flex;align-items:center;gap:8px}
 .payment-spinner{width:14px;height:14px;border:2px solid var(--line);border-top-color:#3a493c;border-radius:50%;animation:payment-spin .8s linear infinite}
@@ -57,9 +53,6 @@
   .customer-order-actions{width:100%}
 }
 
-@media(min-width:761px){
-  .upi-qr-fallback{display:grid}
-}
 
 @media(prefers-reduced-motion:reduce){
   .overlay,.cart-drawer,.account-dialog{animation:none}
@@ -104,3 +97,13 @@
 .owner-order-review{margin-top:10px;padding:10px;border-top:1px solid var(--line)}
 .owner-order-review strong{color:#8a6820}
 .owner-order-review p{overflow-wrap:anywhere}
+
+.payer-upi{display:grid;gap:6px}
+.payer-upi>label:first-child{display:grid;gap:4px;font-size:11px}
+.upi-assurance{margin:0;color:#4d5a4f;font-size:11px;line-height:1.5}
+.customer-upi{display:grid;gap:10px;padding:18px 0;border-bottom:1px solid var(--line)}
+.customer-upi h3{margin:0;font-size:13px}
+.customer-upi label{display:grid;gap:4px;font-size:12px}
+.customer-upi input{height:40px;padding:0 10px;border:1px solid var(--line);background:transparent}
+.customer-upi .upi-actions{display:flex;flex-wrap:wrap;gap:10px}
+.customer-upi .upi-message{margin:0;font-size:12px}
