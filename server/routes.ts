@@ -13,7 +13,7 @@ import { publishSocialPost, runSchedule, socialStatus, validateSchedule } from '
 import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
 import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
-import { createUpiIntent, getUpiConfiguration } from './services/upi.js';
+import { buildAhuzaPayOrder, createAhuzaPayOrder, getAhuzaPayConfiguration, getAhuzaPayStatus } from './services/ahuzaPay.js';
 import { storefrontCopyFields } from '../shared/storefrontCopy.js';
 
 export const api = Router();
@@ -296,8 +296,7 @@ api.delete('/wishlist/:productId', requireCustomer, async (request, response) =>
 async function createPaymentOrder(request: Request, response: Response): Promise<void> {
   const paymentMethod = request.body?.paymentMethod;
   if (paymentMethod !== 'upi' && paymentMethod !== 'cod') { response.status(400).json({ error: 'Choose UPI or cash on delivery' }); return; }
-  const upi = getUpiConfiguration();
-  if (paymentMethod === 'upi' && !upi.configured) { response.status(503).json({ error: 'Direct UPI is unavailable Configure a valid UPI_VPA on the server' }); return; }
+  if (paymentMethod === 'upi' && !getAhuzaPayConfiguration().configured) { response.status(503).json({ error: 'Online payment is unavailable Configure AHUZA_PAY_URL and AHUZA_PAY_API_KEY on the server' }); return; }
   const items = request.body?.items;
   if (!Array.isArray(items) || items.length === 0 || items.length > 20) { response.status(400).json({ error: 'Provide one or more cart items' }); return; }
   const parseAddress = (address: any): ShippingAddress | null => {
@@ -348,7 +347,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   if (!Number.isSafeInteger(amount) || amount < 100) { response.status(400).json({ error: 'Order total is invalid' }); return; }
   const localOrderId = randomUUID();
   const paymentReference = `AHUZA-${randomUUID().replaceAll('-', '').slice(0, 20).toUpperCase()}`;
-  const expiresAt = paymentMethod === 'upi' ? new Date(Date.now() + 20 * 60 * 1000) : null;
+  const expiresAt = paymentMethod === 'upi' ? new Date(Date.now() + 60 * 60 * 1000) : null;
   const persisted = await mutateDatabase((database) => {
     const available = orderItems.every((item) => {
       const product = database.products.find((entry) => entry.id === item.productId && entry.active);
@@ -369,28 +368,73 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   if (!persisted) { response.status(409).json({ error: 'Inventory changed while placing your order Please refresh your bag' }); return; }
   const placed = (await getDatabase()).orders.find((entry) => entry.id === localOrderId);
   const customerEmail = (await getDatabase()).customers.find((entry) => entry.id === request.session.userId)?.email;
-  if (placed && customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
   if (paymentMethod === 'cod') {
+    if (placed && customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
     response.status(201).json({ orderId: localOrderId, paymentMethod, status: 'confirmed', amount, currency: 'INR' });
     return;
   }
-  const upiIntent = createUpiIntent({ vpa: upi.vpa!, merchantName: upi.merchantName, amountPaise: amount, orderReference: paymentReference });
-  response.status(201).json({ orderId: localOrderId, paymentMethod, paymentReference, upiIntent, merchantVpa: upi.vpa, merchantName: upi.merchantName, amount, currency: 'INR', expiresAt: expiresAt!.toISOString(), status: 'pending' });
+  let payUrl: string;
+  try {
+    ({ payUrl } = await createAhuzaPayOrder(buildAhuzaPayOrder(placed!, { name: shippingAddress.name, email: customerEmail || '' }, shippingAddress)));
+  } catch (error) {
+    console.error('Ahuza Pay order creation failed:', error);
+    await mutateDatabase((database) => {
+      const order = database.orders.find((entry) => entry.id === localOrderId && entry.status === 'pending_payment');
+      if (!order) return;
+      for (const item of order.items) {
+        const product = database.products.find((entry) => entry.id === item.productId);
+        if (product) product.stock += item.quantity;
+      }
+      order.status = 'cancelled';
+      order.paymentStatus = 'cancelled';
+      delete order.reservationExpiresAt;
+    });
+    response.status(502).json({ error: 'Could not start the payment Please try again shortly' });
+    return;
+  }
+  if (placed && customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
+  response.status(201).json({ orderId: localOrderId, paymentMethod, paymentReference, payUrl, amount, currency: 'INR', expiresAt: expiresAt!.toISOString(), status: 'pending' });
 }
 
 api.get('/payments/config', (_request, response) => {
-  const config = getUpiConfiguration();
-  response.json({ configured: config.configured, upiVpa: config.vpa, merchantName: config.merchantName, automaticVerification: false });
+  response.json({ configured: getAhuzaPayConfiguration().configured, automaticVerification: true });
 });
+
+// Marks a pending order paid only when Ahuza Pay itself reports a bank-verified payment.
+async function syncAhuzaPayPayment(orderId: string, userId: string): Promise<void> {
+  const order = (await getDatabase()).orders.find((entry) => entry.id === orderId && entry.userId === userId);
+  if (!order || order.paymentMethod !== 'upi' || order.paymentStatus === 'paid' || !getAhuzaPayConfiguration().configured) return;
+  if (!['pending_payment', 'cancelled'].includes(order.status)) return;
+  const remote = await getAhuzaPayStatus(order.id);
+  if (!remote.confirmed) return;
+  const paid = await mutateDatabase((database) => {
+    const current = database.orders.find((entry) => entry.id === orderId && entry.userId === userId);
+    if (!current || current.paymentStatus === 'paid' || !['pending_payment', 'cancelled'].includes(current.status)) return null;
+    if (current.status === 'cancelled') {
+      const available = current.items.every((item) => database.products.find((entry) => entry.id === item.productId)!.stock >= item.quantity);
+      if (!available) return null;
+      for (const item of current.items) database.products.find((entry) => entry.id === item.productId)!.stock -= item.quantity;
+    }
+    current.status = 'paid';
+    current.paymentStatus = 'paid';
+    current.paymentVerificationMethod = 'ahuza_pay';
+    if (remote.transactionReference) current.manualPaymentReference = remote.transactionReference;
+    current.paymentVerifiedAt = new Date().toISOString();
+    delete current.reservationExpiresAt;
+    return true;
+  });
+  if (paid) void enqueueOrderEmail(orderId, 'payment_confirmed').catch((error) => console.error('Payment confirmation email queue failed:', error));
+}
 
 api.post('/payments/orders', requireCustomer, paymentLimit, async (request, response) => {
   await createPaymentOrder(request, response);
 });
 
 api.get('/payments/orders/:id/status', requireCustomer, paymentLimit, async (request, response) => {
+  await syncAhuzaPayPayment(String(request.params.id), request.session.userId!).catch((error) => console.error('Ahuza Pay status sync failed:', error));
   const order = (await getDatabase()).orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
-  response.json({ orderId: order.id, status: order.paymentStatus || 'pending', orderStatus: order.status, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt, verification: 'manual_bank_reconciliation_required' });
+  response.json({ orderId: order.id, status: order.paymentStatus || 'pending', orderStatus: order.status, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt, verification: order.paymentVerificationMethod || 'awaiting_ahuza_pay' });
 });
 
 api.post('/payments/orders/:id/failure', requireCustomer, paymentLimit, async (request, response) => {

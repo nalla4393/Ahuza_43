@@ -37,5 +37,7 @@ services:
         sync: false
       - key: EMAIL_FROM
         sync: false
-      - key: UPI_VPA
+      - key: AHUZA_PAY_URL
+        value: https://ahuza-pay-production.up.railway.app
+      - key: AHUZA_PAY_API_KEY
         sync: false
