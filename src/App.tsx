@@ -1,4 +1,4 @@
-import { useEffect, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react';
 import { User, ArrowRight, ArrowUpRight, Heart, MessageCircle, Mail, MapPin, Menu, Minus, Phone, Plus, Search, ShoppingBag, SlidersHorizontal, X } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import OwnerStudio from './OwnerStudio';
@@ -37,11 +37,11 @@ const formatPrice = (price: number) => new Intl.NumberFormat('en-IN', {
 }).format(price);
 
 type Customer = { id: string; email: string };
-type CustomerOrder = { id: string; amount: number; currency: string; status: string; paymentMethod?: 'upi' | 'cod'; paymentStatus?: string; paymentVerifiedAt?: string; hasPendingReceiptReview?: boolean; createdAt: string; trackingNumber?: string; trackingUrl?: string; review?: { rating: number; comment?: string; createdAt: string }; items: { name: string; quantity: number; size?: string }[] };
+type CustomerOrder = { id: string; amount: number; currency: string; status: string; paymentMethod?: 'upi' | 'cod'; paymentProvider?: 'demo' | 'upi-intent'; paymentStatus?: string; paymentVerificationMethod?: string; paymentVerifiedAt?: string; hasPendingReceiptReview?: boolean; createdAt: string; trackingNumber?: string; trackingUrl?: string; review?: { rating: number; comment?: string; createdAt: string }; items: { name: string; quantity: number; size?: string }[] };
 type StorefrontContent = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string; circleImages?: Record<string, string>; circleLabels?: Record<string, string>; bannerImages?: Record<string, string>; copy?: Record<StorefrontCopyId, string> };
 type CartLine = { productId: string; quantity: number; size?: string };
-type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; paymentReference?: string; upiIntent?: string; merchantVpa?: string; merchantName?: string; amount: number; currency: string; expiresAt?: string; status?: string };
-type PaymentConfiguration = { configured: boolean; upiVpa: string | null; merchantName: string; automaticVerification: false };
+type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; paymentMode?: 'demo' | 'manual-verification'; paymentReference?: string; upiIntent?: string; merchantVpa?: string; merchantName?: string; amount: number; currency: string; expiresAt?: string; status?: string };
+type PaymentConfiguration = { configured: boolean; provider: 'demo' | 'upi-intent'; demoMode: boolean; upiVpa: string | null; merchantName: string; automaticVerification: false };
 
 type AddressValues = { name: string; addressLine1: string; addressLine2: string; city: string; state: string; postalCode: string; phone: string };
 const emptyAddress: AddressValues = { name: '', addressLine1: '', addressLine2: '', city: '', state: '', postalCode: '', phone: '' };
@@ -95,6 +95,7 @@ export default function App() {
   const [receiptMessages, setReceiptMessages] = useState<Record<string, string>>({});
   const [paymentOrder, setPaymentOrder] = useState<PaymentOrder | null>(null);
   const [paymentStatus, setPaymentStatus] = useState('pending');
+  const checkoutIdempotency = useRef<{ key: string; fingerprint: string } | null>(null);
   const [paymentMessage, setPaymentMessage] = useState('');
   const [paymentConfiguration, setPaymentConfiguration] = useState<PaymentConfiguration | null>(null);
   const [sitePublished, setSitePublished] = useState<boolean | null>(null);
@@ -200,7 +201,7 @@ export default function App() {
         if (!response.ok) throw new Error('Payment configuration unavailable');
         setPaymentConfiguration(result);
       })
-      .catch(() => setPaymentConfiguration({ configured: false, upiVpa: null, merchantName: 'AHUZA Apparel', automaticVerification: false }));
+      .catch(() => setPaymentConfiguration({ configured: false, provider: 'upi-intent', demoMode: false, upiVpa: null, merchantName: 'AHUZA Apparel', automaticVerification: false }));
 
     fetch('/api/products')
       .then(async (response) => {
@@ -243,7 +244,7 @@ export default function App() {
   }, [products]);
 
   useEffect(() => {
-    if (!paymentOrder || !['pending', 'failed', 'cancelled'].includes(paymentStatus)) return;
+    if (!paymentOrder || !['pending', 'processing', 'failed', 'cancelled'].includes(paymentStatus)) return;
     let stopped = false;
     let timer = 0;
     const poll = async () => {
@@ -255,7 +256,9 @@ export default function App() {
         setPaymentStatus(result.status);
         if (result.status === 'paid') {
           setCart([]);
-          setPaymentMessage('AHUZA has confirmed the bank settlement Your order is confirmed');
+          setPaymentMessage(paymentOrder.paymentMode === 'demo'
+            ? 'DEMO ONLY: a signed simulated event was received. No money moved and this is not a real payment.'
+            : 'AHUZA has confirmed the bank settlement Your order is confirmed');
         } else if (result.status === 'expired' || result.status === 'cancelled') {
           setPaymentMessage(result.orderStatus === 'pending_payment'
             ? 'The UPI attempt was cancelled Inventory remains reserved briefly in case a bank credit is delayed Do not reuse the link; contact AHUZA if you sent money'
@@ -425,28 +428,43 @@ export default function App() {
     }
     setBusy(true);
     try {
+      const checkoutPayload = {
+        items: cart.map(({ productId, quantity, size }) => ({ productId, quantity, ...(size ? { size } : {}) })),
+        paymentMethod,
+        marketingConsent,
+        shippingAddress: sameAsBilling ? billingAddress : deliveryAddress,
+        billingAddress,
+      };
+      const fingerprint = JSON.stringify(checkoutPayload);
+      if (!checkoutIdempotency.current || checkoutIdempotency.current.fingerprint !== fingerprint) {
+        checkoutIdempotency.current = { key: crypto.randomUUID(), fingerprint };
+      }
       const response = await fetch('/api/payments/orders', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items: cart.map(({ productId, quantity, size }) => ({ productId, quantity, ...(size ? { size } : {}) })),
-          paymentMethod,
-          marketingConsent,
-          shippingAddress: sameAsBilling ? billingAddress : deliveryAddress,
-          billingAddress,
-        }),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': checkoutIdempotency.current.key },
+        body: JSON.stringify(checkoutPayload),
       });
       const order = await parseResponse<PaymentOrder & { error?: string }>(response);
       if (!response.ok || !order.orderId || order.paymentMethod !== paymentMethod || typeof order.amount !== 'number') {
         throw new Error(order.error || 'Could not start checkout');
       }
-      if (paymentMethod === 'upi' && (!order.paymentReference || !order.upiIntent || !order.merchantVpa)) {
+      checkoutIdempotency.current = null;
+      if (paymentMethod === 'upi' && (!order.paymentReference
+        || (order.paymentMode !== 'demo' && !['paid', 'expired', 'cancelled'].includes(order.status || '')
+          && (!order.upiIntent || !order.merchantVpa)))) {
         throw new Error('The server returned an incomplete direct UPI payment request');
       }
       setPaymentOrder(order);
-      setPaymentStatus(paymentMethod === 'cod' ? 'confirmed' : 'pending');
+      setPaymentStatus(order.status || 'pending');
       setPaymentMessage(paymentMethod === 'cod'
         ? 'Your order is confirmed Please pay the delivery partner in cash when your order arrives'
-        : 'Pay using the AHUZA UPI intent The order remains pending until AHUZA manually verifies settlement in its bank account');
+        : order.paymentMode === 'demo'
+          ? 'Development mode only. No money will be moved. The order remains unpaid unless a signed test notification is received.'
+          : order.status === 'paid'
+            ? 'AHUZA has confirmed the bank settlement Your order is confirmed'
+            : order.status === 'expired' || order.status === 'cancelled'
+              ? 'This order is closed Do not use its old UPI payment link'
+          : 'Pay using the AHUZA UPI intent The order remains pending until AHUZA manually verifies settlement in its bank account');
       if (paymentMethod === 'cod') setCart([]);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not start checkout');
@@ -464,7 +482,9 @@ export default function App() {
       if (!response.ok || !result.status) throw new Error(result.error || 'Could not refresh order status');
       setPaymentStatus(result.status);
       setPaymentMessage(result.status === 'paid'
-        ? 'AHUZA has confirmed the bank settlement Your order is confirmed'
+        ? paymentOrder.paymentMode === 'demo'
+          ? 'DEMO ONLY: a signed simulated event was received. No money moved and this is not a real payment.'
+          : 'AHUZA has confirmed the bank settlement Your order is confirmed'
         : result.status === 'cancelled' || result.status === 'expired'
           ? 'This order is closed Do not use its old UPI link'
           : 'Payment is still pending An authorized AHUZA owner must verify the settled credit in the bank account');
@@ -784,11 +804,29 @@ export default function App() {
         <aside className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="bag-title">
           <div className="drawer-heading"><div><p className="eyebrow dark-eyebrow">AHUZA Apparel</p><h2 id="bag-title">{storefrontText('bagTitle')} <span>({cartCount})</span></h2></div><button className="icon-button" aria-label="Close bag" onClick={() => setCartOpen(false)}><X size={21} /></button></div>
           {paymentOrder ? <section className="payment-panel" aria-live="polite">
-            <p className="eyebrow dark-eyebrow">{paymentOrder.paymentMethod === 'cod' ? storefrontText('checkoutCod') : 'Custom UPI checkout'}</p>
+            <p className="eyebrow dark-eyebrow">{paymentOrder.paymentMethod === 'cod' ? storefrontText('checkoutCod') : paymentOrder.paymentMode === 'demo' ? 'AHUZA PAY · DEMO' : 'AHUZA PAY'}</p>
             <h3>{paymentOrder.paymentMethod === 'cod' ? storefrontText('payOrderConfirmed') : paymentStatus === 'paid' ? storefrontText('payConfirmed') : paymentStatus === 'failed' ? storefrontText('payFailed') : paymentStatus === 'expired' || paymentStatus === 'cancelled' ? storefrontText('payClosed') : paymentStatus === 'pending' ? storefrontText('payUpiPending') : storefrontText('payPending')}</h3>
             <p>{paymentMessage || storefrontText('payWaiting')}</p>
+            {paymentOrder.paymentMode === 'demo' && <p className="payment-test-warning" role="status">DEVELOPMENT MODE — simulated payments only. No real payment is processed or verified.</p>}
             <p><strong>{formatPrice(paymentOrder.amount / 100)}</strong>{paymentOrder.paymentReference ? ` · Reference ${paymentOrder.paymentReference}` : ` · Order ${paymentOrder.orderId.slice(0, 8)}`}</p>
-            {paymentOrder.paymentMethod === 'upi' && ['pending', 'failed', 'cancelled'].includes(paymentStatus) && <>{paymentStatus !== 'cancelled' && <><div className="upi-qr-fallback"><QRCodeSVG className="payment-qr" value={paymentOrder.upiIntent!} size={210} level="M" bgColor="#ffffff" fgColor="#1c241c" /><p>{storefrontText('payScan')}</p></div><a className="dark-button" href={paymentOrder.upiIntent} onClick={() => setPaymentMessage(storefrontText('payAppOpened'))}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : storefrontText('checkoutPayUpi')}</a><p>Paying {paymentOrder.merchantVpa} · {paymentOrder.merchantName} The amount and order reference are pre-filled in Google Pay, PhonePe, Paytm or another installed UPI app</p></>}<p className="payment-pending"><span className="payment-spinner" /> {storefrontText('payChecking')}</p><button className="invoice-button" type="button" disabled={busy} onClick={() => void refreshPaymentStatus()}>{storefrontText('payRefresh')}</button>{paymentStatus === 'pending' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void reportPaymentFailure()}>{storefrontText('payReportFailure')}</button>}{paymentStatus !== 'cancelled' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void cancelPayment()}>{storefrontText('payCancel')}</button>}</>}
+            {paymentOrder.paymentMethod === 'upi' && paymentOrder.paymentMode === 'demo'
+              && ['pending', 'processing', 'failed', 'cancelled'].includes(paymentStatus) && <>
+                <p className="payment-pending"><span className="payment-spinner" /> No real payment is being attempted</p>
+                <button className="invoice-button" type="button" disabled={busy} onClick={() => void refreshPaymentStatus()}>{storefrontText('payRefresh')}</button>
+                {paymentStatus !== 'cancelled' && paymentStatus !== 'processing' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void cancelPayment()}>{storefrontText('payCancel')}</button>}
+              </>}
+            {paymentOrder.paymentMethod === 'upi' && paymentOrder.paymentMode !== 'demo'
+              && ['pending', 'processing', 'failed', 'cancelled'].includes(paymentStatus) && <>
+                {paymentStatus !== 'cancelled' && paymentStatus !== 'processing' && <>
+                  <div className="upi-qr-fallback"><QRCodeSVG className="payment-qr" value={paymentOrder.upiIntent!} size={210} level="M" bgColor="#ffffff" fgColor="#1c241c" /><p>{storefrontText('payScan')}</p></div>
+                  <a className="dark-button" href={paymentOrder.upiIntent} onClick={() => setPaymentMessage(storefrontText('payAppOpened'))}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : storefrontText('checkoutPayUpi')}</a>
+                  <p>Paying {paymentOrder.merchantVpa} · {paymentOrder.merchantName} The amount and order reference are pre-filled in Google Pay, PhonePe, Paytm or another installed UPI app</p>
+                </>}
+                <p className="payment-pending"><span className="payment-spinner" /> {storefrontText('payChecking')}</p>
+                <button className="invoice-button" type="button" disabled={busy} onClick={() => void refreshPaymentStatus()}>{storefrontText('payRefresh')}</button>
+                {paymentStatus === 'pending' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void reportPaymentFailure()}>{storefrontText('payReportFailure')}</button>}
+                {paymentStatus !== 'cancelled' && paymentStatus !== 'processing' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void cancelPayment()}>{storefrontText('payCancel')}</button>}
+              </>}
             {paymentStatus === 'failed' && <p>{storefrontText('payFailureNote')}</p>}
             {(paymentOrder.paymentMethod === 'cod' || paymentStatus === 'paid' || paymentStatus === 'cancelled' || paymentStatus === 'expired') && <button className="dark-button" type="button" onClick={() => { setPaymentOrder(null); setPaymentStatus('pending'); setCartOpen(false); }}>{paymentStatus === 'cancelled' ? storefrontText('payReturn') : 'Done'}</button>}
             {paymentOrder.paymentMethod === 'upi' && <small>{storefrontText('payVerificationNote')}</small>}
@@ -799,9 +837,10 @@ export default function App() {
               <AddressFields section="billing" value={billingAddress} onChange={setBillingAddress} />
               <div className="address-title-row"><p className="address-title">{storefrontText('checkoutDelivery')}</p><label className="same-address-check"><input type="checkbox" checked={sameAsBilling} onChange={(event) => setSameAsBilling(event.target.checked)} /> (same as billing address)</label></div>
               <AddressFields section="shipping" value={sameAsBilling ? billingAddress : deliveryAddress} onChange={setDeliveryAddress} readOnly={sameAsBilling} />
-              <fieldset className="payment-method-options"><legend>{storefrontText('checkoutPaymentMethod')}</legend><label><input type="radio" name="paymentMethod" value="upi" checked={paymentMethod === 'upi'} onChange={() => setPaymentMethod('upi')} disabled={!paymentConfiguration?.configured} /> {storefrontText('checkoutPayUpi')}</label><label><input type="radio" name="paymentMethod" value="cod" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} /> {storefrontText('checkoutCod')}</label></fieldset>
+              <fieldset className="payment-method-options"><legend>{storefrontText('checkoutPaymentMethod')}</legend><label><input type="radio" name="paymentMethod" value="upi" checked={paymentMethod === 'upi'} onChange={() => setPaymentMethod('upi')} disabled={!paymentConfiguration?.configured} /> {paymentConfiguration?.demoMode ? 'Ahuza Pay demo (no real payment)' : storefrontText('checkoutPayUpi')}</label><label><input type="radio" name="paymentMethod" value="cod" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} /> {storefrontText('checkoutCod')}</label></fieldset>
               {paymentMethod === 'upi' && !paymentConfiguration?.configured && <p className="payment-config-warning" role="status">{paymentConfiguration ? storefrontText('checkoutUpiUnavailable') : storefrontText('checkoutUpiChecking')}</p>}
-              {paymentMethod === 'upi' && paymentConfiguration?.configured && <p className="payment-config-warning">{storefrontText('checkoutUpiNote')}</p>}
+              {paymentMethod === 'upi' && paymentConfiguration?.configured && paymentConfiguration.demoMode && <p className="payment-test-warning" role="status">DEVELOPMENT MODE — the demo cannot accept or verify real payments.</p>}
+              {paymentMethod === 'upi' && paymentConfiguration?.configured && !paymentConfiguration.demoMode && <p className="payment-config-warning">{storefrontText('checkoutUpiNote')}</p>}
               <label className="consent-check"><input type="checkbox" checked={marketingConsent} onChange={(event) => setMarketingConsent(event.target.checked)} />{storefrontText('checkoutConsent')}</label><button className="dark-button checkout-button" disabled={busy || (paymentMethod === 'upi' && paymentConfiguration?.configured !== true)}>{busy ? storefrontText('checkoutPlacing') : customer ? paymentMethod === 'cod' ? storefrontText('checkoutPlaceCod') : paymentConfiguration?.configured ? storefrontText('checkoutContinueUpi') : storefrontText('checkoutUpiUnavailableButton') : storefrontText('checkoutSignIn')} <ArrowRight size={16} /></button></form><small>{storefrontText('checkoutPolicy')}</small></div>
           </>}
         </aside>
@@ -811,7 +850,7 @@ export default function App() {
         <section className={`account-dialog${accountPageOpen ? ' account-page-dialog' : ''}`} role="dialog" aria-modal="true" aria-labelledby="account-title">
           {accountPageOpen && <button className="account-page-back" type="button" onClick={() => { setAccountOpen(false); setAccountPageOpen(false); }}><ArrowRight size={16} /> {storefrontText('accountBack')}</button>}
           <button className="icon-button dialog-close" aria-label={accountPageOpen ? 'Close account page' : 'Close account'} onClick={() => { setAccountOpen(false); setAccountPageOpen(false); }}><X size={20} /></button>
-          {customer ? <><p className="eyebrow dark-eyebrow">{storefrontText('accountEyebrow')}</p><h2 id="account-title">{storefrontText('accountWelcome')}</h2><nav className="customer-account-nav" aria-label="Account sections"><a href="#profile-section">{storefrontText('accountProfile')}</a><a href="#wishlist-section">Wishlist ({wishlist.length})</a><a href="#order-history-title">Orders ({orders.length})</a></nav><section className="customer-profile" id="profile-section" aria-labelledby="customer-profile-title"><h3 id="customer-profile-title">{storefrontText('accountProfile')}</h3><p className="account-email">{customer.email}</p></section><section className="customer-wishlist" id="wishlist-section" aria-labelledby="wishlist-title"><h3 id="wishlist-title">Wishlist ({wishlist.length})</h3>{wishlist.length === 0 && <p>{storefrontText('accountWishlistEmpty')}</p>}{wishlist.map((id) => products.find((product) => product.id === id)).filter((product): product is Product => Boolean(product)).map((product) => <div className="wishlist-item" key={product.id}><span>{product.name} · {formatPrice(product.price)}</span>{product.stock < 1 ? <button type="button" className="dark-button" onClick={() => void requestRestockAlert(product)}>{storefrontText('cardNotify')}</button> : <button type="button" className="dark-button" onClick={() => addToBag(product)}>{product.sizes?.length ? storefrontText('accountChooseSize') : storefrontText('addToCart')}</button>}<button type="button" className="icon-button" aria-label={`Remove ${product.name} from wishlist`} onClick={() => void toggleWishlist(product)}><X size={16} /></button></div>)}</section><section className="customer-order-history" aria-labelledby="order-history-title"><h3 id="order-history-title">{storefrontText('accountOrderHistory')}</h3>{ordersLoading && <p>{storefrontText('accountOrdersLoading')}</p>}{ordersError && <p className="order-history-error" role="alert">{ordersError}</p>}{!ordersLoading && !ordersError && orders.length === 0 && <p>{storefrontText('accountOrdersEmpty')}</p>}{orders.map((order) => <article className="customer-order" key={order.id}><div><strong>{order.id.slice(0, 8)}</strong><span>{new Date(order.createdAt).toLocaleDateString('en-IN')} · {order.status.replaceAll('_', ' ')} · payment {order.paymentStatus || 'pending'}</span><span>{order.items.map((item) => `${item.name}${item.size ? ` (Size ${item.size})` : ''} × ${item.quantity}`).join(', ')}</span>{order.trackingNumber && <span>Tracking number: {order.trackingNumber}</span>}{order.trackingUrl && <a className="customer-track-link" href={order.trackingUrl} target="_blank" rel="noopener noreferrer">{storefrontText('accountTrack')} <ArrowRight size={14} /></a>}{order.status === 'out_for_delivery' && <strong className="delivery-update">{storefrontText('accountOutForDelivery')}</strong>}</div><div className="customer-order-actions"><button className="invoice-button" type="button" onClick={() => void downloadInvoice(order)} disabled={!order.paymentVerifiedAt || !['paid', 'shipped', 'out_for_delivery', 'delivered'].includes(order.status)}>{order.paymentVerifiedAt && ['paid', 'shipped', 'out_for_delivery', 'delivered'].includes(order.status) ? storefrontText('accountInvoice') : storefrontText('accountInvoiceLater')}</button>{order.review ? <p className="order-review-result" aria-label={`Your rating: ${order.review.rating} out of 5`}>{'★'.repeat(order.review.rating)}{'☆'.repeat(5 - order.review.rating)}{order.review.comment ? ` · ${order.review.comment}` : ''}</p> : order.status === 'delivered' ? <form className="order-review-form" onSubmit={(event) => { event.preventDefault(); void submitOrderReview(order.id, new FormData(event.currentTarget)); }}><label>{storefrontText('accountRate')}<select name="rating" defaultValue="5"><option value="5">★★★★★ · Loved it</option><option value="4">★★★★ · Great</option><option value="3">★★★ · Good</option><option value="2">★★ · Could be better</option><option value="1">★ · Not satisfied</option></select></label><label>{storefrontText('accountReviewLabel')}<textarea name="comment" maxLength={1000} rows={2} placeholder="Share your experience" /></label><button className="invoice-button" type="submit" disabled={reviewBusy === order.id}>{reviewBusy === order.id ? 'Sending…' : storefrontText('accountSubmitReview')}</button>{reviewMessages[order.id] && <small role="status">{reviewMessages[order.id]}</small>}</form> : null}{['pending_payment', 'cancelled'].includes(order.status) && (order.hasPendingReceiptReview ? <small>Receipt waiting for owner review This does not confirm payment</small> : <form className="receipt-upload-form" onSubmit={(event) => { event.preventDefault(); void uploadPaymentReceipt(order.id, new FormData(event.currentTarget).get('receipt')); }}><label htmlFor={`receipt-${order.id}`}>If an owner requested payment proof<input id={`receipt-${order.id}`} type="file" name="receipt" accept="image/jpeg,image/png,image/webp" required /></label><button className="invoice-button" type="submit" disabled={receiptUploadOrder === order.id}>{receiptUploadOrder === order.id ? 'Sending…' : 'Submit for review'}</button><small>Gemini extracts receipt details for owner review only The image is not stored, and AI cannot confirm payment</small>{receiptMessages[order.id] && <small role="status">{receiptMessages[order.id]}</small>}</form>)}</div></article>)}</section><button className="dark-button" onClick={() => void logout()}>{storefrontText('accountSignOut')}</button></> : <>
+          {customer ? <><p className="eyebrow dark-eyebrow">{storefrontText('accountEyebrow')}</p><h2 id="account-title">{storefrontText('accountWelcome')}</h2><nav className="customer-account-nav" aria-label="Account sections"><a href="#profile-section">{storefrontText('accountProfile')}</a><a href="#wishlist-section">Wishlist ({wishlist.length})</a><a href="#order-history-title">Orders ({orders.length})</a></nav><section className="customer-profile" id="profile-section" aria-labelledby="customer-profile-title"><h3 id="customer-profile-title">{storefrontText('accountProfile')}</h3><p className="account-email">{customer.email}</p></section><section className="customer-wishlist" id="wishlist-section" aria-labelledby="wishlist-title"><h3 id="wishlist-title">Wishlist ({wishlist.length})</h3>{wishlist.length === 0 && <p>{storefrontText('accountWishlistEmpty')}</p>}{wishlist.map((id) => products.find((product) => product.id === id)).filter((product): product is Product => Boolean(product)).map((product) => <div className="wishlist-item" key={product.id}><span>{product.name} · {formatPrice(product.price)}</span>{product.stock < 1 ? <button type="button" className="dark-button" onClick={() => void requestRestockAlert(product)}>{storefrontText('cardNotify')}</button> : <button type="button" className="dark-button" onClick={() => addToBag(product)}>{product.sizes?.length ? storefrontText('accountChooseSize') : storefrontText('addToCart')}</button>}<button type="button" className="icon-button" aria-label={`Remove ${product.name} from wishlist`} onClick={() => void toggleWishlist(product)}><X size={16} /></button></div>)}</section><section className="customer-order-history" aria-labelledby="order-history-title"><h3 id="order-history-title">{storefrontText('accountOrderHistory')}</h3>{ordersLoading && <p>{storefrontText('accountOrdersLoading')}</p>}{ordersError && <p className="order-history-error" role="alert">{ordersError}</p>}{!ordersLoading && !ordersError && orders.length === 0 && <p>{storefrontText('accountOrdersEmpty')}</p>}{orders.map((order) => <article className="customer-order" key={order.id}><div><strong>{order.id.slice(0, 8)}</strong><span>{new Date(order.createdAt).toLocaleDateString('en-IN')} · {order.status.replaceAll('_', ' ')} · payment {order.paymentStatus || 'pending'}{order.paymentVerificationMethod === 'demo_webhook' ? ' · DEMO ONLY — no money moved' : ''}</span><span>{order.items.map((item) => `${item.name}${item.size ? ` (Size ${item.size})` : ''} × ${item.quantity}`).join(', ')}</span>{order.trackingNumber && <span>Tracking number: {order.trackingNumber}</span>}{order.trackingUrl && <a className="customer-track-link" href={order.trackingUrl} target="_blank" rel="noopener noreferrer">{storefrontText('accountTrack')} <ArrowRight size={14} /></a>}{order.status === 'out_for_delivery' && <strong className="delivery-update">{storefrontText('accountOutForDelivery')}</strong>}</div><div className="customer-order-actions"><button className="invoice-button" type="button" onClick={() => void downloadInvoice(order)} disabled={!order.paymentVerifiedAt || !['paid', 'shipped', 'out_for_delivery', 'delivered'].includes(order.status)}>{order.paymentVerifiedAt && ['paid', 'shipped', 'out_for_delivery', 'delivered'].includes(order.status) ? storefrontText('accountInvoice') : storefrontText('accountInvoiceLater')}</button>{order.review ? <p className="order-review-result" aria-label={`Your rating: ${order.review.rating} out of 5`}>{'★'.repeat(order.review.rating)}{'☆'.repeat(5 - order.review.rating)}{order.review.comment ? ` · ${order.review.comment}` : ''}</p> : order.status === 'delivered' ? <form className="order-review-form" onSubmit={(event) => { event.preventDefault(); void submitOrderReview(order.id, new FormData(event.currentTarget)); }}><label>{storefrontText('accountRate')}<select name="rating" defaultValue="5"><option value="5">★★★★★ · Loved it</option><option value="4">★★★★ · Great</option><option value="3">★★★ · Good</option><option value="2">★★ · Could be better</option><option value="1">★ · Not satisfied</option></select></label><label>{storefrontText('accountReviewLabel')}<textarea name="comment" maxLength={1000} rows={2} placeholder="Share your experience" /></label><button className="invoice-button" type="submit" disabled={reviewBusy === order.id}>{reviewBusy === order.id ? 'Sending…' : storefrontText('accountSubmitReview')}</button>{reviewMessages[order.id] && <small role="status">{reviewMessages[order.id]}</small>}</form> : null}          {['pending_payment', 'cancelled'].includes(order.status) && order.paymentProvider !== 'demo' && (order.hasPendingReceiptReview ? <small>Receipt waiting for owner review This does not confirm payment</small> : <form className="receipt-upload-form" onSubmit={(event) => { event.preventDefault(); void uploadPaymentReceipt(order.id, new FormData(event.currentTarget).get('receipt')); }}><label htmlFor={`receipt-${order.id}`}>If an owner requested payment proof<input id={`receipt-${order.id}`} type="file" name="receipt" accept="image/jpeg,image/png,image/webp" required /></label><button className="invoice-button" type="submit" disabled={receiptUploadOrder === order.id}>{receiptUploadOrder === order.id ? 'Sending…' : 'Submit for review'}</button><small>Gemini extracts receipt details for owner review only The image is not stored, and AI cannot confirm payment</small>{receiptMessages[order.id] && <small role="status">{receiptMessages[order.id]}</small>}</form>)}</div></article>)}</section><button className="dark-button" onClick={() => void logout()}>{storefrontText('accountSignOut')}</button></> : <>
             <p className="eyebrow dark-eyebrow">{storefrontText('accountEyebrow')}</p><h2 id="account-title">{authMode === 'login' ? storefrontText('authLoginTitle') : storefrontText('authSignupTitle')}</h2>
             <form className="auth-form" onSubmit={(event) => void handleAuth(event)}><label>{storefrontText('authEmail')}<input name="email" type="email" autoComplete="email" required /></label><label>{storefrontText('authPassword')}<input name="password" type="password" minLength={authMode === 'signup' ? 12 : 1} autoComplete={authMode === 'signup' ? 'new-password' : 'current-password'} required />{authMode === 'signup' && <small>{storefrontText('authPasswordHint')}</small>}</label><button className="dark-button" disabled={busy}>{busy ? storefrontText('authBusy') : authMode === 'login' ? storefrontText('authSignIn') : storefrontText('authCreate')} <ArrowRight size={16} /></button></form>
             <button className="mode-switch" onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}>{authMode === 'login' ? storefrontText('authSwitchToSignup') : storefrontText('authSwitchToLogin')}</button>

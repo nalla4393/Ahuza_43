@@ -53,10 +53,15 @@ if (process.env.FRONTEND_ORIGIN || !isProduction) app.use(cors({
     callback(new Error('Origin is not allowed by CORS.'));
   },
   credentials: true,
-  allowedHeaders: ['Content-Type', 'X-Owner-Key', 'X-File-Name'],
+  allowedHeaders: ['Content-Type', 'X-Owner-Key', 'X-File-Name', 'Idempotency-Key', 'X-Ahuza-Signature'],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
-app.use(express.json({ limit: '32kb' }));
+app.use(express.json({
+  limit: '32kb',
+  verify: (request, _response, body) => {
+    (request as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(body);
+  },
+}));
 app.use(session({
   name: 'ahuza.sid',
   secret: sessionSecret,

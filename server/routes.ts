@@ -13,7 +13,9 @@ import { publishSocialPost, runSchedule, socialStatus, validateSchedule } from '
 import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
 import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
-import { createUpiIntent, getUpiConfiguration } from './services/upi.js';
+import { getUpiConfiguration } from './services/upi.js';
+import { getPaymentProvider, getPaymentStatus } from './services/payment-provider.js';
+import { confirmOrderAfterVerifiedPayment, processPaymentWebhook } from './services/payment-webhook.js';
 import { storefrontCopyFields } from '../shared/storefrontCopy.js';
 
 export const api = Router();
@@ -90,7 +92,7 @@ api.use(async (request, response, next) => {
   const healthOrStatus = method === 'GET' && (path === '/health' || path === '/site-status');
   const paymentReadOnly = (method === 'GET' && path === '/payments/config')
     || (method === 'GET' && /^\/payments\/orders\/[^/]+\/status$/.test(path))
-    || (method === 'POST' && /^\/payments\/orders\/[^/]+\/cancel$/.test(path));
+    || (method === 'POST' && (/^\/payments\/orders\/[^/]+\/cancel$/.test(path) || path === '/payments/webhook'));
   const customerAccount = (method === 'GET' && path === '/auth/me')
     || (method === 'POST' && (path === '/auth/login' || path === '/auth/logout'));
   const existingOrders = (method === 'GET' && (path === '/orders' || /^\/orders\/[^/]+(?:\/invoice)?$/.test(path)))
@@ -293,11 +295,54 @@ api.delete('/wishlist/:productId', requireCustomer, async (request, response) =>
   response.json({ productIds: result });
 });
 
+async function sendPaymentOrderResponse(response: Response, order: Order, statusCode: number, fallbackProvider: 'demo' | 'upi-intent'): Promise<void> {
+  if (order.paymentMethod === 'cod') {
+    response.status(statusCode).json({ orderId: order.id, paymentMethod: 'cod', status: order.status, amount: order.amount, currency: order.currency });
+    return;
+  }
+  const paymentRequest = order.paymentStatus !== 'paid'
+    && ['pending', 'processing', 'failed'].includes(order.paymentStatus || 'pending')
+    && !(order.paymentProvider === 'demo' && process.env.NODE_ENV === 'production')
+    && order.reservationExpiresAt && Date.parse(order.reservationExpiresAt) > Date.now()
+    ? await getPaymentProvider(order.paymentProvider || fallbackProvider).createPaymentRequest({
+      orderReference: order.paymentReference!, amountPaise: order.amount,
+    })
+    : undefined;
+  response.status(statusCode).json({
+    orderId: order.id, paymentMethod: 'upi', paymentReference: order.paymentReference,
+    paymentMode: order.paymentProvider === 'demo' ? 'demo' : 'manual-verification',
+    ...(paymentRequest?.upiIntent ? { upiIntent: paymentRequest.upiIntent } : {}),
+    ...(paymentRequest?.merchantVpa ? { merchantVpa: paymentRequest.merchantVpa } : {}),
+    ...(paymentRequest?.merchantName ? { merchantName: paymentRequest.merchantName } : {}),
+    amount: order.amount, currency: order.currency, expiresAt: order.reservationExpiresAt,
+    status: order.paymentStatus || 'pending',
+  });
+}
+
 async function createPaymentOrder(request: Request, response: Response): Promise<void> {
   const paymentMethod = request.body?.paymentMethod;
   if (paymentMethod !== 'upi' && paymentMethod !== 'cod') { response.status(400).json({ error: 'Choose UPI or cash on delivery' }); return; }
+  const idempotencyKey = request.get('idempotency-key') || '';
+  if (!/^[A-Za-z0-9_-]{16,100}$/.test(idempotencyKey)) {
+    response.status(400).json({ error: 'A valid Idempotency-Key is required for checkout' }); return;
+  }
   const upi = getUpiConfiguration();
-  if (paymentMethod === 'upi' && !upi.configured) { response.status(503).json({ error: 'Direct UPI is unavailable Configure a valid UPI_VPA on the server' }); return; }
+  const paymentProviderName = process.env.PAYMENT_PROVIDER || 'upi-intent';
+  const selectedProvider = paymentProviderName === 'demo' ? 'demo' : paymentProviderName === 'upi-intent' ? 'upi-intent' : null;
+  if (paymentMethod === 'upi' && paymentProviderName !== 'demo' && paymentProviderName !== 'upi-intent') {
+    response.status(503).json({ error: 'The configured payment provider is not supported' }); return;
+  }
+  const demoConfigured = paymentProviderName === 'demo' && process.env.NODE_ENV !== 'production'
+    && (process.env.DEMO_PAYMENT_WEBHOOK_SECRET?.length || 0) >= 32;
+  if (paymentMethod === 'upi' && paymentProviderName === 'demo' && !demoConfigured) {
+    response.status(503).json({ error: 'Development payment mode needs a DEMO_PAYMENT_WEBHOOK_SECRET of at least 32 characters' }); return;
+  }
+  if (paymentMethod === 'upi' && paymentProviderName === 'demo' && process.env.NODE_ENV === 'production') {
+    response.status(503).json({ error: 'The demo payment provider is not available in production' }); return;
+  }
+  if (paymentMethod === 'upi' && paymentProviderName !== 'demo' && !upi.configured) {
+    response.status(503).json({ error: 'Direct UPI is unavailable Configure a verified merchant UPI_VPA on the server' }); return;
+  }
   const items = request.body?.items;
   if (!Array.isArray(items) || items.length === 0 || items.length > 20) { response.status(400).json({ error: 'Provide one or more cart items' }); return; }
   const parseAddress = (address: any): ShippingAddress | null => {
@@ -329,6 +374,22 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     if (quantity > 10) { response.status(400).json({ error: 'Each product is limited to 10 items per order' }); return; }
     requested.set(key, { productId: item.productId, ...(typeof item.size === 'string' ? { size: item.size.trim() } : {}), quantity });
   }
+  const checkoutRequestHash = createHash('sha256').update(JSON.stringify({
+    paymentMethod,
+    items: [...requested.values()],
+    shippingAddress,
+    billingAddress,
+    marketingConsent: request.body?.marketingConsent === true,
+  })).digest('hex');
+  const previousOrder = (await getDatabase()).orders.find((entry) => entry.userId === request.session.userId
+    && entry.checkoutIdempotencyKey === idempotencyKey);
+  if (previousOrder) {
+    if (previousOrder.checkoutRequestHash !== checkoutRequestHash) {
+      response.status(409).json({ error: 'This checkout key was already used for different order details' }); return;
+    }
+    await sendPaymentOrderResponse(response, previousOrder, 200, selectedProvider || 'upi-intent');
+    return;
+  }
   const products = (await getDatabase()).products;
   const orderItems: Order['items'] = [];
   for (const { productId, size, quantity } of requested.values()) {
@@ -350,37 +411,52 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   const paymentReference = `AHUZA-${randomUUID().replaceAll('-', '').slice(0, 20).toUpperCase()}`;
   const expiresAt = paymentMethod === 'upi' ? new Date(Date.now() + 20 * 60 * 1000) : null;
   const persisted = await mutateDatabase((database) => {
+    const existing = database.orders.find((entry) => entry.userId === request.session.userId
+      && entry.checkoutIdempotencyKey === idempotencyKey);
+    if (existing) {
+      return existing.checkoutRequestHash === checkoutRequestHash
+        ? { order: structuredClone(existing), created: false }
+        : { conflict: true as const };
+    }
     const available = orderItems.every((item) => {
       const product = database.products.find((entry) => entry.id === item.productId && entry.active);
       return product && product.stock >= item.quantity && product.price === item.unitPrice;
     });
-    if (!available) return false;
+    if (!available) return null;
     for (const item of orderItems) database.products.find((entry) => entry.id === item.productId)!.stock -= item.quantity;
-    database.orders.push({
+    const order = {
       id: localOrderId, userId: request.session.userId!, shippingAddress, billingAddress, items: orderItems,
       amount, subtotalAmount, shippingAmount, discountAmount: 0, taxAmount: 0,
       currency: 'INR', status: paymentMethod === 'cod' ? 'confirmed' : 'pending_payment', paymentStatus: 'pending', paymentMethod,
-      ...(paymentMethod === 'upi' ? { paymentReference, reservationExpiresAt: expiresAt!.toISOString() } : {}),
+      checkoutIdempotencyKey: idempotencyKey, checkoutRequestHash,
+      ...(paymentMethod === 'upi' ? { paymentReference, paymentProvider: selectedProvider!, reservationExpiresAt: expiresAt!.toISOString() } : {}),
       marketingConsent: request.body?.marketingConsent === true,
       createdAt: new Date().toISOString(),
-    });
-    return true;
+    } satisfies Order;
+    database.orders.push(order);
+    return { order: structuredClone(order), created: true };
   });
   if (!persisted) { response.status(409).json({ error: 'Inventory changed while placing your order Please refresh your bag' }); return; }
-  const placed = (await getDatabase()).orders.find((entry) => entry.id === localOrderId);
+  if ('conflict' in persisted) { response.status(409).json({ error: 'This checkout key was already used for different order details' }); return; }
+  const placed = persisted.order;
   const customerEmail = (await getDatabase()).customers.find((entry) => entry.id === request.session.userId)?.email;
-  if (placed && customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
-  if (paymentMethod === 'cod') {
-    response.status(201).json({ orderId: localOrderId, paymentMethod, status: 'confirmed', amount, currency: 'INR' });
-    return;
+  if (persisted.created && customerEmail && (paymentMethod === 'cod' || paymentProviderName !== 'demo')) {
+    void enqueueOrderEmail(placed.id, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
   }
-  const upiIntent = createUpiIntent({ vpa: upi.vpa!, merchantName: upi.merchantName, amountPaise: amount, orderReference: paymentReference });
-  response.status(201).json({ orderId: localOrderId, paymentMethod, paymentReference, upiIntent, merchantVpa: upi.vpa, merchantName: upi.merchantName, amount, currency: 'INR', expiresAt: expiresAt!.toISOString(), status: 'pending' });
+  await sendPaymentOrderResponse(response, placed, persisted.created ? 201 : 200, selectedProvider || 'upi-intent');
 }
 
 api.get('/payments/config', (_request, response) => {
   const config = getUpiConfiguration();
-  response.json({ configured: config.configured, upiVpa: config.vpa, merchantName: config.merchantName, automaticVerification: false });
+  const provider = process.env.PAYMENT_PROVIDER || 'upi-intent';
+  const demoMode = provider === 'demo' && process.env.NODE_ENV !== 'production';
+  const configured = demoMode
+    ? (process.env.DEMO_PAYMENT_WEBHOOK_SECRET?.length || 0) >= 32
+    : provider === 'upi-intent' && config.configured;
+  response.json({
+    configured, provider, demoMode, upiVpa: demoMode ? null : config.vpa,
+    merchantName: config.merchantName, automaticVerification: false,
+  });
 });
 
 api.post('/payments/orders', requireCustomer, paymentLimit, async (request, response) => {
@@ -390,7 +466,41 @@ api.post('/payments/orders', requireCustomer, paymentLimit, async (request, resp
 api.get('/payments/orders/:id/status', requireCustomer, paymentLimit, async (request, response) => {
   const order = (await getDatabase()).orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
-  response.json({ orderId: order.id, status: order.paymentStatus || 'pending', orderStatus: order.status, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt, verification: 'manual_bank_reconciliation_required' });
+  const providerStatus = order.paymentProvider && order.providerPaymentReference
+    && !(order.paymentProvider === 'demo' && process.env.NODE_ENV === 'production')
+    ? await getPaymentStatus(order.paymentProvider, order.providerPaymentReference)
+    : 'unknown';
+  response.json({
+    orderId: order.id, status: order.paymentStatus || (providerStatus === 'unknown' ? 'pending' : providerStatus),
+    orderStatus: order.status, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt,
+    verification: order.paymentVerificationMethod === 'demo_webhook' ? 'simulated_demo_only'
+      : order.paymentProvider === 'upi-intent' ? 'manual_bank_reconciliation_required' : 'provider_notification_required',
+  });
+});
+
+api.post('/payments/webhook', paymentLimit, async (request, response) => {
+  if (process.env.NODE_ENV === 'production') {
+    response.status(503).json({ error: 'The demo payment provider is not available in production' }); return;
+  }
+  if ((process.env.PAYMENT_PROVIDER || 'upi-intent') !== 'demo') {
+    response.status(503).json({ error: 'No live payment notification integration is configured' }); return;
+  }
+  const provider = getPaymentProvider('demo');
+  const rawBody = (request as Request & { rawBody?: Buffer }).rawBody;
+  if (!rawBody || rawBody.length === 0) { response.status(415).json({ error: 'A JSON payment notification is required' }); return; }
+  const result = await processPaymentWebhook(provider, rawBody, request.get('x-ahuza-signature'));
+  if (result.outcome === 'rejected' && result.reason === 'invalid_signature') {
+    response.status(401).json({ error: 'Payment notification authentication failed' }); return;
+  }
+  if (result.outcome === 'rejected') {
+    response.status(409).json({ error: 'Payment notification did not match a valid order' }); return;
+  }
+  if (provider.name !== 'demo' && result.paymentConfirmed && result.orderId) {
+    const database = await getDatabase();
+    const email = database.customers.find((entry) => entry.id === database.orders.find((entry) => entry.id === result.orderId)?.userId)?.email;
+    if (email) void enqueueOrderEmail(result.orderId, 'payment_confirmed').catch((error) => console.error('Verified payment email queue failed:', error));
+  }
+  response.status(200).json({ received: true, outcome: result.outcome, mode: 'demo' });
 });
 
 api.post('/payments/orders/:id/failure', requireCustomer, paymentLimit, async (request, response) => {
@@ -435,6 +545,7 @@ api.post('/orders/:id/payment-receipts', requireCustomer, paymentReceiptLimit, e
   const database = await getDatabase();
   const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
+  if (order.paymentProvider === 'demo') { response.status(409).json({ error: 'Demo orders do not accept payment receipts' }); return; }
   if (!['pending_payment', 'cancelled'].includes(order.status)) { response.status(409).json({ error: 'A receipt can only be submitted for an unpaid order' }); return; }
   if (database.paymentReceiptReviews?.some((entry) => entry.orderId === order.id && entry.status === 'pending_admin_review')) {
     response.status(409).json({ error: 'A receipt for this order is already waiting for owner review' }); return;
@@ -490,8 +601,8 @@ api.get('/orders', requireCustomer, async (request, response) => {
   const orders = database.orders
     .filter((order) => order.userId === request.session.userId)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-    .map(({ id, amount, currency, status, paymentMethod, paymentStatus, paymentVerifiedAt, createdAt, items, trackingNumber, trackingUrl, review }) => ({
-      id, amount, currency, status, paymentMethod, paymentStatus, paymentVerifiedAt, createdAt, items, trackingNumber, trackingUrl, review,
+    .map(({ id, amount, currency, status, paymentMethod, paymentProvider, paymentStatus, paymentVerificationMethod, paymentVerifiedAt, createdAt, items, trackingNumber, trackingUrl, review }) => ({
+      id, amount, currency, status, paymentMethod, paymentProvider, paymentStatus, paymentVerificationMethod, paymentVerifiedAt, createdAt, items, trackingNumber, trackingUrl, review,
       hasPendingReceiptReview: database.paymentReceiptReviews?.some((review) => review.orderId === id && review.status === 'pending_admin_review') || false,
     }));
   response.json({ orders });
@@ -521,6 +632,7 @@ api.get('/orders/:id/invoice', requireCustomer, async (request, response) => {
   const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
   if (!['paid', 'shipped', 'out_for_delivery', 'delivered'].includes(order.status) || order.paymentStatus !== 'paid'
+    || order.paymentVerificationMethod === 'demo_webhook'
     || (order.paymentMethod === 'upi' && !order.paymentVerifiedAt)) {
     response.status(409).json({ error: 'An invoice is available only after payment is confirmed' }); return;
   }
@@ -586,7 +698,8 @@ api.get('/owner/analytics', requireOwner, ownerLimit, async (_request, response)
   const database = await getDatabase();
   const counts = database.events.reduce<Record<string, number>>((result, event) => { result[event.name] = (result[event.name] || 0) + 1; return result; }, {});
   const revenue = database.orders.filter((order) => ['paid', 'shipped', 'delivered'].includes(order.status)
-    && order.paymentStatus !== 'refunded' && (order.paymentMethod !== 'cod' || order.paymentStatus === 'paid')).reduce((total, order) => total + order.amount, 0);
+    && order.paymentStatus !== 'refunded' && order.paymentVerificationMethod !== 'demo_webhook'
+    && (order.paymentMethod !== 'cod' || order.paymentStatus === 'paid')).reduce((total, order) => total + order.amount, 0);
   response.json({ eventCounts: counts, orderCount: database.orders.length, paidRevenue: revenue / 100, currency: 'INR', lowStock: database.products.filter((product) => product.stock < 5).map(({ id, name, sku, stock }) => ({ id, name, sku, stock })) });
 });
 
@@ -850,7 +963,7 @@ api.patch('/owner/orders/:id/status', requireOwner, ownerLimit, async (request, 
   if (trackingUrl !== undefined && trackingUrl !== '' && !validTrackingUrl(trackingUrl)) { response.status(400).json({ error: 'Tracking link must be a valid HTTPS URL' }); return; }
   const result = await mutateDatabase((database) => {
     const order = database.orders.find((entry) => entry.id === request.params.id);
-    if (!order) return null;
+    if (!order || order.paymentVerificationMethod === 'demo_webhook') return null;
     const validTransitions: Record<string, string[]> = {
       confirmed: ['shipped'],
       paid: ['shipped'],
@@ -900,7 +1013,7 @@ api.patch('/owner/orders/:id/upi-payment', requireOwner, ownerLimit, async (requ
   }
   const order = await mutateDatabase((database) => {
     const current = database.orders.find((entry) => entry.id === request.params.id);
-    if (!current || current.paymentMethod !== 'upi') return null;
+    if (!current || current.paymentMethod !== 'upi' || current.paymentProvider === 'demo') return null;
     const activeReservation = current.status === 'pending_payment'
       && ['pending', 'failed', 'cancelled'].includes(current.paymentStatus || 'pending')
       && Boolean(current.reservationExpiresAt && Date.parse(current.reservationExpiresAt) > Date.now());
@@ -917,12 +1030,11 @@ api.patch('/owner/orders/:id/upi-payment', requireOwner, ownerLimit, async (requ
       if (!available) return 'stock_unavailable' as const;
       for (const item of current.items) database.products.find((entry) => entry.id === item.productId)!.stock -= item.quantity;
     }
-    current.status = 'paid';
-    current.paymentStatus = 'paid';
     current.manualPaymentReference = bankReference.trim();
-    current.paymentVerificationMethod = 'manual_bank_reconciliation';
-    current.paymentVerifiedAt = new Date().toISOString();
-    delete current.reservationExpiresAt;
+    confirmOrderAfterVerifiedPayment(current, {
+      method: 'manual_bank_reconciliation',
+      verifiedAt: new Date().toISOString(),
+    });
     return structuredClone(current);
   });
   if (order === 'duplicate') { response.status(409).json({ error: 'This bank reference has already been recorded for another order' }); return; }
@@ -958,12 +1070,14 @@ function validateOwnerAgentIntent(intent: OwnerAgentIntent, database: Awaited<Re
   }
   if (intent.type === 'update_order_status') {
     const order = database.orders.find((entry) => entry.id === intent.orderId);
-    if (!order || !['paid', 'shipped', 'delivered'].includes(order.status) || order.status === intent.status || (order.status === 'delivered' && intent.status === 'shipped')) return null;
+    if (!order || order.paymentVerificationMethod === 'demo_webhook'
+      || !['paid', 'shipped', 'delivered'].includes(order.status) || order.status === intent.status || (order.status === 'delivered' && intent.status === 'shipped')) return null;
     return { type: 'update_order_status', orderId: order.id, previousStatus: order.status, status: intent.status };
   }
   const order = database.orders.find((entry) => entry.id === intent.orderId);
   const customer = order && database.customers.find((entry) => entry.id === order.userId);
-  if (!order || !customer || !['paid', 'shipped', 'delivered'].includes(order.status) || (intent.kind === 'follow_up' && order.status !== 'delivered')) return null;
+  if (!order || !customer || order.paymentVerificationMethod === 'demo_webhook'
+    || !['paid', 'shipped', 'delivered'].includes(order.status) || (intent.kind === 'follow_up' && order.status !== 'delivered')) return null;
   return { type: 'draft_email', orderId: order.id, kind: intent.kind };
 }
 
@@ -984,11 +1098,13 @@ api.post('/owner/chat', requireOwner, ownerLimit, async (request, response) => {
       analytics: {
         orderCount: database.orders.length,
         paidRevenue: database.orders.filter((order) => ['paid', 'shipped', 'delivered'].includes(order.status)
-          && order.paymentStatus !== 'refunded' && (order.paymentMethod !== 'cod' || order.paymentStatus === 'paid')).reduce((total, order) => total + order.amount, 0) / 100,
+          && order.paymentStatus !== 'refunded' && order.paymentVerificationMethod !== 'demo_webhook'
+          && (order.paymentMethod !== 'cod' || order.paymentStatus === 'paid')).reduce((total, order) => total + order.amount, 0) / 100,
         eventCounts: database.events.reduce<Record<string, number>>((counts, event) => { counts[event.name] = (counts[event.name] || 0) + 1; return counts; }, {}),
       },
       products: database.products.slice(0, 100).map(({ id, name, sku, stock, price, active }) => ({ id, name, sku, stock, price, active })),
-      recentOrders: database.orders.slice(-20).reverse().map(({ id, status, amount, currency, trackingNumber, items }) => ({ id, status, total: `${currency} ${(amount / 100).toFixed(2)}`, trackingNumber, items: items.map(({ name, quantity }) => ({ name, quantity })) })),
+      recentOrders: database.orders.filter((order) => order.paymentVerificationMethod !== 'demo_webhook')
+        .slice(-20).reverse().map(({ id, status, amount, currency, trackingNumber, items }) => ({ id, status, total: `${currency} ${(amount / 100).toFixed(2)}`, trackingNumber, items: items.map(({ name, quantity }) => ({ name, quantity })) })),
     });
     const plan = await generateOwnerAgentPlan(message, summary);
     if (!plan.action) { response.json(plan); return; }

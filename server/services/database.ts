@@ -93,7 +93,11 @@ export type Order = {
   trackingUrl?: string;
   paymentMethod?: 'upi' | 'cod';
   status: 'pending_payment' | 'confirmed' | 'paid' | 'shipped' | 'out_for_delivery' | 'delivered' | 'cancelled' | 'refunded';
-  paymentStatus?: 'pending' | 'paid' | 'failed' | 'cancelled' | 'expired' | 'refunded';
+  paymentStatus?: 'pending' | 'processing' | 'paid' | 'failed' | 'cancelled' | 'expired' | 'refunded';
+  paymentProvider?: 'demo' | 'upi-intent';
+  providerPaymentReference?: string;
+  checkoutIdempotencyKey?: string;
+  checkoutRequestHash?: string;
   marketingConsent?: boolean;
   subtotalAmount?: number;
   shippingAmount?: number;
@@ -102,7 +106,8 @@ export type Order = {
   paymentReference?: string;
   paymentVerifiedAt?: string;
   manualPaymentReference?: string;
-  paymentVerificationMethod?: 'manual_bank_reconciliation';
+  paymentVerificationMethod?: 'manual_bank_reconciliation' | 'verified_webhook' | 'demo_webhook';
+  paymentFulfillmentIssue?: 'inventory_unavailable_after_late_payment';
   reservationExpiresAt?: string;
   createdAt: string;
   deliveredAt?: string;
@@ -160,6 +165,20 @@ export type PaymentReceiptReview = {
   createdAt: string;
   reviewedAt?: string;
   reviewNote?: string;
+};
+
+export type PaymentEvent = {
+  eventId: string;
+  provider: 'demo' | 'upi-intent';
+  orderId?: string;
+  orderReference: string;
+  providerReference: string;
+  amountPaise: number;
+  currency: 'INR';
+  status: 'pending' | 'processing' | 'paid' | 'failed' | 'cancelled' | 'refunded';
+  outcome: 'processed' | 'rejected';
+  rejectionReason?: 'order_not_found' | 'amount_mismatch' | 'currency_mismatch' | 'provider_reference_reused';
+  receivedAt: string;
 };
 
 
@@ -242,6 +261,7 @@ export type Database = {
   products: Product[];
   customers: Customer[];
   orders: Order[];
+  paymentEvents?: PaymentEvent[];
   events: StoreEvent[];
   supportTickets: SupportTicket[];
   newsletterSubscribers?: NewsletterSubscriber[];
@@ -285,7 +305,7 @@ let writeQueue: Promise<void> = Promise.resolve();
 let loaded: Database | undefined;
 
 function emptyDatabase(): Database {
-  return { products: structuredClone(seedProducts), seededProductIds: seedProducts.map((product) => product.id), customers: [], orders: [], events: [], supportTickets: [], paymentReceiptReviews: [], sitePublished: true, content: structuredClone(defaultStorefrontContent), imageSettings: structuredClone(defaultImageSettings) };
+  return { products: structuredClone(seedProducts), seededProductIds: seedProducts.map((product) => product.id), customers: [], orders: [], events: [], paymentEvents: [], supportTickets: [], paymentReceiptReviews: [], sitePublished: true, content: structuredClone(defaultStorefrontContent), imageSettings: structuredClone(defaultImageSettings) };
 }
 
 export function mergeImageSettings(value: unknown): ImageSettings {
