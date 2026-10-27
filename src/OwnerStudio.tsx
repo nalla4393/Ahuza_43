@@ -13,7 +13,6 @@ import { defaultStorefrontCopy, storefrontCopyFields, type StorefrontCopyId } fr
 type Product = { id: string; name: string; description: string; price: number; sku: string; stock: number; category: string; imageUrl: string; active: boolean; ghostMannequin: { imageUrl?: string; tags: string[]; background?: string }; images?: ProductImage[]; mainImageId?: string; sizes?: string[] };
 type Content = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string; circleImages?: Record<string, string>; circleLabels?: Record<string, string>; bannerImages?: Record<string, string>; copy: Record<StorefrontCopyId, string> };
 type Order = { id: string; status: string; amount: number; currency: string; createdAt: string; paymentMethod?: 'upi' | 'cod'; paymentReference?: string; payerUpiId?: string; trackingNumber?: string; trackingUrl?: string; paymentVerifiedAt?: string; paymentStatus?: string; manualPaymentReference?: string; paymentVerificationMethod?: string; shippingAddress: { name: string; addressLine1: string; addressLine2?: string; city: string; state: string; postalCode: string; phone: string }; items: { name: string; sku: string; quantity: number; size?: string }[]; review?: { rating: number; comment?: string; createdAt: string }; returnRequest?: { action: string; reason: string; status: string } };
-type PaymentReceiptReview = { id: string; orderId: string; userId: string; expectedAmount: number; extraction: { utrNumber: string | null; amountPaid: number | null; receiverUpiId: string | null; date: string | null; isSuccessful: boolean }; flags: string[]; status: 'pending_admin_review' | 'reviewed'; createdAt: string; reviewedAt?: string; reviewNote?: string };
 type Analytics = { eventCounts: Record<string, number>; orderCount: number; paidRevenue: number; currency: string; lowStock: { id: string; name: string; sku: string; stock: number }[] };
 type IntegrationStatus = { email: boolean; followUps: boolean; ai: boolean };
 type SupportTicket = { id: string; email: string; message: string; category: 'delivery' | 'complaint' | 'general'; status: 'open' | 'resolved'; createdAt: string };
@@ -133,8 +132,6 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
   const [error, setError] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
-  const [paymentReceiptReviews, setPaymentReceiptReviews] = useState<PaymentReceiptReview[]>([]);
-  const [receiptReviewNotes, setReceiptReviewNotes] = useState<Record<string, string>>({});
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [content, setContent] = useState<Content>(emptyContent);
@@ -156,7 +153,6 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
   const [payeeError, setPayeeError] = useState('');
   const [payeeVpaInput, setPayeeVpaInput] = useState('');
   const [payeeNameInput, setPayeeNameInput] = useState('');
-  const [bankReferences, setBankReferences] = useState<Record<string, string>>({});
   const [imageSettings, setImageSettings] = useState<ImageSettings | null>(null);
   const [maxUploadMb, setMaxUploadMb] = useState(10);
   const [imagesPending, setImagesPending] = useState(false);
@@ -168,14 +164,13 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
     setLoading(true);
     setError('');
     try {
-      const [analyticsResult, inventoryResult, ordersResult, supportResult, contentResult, integrationResult, receiptReviewsResult, siteStatusResult, imageSettingsResult] = await Promise.all([
+      const [analyticsResult, inventoryResult, ordersResult, supportResult, contentResult, integrationResult, siteStatusResult, imageSettingsResult] = await Promise.all([
         ownerRequest<{ analytics?: Analytics } & Analytics>(ownerKey, '/api/owner/analytics'),
         ownerRequest<{ products: Product[] }>(ownerKey, '/api/owner/inventory'),
         ownerRequest<{ orders: Order[] }>(ownerKey, '/api/owner/orders'),
         ownerRequest<{ tickets: SupportTicket[] }>(ownerKey, '/api/owner/support-tickets'),
         ownerRequest<{ content: Content }>(ownerKey, '/api/owner/content'),
         ownerRequest<{ integrations: IntegrationStatus }>(ownerKey, '/api/owner/integrations'),
-        ownerRequest<{ reviews: PaymentReceiptReview[] }>(ownerKey, '/api/owner/payment-receipts'),
         ownerRequest<{ published: boolean }>(ownerKey, '/api/owner/site-status'),
         ownerRequest<{ imageSettings: ImageSettings; maxUploadMb: number }>(ownerKey, '/api/owner/image-settings'),
       ]);
@@ -185,7 +180,6 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
       setProducts(inventoryResult.products);
       onProductsChange(inventoryResult.products);
       setOrders(ordersResult.orders);
-      setPaymentReceiptReviews(receiptReviewsResult.reviews);
       setEmailOrderId((current) => current || ordersResult.orders.find((order) => ['paid', 'shipped', 'delivered'].includes(order.status))?.id || '');
       setSupportTickets(supportResult.tickets);
       setContent(contentResult.content);
@@ -341,19 +335,6 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
     finally { setBusyAction(false); }
   }
 
-  async function confirmUpiPayment(order: Order) {
-    const bankReference = bankReferences[order.id]?.trim() || '';
-    if (!/^[A-Za-z0-9-]{6,80}$/.test(bankReference)) { fail(new Error('Enter the bank UTR/reference after verifying the settled transaction in the bank account')); return; }
-    if (!window.confirm(`Confirm ${money(order.amount / 100)} received for ${order.id} only after matching the settled credit in the AHUZA bank account?`)) return;
-    setBusyAction(true);
-    try {
-      const result = await ownerRequest<{ order: Order }>(key, `/api/owner/orders/${encodeURIComponent(order.id)}/upi-payment`, { method: 'PATCH', body: JSON.stringify({ status: 'paid', bankReference }) });
-      setOrders((current) => current.map((entry) => entry.id === order.id ? result.order : entry));
-      notify('UPI payment marked paid after owner bank reconciliation');
-    } catch (reason) { fail(reason); }
-    finally { setBusyAction(false); }
-  }
-
   async function markCodPaid(order: Order) {
     setBusyAction(true);
     try {
@@ -370,19 +351,6 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
     try {
       const result = await ownerRequest<{ order: Order }>(key, `/api/owner/orders/${order.id}/return`, { method: 'PATCH', body: JSON.stringify({ status }) });
       setOrders((current) => current.map((entry) => entry.id === order.id ? result.order : entry)); notify(`Return request ${status}`);
-    } catch (reason) { fail(reason); }
-    finally { setBusyAction(false); }
-  }
-
-  async function markReceiptReviewed(review: PaymentReceiptReview) {
-    setBusyAction(true);
-    try {
-      const result = await ownerRequest<{ review: PaymentReceiptReview }>(key, `/api/owner/payment-receipts/${encodeURIComponent(review.id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ reviewNote: receiptReviewNotes[review.id] || '' }),
-      });
-      setPaymentReceiptReviews((current) => current.map((entry) => entry.id === review.id ? result.review : entry));
-      notify('Receipt marked reviewed The order payment status was not changed');
     } catch (reason) { fail(reason); }
     finally { setBusyAction(false); }
   }
@@ -485,7 +453,7 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
   return <div className="studio-shell">
     <header className="studio-topbar" id="top"><a className="studio-brand" href="#top">AHUZA<span></span><small>OWNER STUDIO</small></a><div className="studio-top-actions"><span className={ready ? 'studio-connection connected' : 'studio-connection'}>{ready ? 'Connected' : 'Private workspace'}</span><button className="studio-icon-button" type="button" onClick={onClose} aria-label="Close Owner Studio"><X size={19} /></button></div></header>
     {!ready ? <main className="studio-gate"><div className="studio-gate-mark"><Settings2 size={20} /></div><p className="studio-eyebrow">AHUZA Apparel · Private</p><h1>Owner Studio</h1><p>Manage the storefront, catalog, orders, and marketing from one workspace</p><form onSubmit={(event) => void unlock(event)}><label>Owner access key<input type="password" value={key} onChange={(event) => setKey(event.target.value)} autoComplete="current-password" placeholder="Enter OWNER_API_KEY" required /></label><button className="studio-primary" disabled={loading}>{loading ? <LoaderCircle className="spin" size={16} /> : null}Open studio <ArrowLeft size={15} /></button></form>{error && <p className="studio-error" role="alert">{error}</p>}<small>The key stays in memory and is cleared when this view closes</small></main> : <div className="studio-layout">
-      <aside className="studio-sidebar"><p className="studio-eyebrow">Workspace</p><nav>{tabs.map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={17} /><span>{label}</span>{id === 'products' && analytics?.lowStock.length ? <b>{analytics.lowStock.length}</b> : id === 'orders' && paymentReceiptReviews.filter((review) => review.status === 'pending_admin_review').length ? <b>{paymentReceiptReviews.filter((review) => review.status === 'pending_admin_review').length}</b> : null}</button>)}</nav><div className="studio-sidebar-bottom"><span className="studio-live-dot" /> Store API online <button onClick={() => { setReady(false); setKey(''); }}>Lock studio</button></div></aside>
+      <aside className="studio-sidebar"><p className="studio-eyebrow">Workspace</p><nav>{tabs.map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}><Icon size={17} /><span>{label}</span>{id === 'products' && analytics?.lowStock.length ? <b>{analytics.lowStock.length}</b> : null}</button>)}</nav><div className="studio-sidebar-bottom"><span className="studio-live-dot" /> Store API online <button onClick={() => { setReady(false); setKey(''); }}>Lock studio</button></div></aside>
       <main className="studio-main"><div className="studio-page-heading"><div><p className="studio-eyebrow">AHUZA Apparel / {tabs.find((item) => item.id === tab)?.label}</p><h1>{tabs.find((item) => item.id === tab)?.label}</h1></div><div className="studio-page-actions"><span className={`site-publication-state ${sitePublished ? 'is-published' : 'is-unpublished'}`}><span />{sitePublished ? 'Published' : 'Unpublished'}</span><button className={sitePublished ? 'studio-unpublish-button' : 'studio-publish-button'} onClick={() => void toggleSitePublication()} disabled={busyAction}>{busyAction ? 'Updating…' : sitePublished ? 'Unpublish site' : 'Publish site'}</button><button className="studio-refresh" onClick={() => void loadDashboard(key)} disabled={loading}><LoaderCircle size={15} className={loading ? 'spin' : ''} /> Refresh</button></div></div>
         {message && <div className="studio-flash success"><Check size={16} />{message}</div>}{error && <div className="studio-flash error">{error}</div>}
         {tab === 'email' && <EmailAgentPanel orders={orders} emailEnabled={Boolean(integrations?.email)} selectedOrderId={emailOrderId} kind={emailKind} draft={emailDraft} reviewed={emailReviewed} sent={emailSent} busy={busyAction} onSelectOrder={(orderId) => { setEmailOrderId(orderId); setEmailDraft(null); setEmailReviewed(false); setEmailSent(false); }} onSelectKind={(kind) => { setEmailKind(kind); setEmailDraft(null); setEmailReviewed(false); setEmailSent(false); }} onGenerate={() => void generateCustomerEmail()} onDraftChange={(field, value) => setEmailDraft((current) => current ? { ...current, [field]: value } : current)} onReview={setEmailReviewed} onSend={(event) => void sendCustomerEmail(event)} />}
@@ -525,28 +493,11 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
           </section>
         </section>}
         {tab === 'orders' && <section className="studio-section studio-orders">
-          <section className="studio-panel">
-            <div className="studio-panel-heading"><div><h2>UPI receipt review queue</h2><span>Gemini extracts details only; independently verify any transfer</span></div></div>
-            <p className="studio-payment-caution">Reviewing a receipt never marks an order paid Only a bank-settled transaction confirmed by an authorized owner can mark a direct UPI order paid</p>
-            {paymentReceiptReviews.filter((review) => review.status === 'pending_admin_review').length === 0
-              ? <p className="studio-muted">No receipts are awaiting review</p>
-              : paymentReceiptReviews.filter((review) => review.status === 'pending_admin_review').map((review) => {
-                const order = orders.find((entry) => entry.id === review.orderId);
-                return <article className="studio-receipt-review" key={review.id}>
-                  <div className="studio-panel-heading"><div><h3>{order?.shippingAddress.name || 'Customer'} · Order {review.orderId.slice(0, 8)}</h3><span>Submitted {new Date(review.createdAt).toLocaleString()}</span></div><span className="order-status status-pending_payment">Needs review</span></div>
-                  <dl><div><dt>Expected</dt><dd>{money(review.expectedAmount)}</dd></div><div><dt>Extracted paid amount</dt><dd>{review.extraction.amountPaid === null ? 'Not found' : money(review.extraction.amountPaid)}</dd></div><div><dt>UTR/reference</dt><dd>{review.extraction.utrNumber || 'Not found'}</dd></div><div><dt>Receiver UPI</dt><dd>{review.extraction.receiverUpiId || 'Not found'}</dd></div><div><dt>Receipt date</dt><dd>{review.extraction.date || 'Not found'}</dd></div><div><dt>AI success text</dt><dd>{review.extraction.isSuccessful ? 'Appears successful' : 'Not successful / unclear'}</dd></div></dl>
-                  {review.flags.length > 0 && <ul>{review.flags.map((flag) => <li key={flag}>{flag}</li>)}</ul>}
-                  <label>Review note (optional)<textarea value={receiptReviewNotes[review.id] || ''} onChange={(event) => setReceiptReviewNotes((current) => ({ ...current, [review.id]: event.target.value }))} maxLength={500} rows={2} /></label>
-                  <button className="studio-secondary" type="button" onClick={() => void markReceiptReviewed(review)} disabled={busyAction}>Mark reviewed <Check size={15} /></button>
-                </article>;
-              })}
-          </section>
           {orders.length === 0 && <section className="studio-panel"><p className="studio-muted">There are no orders yet</p></section>}
           {orders.map((order) => <article className="studio-panel studio-order" key={order.id}>
             <div className="studio-order-heading"><div><span className="studio-eyebrow">{order.id}</span><h2>{order.shippingAddress.name}</h2><p>{new Date(order.createdAt).toLocaleString()} · {money(order.amount / 100)}</p><p>{order.paymentMethod === 'cod' ? 'Cash on delivery' : 'UPI'} · payment {order.paymentStatus || 'pending'}{order.paymentReference ? ` · reference ${order.paymentReference}` : ''}</p>{order.payerUpiId && <p>Customer UPI ID (to match the bank credit): {order.payerUpiId}</p>}</div><span className={`order-status status-${order.status}`}>{order.status.replaceAll('_', ' ')}</span></div>
             <div className="studio-order-details"><div><h3>Delivery</h3><p>{order.shippingAddress.addressLine1}{order.shippingAddress.addressLine2 ? `, ${order.shippingAddress.addressLine2}` : ''}<br />{order.shippingAddress.city}, {order.shippingAddress.state} {order.shippingAddress.postalCode}<br />{order.shippingAddress.phone}</p><label>Tracking number<input value={order.trackingNumber || ''} onChange={(event) => setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, trackingNumber: event.target.value } : entry))} placeholder="Carrier tracking reference" maxLength={100} /></label><label>Carrier tracking link<input type="url" value={order.trackingUrl || ''} onChange={(event) => setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, trackingUrl: event.target.value } : entry))} placeholder="https://carrier.example/track/…" maxLength={2000} onBlur={(event) => { if (event.target.value && !event.target.value.startsWith('https://')) fail(new Error('Tracking link must start with https://')); }} /></label></div><div><h3>Items</h3>{order.items.map((item, index) => <p key={`${item.sku}-${index}`}>{item.quantity} × {item.name}{item.size ? ` · Size ${item.size}` : ''} <small>({item.sku})</small></p>)}{order.review && <div className="owner-order-review"><strong>Customer rating: {'★'.repeat(order.review.rating)}{'☆'.repeat(5 - order.review.rating)}</strong>{order.review.comment && <p>{order.review.comment}</p>}<small>{new Date(order.review.createdAt).toLocaleString()}</small></div>}</div></div>
                         {order.returnRequest && <div className="studio-return"><div><strong>{order.returnRequest.action} requested · {order.returnRequest.status}</strong><p>{order.returnRequest.reason}</p></div>{order.returnRequest.status === 'requested' && <div className="studio-return-actions"><button onClick={() => void resolveReturn(order, 'approved')} disabled={busyAction}>Approve</button><button onClick={() => void resolveReturn(order, 'rejected')} disabled={busyAction}>Decline</button></div>}</div>}
-            {order.paymentMethod === 'upi' && ((order.status === 'pending_payment' && ['pending', 'failed', 'cancelled'].includes(order.paymentStatus || 'pending')) || (order.status === 'cancelled' && order.paymentStatus === 'expired')) && <div className="studio-payment-verification"><label>Bank UTR/reference (owner only)<input value={bankReferences[order.id] || ''} onChange={(event) => setBankReferences((current) => ({ ...current, [order.id]: event.target.value }))} minLength={6} maxLength={80} pattern="[A-Za-z0-9-]{6,80}" placeholder="Enter after checking settled bank credit" /></label><button className="studio-secondary" type="button" onClick={() => void confirmUpiPayment(order)} disabled={busyAction}>Confirm after bank verification <Check size={15} /></button><small>Never confirm from a customer claim, receipt, screenshot or UPI app screen Match the settled amount, merchant VPA and order reference in the bank account Expired payments can only be confirmed if all original items remain in stock</small></div>}
             <div className="studio-order-actions">{(order.status === 'paid' || (order.paymentMethod === 'cod' && order.status === 'confirmed')) && <button className="studio-primary" onClick={() => void updateOrder(order, 'shipped')} disabled={busyAction}>Mark shipped <PackageCheck size={15} /></button>}{order.status === 'shipped' && <button className="studio-primary" onClick={() => void updateOrder(order, 'out_for_delivery')} disabled={busyAction}>Mark out for delivery <PackageCheck size={15} /></button>}{order.status === 'out_for_delivery' && <button className="studio-primary" onClick={() => void updateOrder(order, 'delivered')} disabled={busyAction}>Mark delivered <Check size={15} /></button>}{order.paymentMethod === 'cod' && order.status === 'delivered' && order.paymentStatus === 'pending' && <button className="studio-secondary" onClick={() => void markCodPaid(order)} disabled={busyAction}>Mark cash collected / paid <Check size={15} /></button>}<small>Status updates email the customer Mark out for delivery when the carrier reports it; carrier status is not automatically connected</small><small>Returns and replacements are accepted within 7 days after delivery</small></div>
           </article>)}
         </section>}

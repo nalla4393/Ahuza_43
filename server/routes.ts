@@ -4,8 +4,8 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import express, { Router, type Request, type Response, type NextFunction } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { hashPassword, verifyPassword } from './services/auth.js';
-import { extractPaymentReceipt, generateAdCopy, generateAdImage, generateCustomerEmailBody, generateCustomerSupportReply, generateOwnerAgentPlan, generateSocialPost, isTextAiConfigured, type CustomerEmailKind, type OwnerAgentIntent } from './services/ai.js';
-import { bannerImageKeys, circleImageKeys, getDatabase, mergeImageSettings, mutateDatabase, type Database, type Order, type PaymentReceiptReview, type Product, type ShippingAddress, type StorefrontContent, type SupportTicket } from './services/database.js';
+import { generateAdCopy, generateAdImage, generateCustomerEmailBody, generateCustomerSupportReply, generateOwnerAgentPlan, generateSocialPost, isTextAiConfigured, type CustomerEmailKind, type OwnerAgentIntent } from './services/ai.js';
+import { bannerImageKeys, circleImageKeys, getDatabase, mergeImageSettings, mutateDatabase, type Database, type Order, type Product, type ShippingAddress, type StorefrontContent, type SupportTicket } from './services/database.js';
 import { sendRestockAlerts } from './services/stock-alerts.js';
 import { deleteProductImageFiles, detectImageType, maxUploadBytes, sanitizeImageSettings, saveProductImage, uploadRoot } from './services/images.js';
 import { publishSocialPost, runSchedule, socialStatus, validateSchedule } from './services/social.js';
@@ -27,7 +27,6 @@ const uploadLimit = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders
 const analyticsLimit = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false });
 const supportLimit = rateLimit({ windowMs: 60 * 1000, limit: 12, standardHeaders: 'draft-8', legacyHeaders: false });
 const newsletterLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 5, standardHeaders: 'draft-8', legacyHeaders: false });
-const paymentReceiptLimit = rateLimit({ windowMs: 60 * 60 * 1000, limit: 3, standardHeaders: 'draft-8', legacyHeaders: false });
 const paymentLimit = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false });
 
 function requireCustomer(request: Request, response: Response, next: NextFunction): void {
@@ -69,13 +68,6 @@ function validGhostMannequin(value: unknown): boolean {
     && (metadata.background === undefined || (typeof metadata.background === 'string' && metadata.background.length <= 40));
 }
 
-function detectReceiptMimeType(buffer: Buffer): 'image/jpeg' | 'image/png' | 'image/webp' | null {
-  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
-  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
-  if (buffer.length >= 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
-  return null;
-}
-
 api.get('/health', (_request, response) => response.json({ status: 'ok' }));
 
 api.get('/site-status', async (_request, response) => {
@@ -95,7 +87,7 @@ api.use(async (request, response, next) => {
   const customerAccount = (method === 'GET' && path === '/auth/me')
     || (method === 'POST' && (path === '/auth/login' || path === '/auth/logout'));
   const existingOrders = (method === 'GET' && (path === '/orders' || /^\/orders\/[^/]+(?:\/invoice)?$/.test(path)))
-    || ((method === 'POST' || method === 'PATCH') && /^\/orders\/[^/]+(?:\/returns|\/payment-receipts)?$/.test(path));
+    || ((method === 'POST' || method === 'PATCH') && /^\/orders\/[^/]+(?:\/returns)?$/.test(path));
   if (ownerApi || healthOrStatus || paymentReadOnly || customerAccount || existingOrders) { next(); return; }
   response.status(503).json({ error: 'The AHUZA storefront is temporarily unavailable Please check back soon' });
 });
@@ -511,65 +503,6 @@ api.get('/orders/:id', requireCustomer, async (request, response) => {
   response.json({ order });
 });
 
-api.post('/orders/:id/payment-receipts', requireCustomer, paymentReceiptLimit, express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: '5mb' }), async (request, response) => {
-  if (!Buffer.isBuffer(request.body)) { response.status(415).json({ error: 'Upload a JPEG, PNG, or WebP receipt image' }); return; }
-  const mimeType = detectReceiptMimeType(request.body);
-  const declaredMimeType = request.get('content-type')?.split(';', 1)[0].trim().toLowerCase();
-  if (!mimeType || mimeType !== declaredMimeType) { response.status(415).json({ error: 'The uploaded file is not a valid JPEG, PNG, or WebP image' }); return; }
-
-  const database = await getDatabase();
-  const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
-  if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
-  if (!['pending_payment', 'cancelled'].includes(order.status)) { response.status(409).json({ error: 'A receipt can only be submitted for an unpaid order' }); return; }
-  if (database.paymentReceiptReviews?.some((entry) => entry.orderId === order.id && entry.status === 'pending_admin_review')) {
-    response.status(409).json({ error: 'A receipt for this order is already waiting for owner review' }); return;
-  }
-
-  let extraction;
-  try {
-    extraction = await extractPaymentReceipt(request.body, mimeType);
-  } catch (error) {
-    if (error instanceof Error && error.message === 'AI_NOT_CONFIGURED') {
-      response.status(503).json({ error: 'Receipt review is unavailable until the server has GEMINI_API_KEY configured' }); return;
-    }
-    if (error instanceof Error && error.message === 'RECEIPT_PARSE_FAILED') {
-      response.status(422).json({ error: 'The receipt details could not be read safely Try a clearer image' }); return;
-    }
-    asyncError(response, error);
-    return;
-  }
-
-  const saved = await mutateDatabase((current) => {
-    current.paymentReceiptReviews ||= [];
-    const currentOrder = current.orders.find((entry) => entry.id === order.id && entry.userId === request.session.userId);
-    if (!currentOrder || !['pending_payment', 'cancelled'].includes(currentOrder.status)
-      || current.paymentReceiptReviews.some((entry) => entry.orderId === order.id && entry.status === 'pending_admin_review')) return null;
-    const flags: string[] = [];
-    if (!extraction.isSuccessful) flags.push('AI extraction indicates a possibly unsuccessful transaction; verify independently');
-    if (extraction.amountPaid === null) flags.push('Amount was not clearly extracted');
-    else if (Math.abs(extraction.amountPaid - currentOrder.amount / 100) > 0.01) flags.push('Extracted amount differs from the order amount');
-    if (!extraction.utrNumber) flags.push('UTR/reference number was not clearly extracted');
-    const normalizedUtr = extraction.utrNumber?.replace(/\s+/g, '').toLowerCase();
-    if (normalizedUtr && current.paymentReceiptReviews.some((entry) => entry.extraction.utrNumber?.replace(/\s+/g, '').toLowerCase() === normalizedUtr)) {
-      flags.push('This UTR/reference number appears in another receipt submission');
-    }
-    const review: PaymentReceiptReview = {
-      id: randomUUID(),
-      orderId: currentOrder.id,
-      userId: currentOrder.userId,
-      expectedAmount: currentOrder.amount / 100,
-      extraction,
-      flags,
-      status: 'pending_admin_review',
-      createdAt: new Date().toISOString(),
-    };
-    current.paymentReceiptReviews.push(review);
-    return review;
-  });
-  if (!saved) { response.status(409).json({ error: 'Order status changed or a receipt was submitted while processing Refresh your orders and try again' }); return; }
-  response.status(202).json({ review: { id: saved.id, orderId: saved.orderId, status: saved.status, flags: saved.flags } });
-});
-
 api.get('/orders', requireCustomer, async (request, response) => {
   const database = await getDatabase();
   const orders = database.orders
@@ -577,7 +510,6 @@ api.get('/orders', requireCustomer, async (request, response) => {
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
     .map(({ id, amount, currency, status, paymentMethod, paymentStatus, paymentVerifiedAt, createdAt, items, trackingNumber, trackingUrl, review }) => ({
       id, amount, currency, status, paymentMethod, paymentStatus, paymentVerifiedAt, createdAt, items, trackingNumber, trackingUrl, review,
-      hasPendingReceiptReview: database.paymentReceiptReviews?.some((review) => review.orderId === id && review.status === 'pending_admin_review') || false,
     }));
   response.json({ orders });
 });
@@ -875,30 +807,6 @@ api.delete('/owner/payee', requireOwner, ownerLimit, async (_request, response) 
   try { response.json({ payee: await resetAhuzaPayPayee() }); } catch (error) { payeeError(response, error); }
 });
 
-api.get('/owner/payment-receipts', requireOwner, ownerLimit, async (_request, response) => {
-  const reviews = (await getDatabase()).paymentReceiptReviews || [];
-  response.json({ reviews: [...reviews].sort((left, right) => right.createdAt.localeCompare(left.createdAt)) });
-});
-
-api.patch('/owner/payment-receipts/:id', requireOwner, ownerLimit, async (request, response) => {
-  const body = request.body;
-  if (!body || typeof body !== 'object' || Array.isArray(body)
-    || Object.keys(body).some((key) => key !== 'reviewNote')
-    || (body.reviewNote !== undefined && (typeof body.reviewNote !== 'string' || body.reviewNote.length > 500))) {
-    response.status(400).json({ error: 'Review note must be at most 500 characters' }); return;
-  }
-  const review = await mutateDatabase((database) => {
-    const current = database.paymentReceiptReviews?.find((entry) => entry.id === request.params.id);
-    if (!current || current.status !== 'pending_admin_review') return null;
-    current.status = 'reviewed';
-    current.reviewedAt = new Date().toISOString();
-    if (typeof body.reviewNote === 'string' && body.reviewNote.trim()) current.reviewNote = body.reviewNote.trim();
-    return current;
-  });
-  if (!review) { response.status(404).json({ error: 'Pending receipt review not found' }); return; }
-  response.json({ review });
-});
-
 api.get('/owner/integrations', requireOwner, ownerLimit, async (_request, response) => {
   response.json({ integrations: {
     email: isEmailConfigured(),
@@ -982,46 +890,6 @@ api.patch('/owner/orders/:id/cod-payment', requireOwner, ownerLimit, async (requ
   const email = (await getDatabase()).customers.find((entry) => entry.id === result.order.userId)?.email;
   if (email) void enqueueOrderEmail(result.order.id, 'payment_confirmed').catch((error) => console.error('COD payment confirmation email queue failed:', error));
   response.json({ order: result.order });
-});
-
-api.patch('/owner/orders/:id/upi-payment', requireOwner, ownerLimit, async (request, response) => {
-  const bankReference = request.body?.bankReference;
-  if (request.body?.status !== 'paid' || Object.keys(request.body || {}).some((key) => !['status', 'bankReference'].includes(key))
-    || typeof bankReference !== 'string' || !/^[A-Za-z0-9-]{6,80}$/.test(bankReference.trim())) {
-    response.status(400).json({ error: 'Confirm only after checking the settled payment in your bank account, and provide its bank reference' }); return;
-  }
-  const order = await mutateDatabase((database) => {
-    const current = database.orders.find((entry) => entry.id === request.params.id);
-    if (!current || current.paymentMethod !== 'upi') return null;
-    const activeReservation = current.status === 'pending_payment'
-      && ['pending', 'failed', 'cancelled'].includes(current.paymentStatus || 'pending')
-      && Boolean(current.reservationExpiresAt && Date.parse(current.reservationExpiresAt) > Date.now());
-    const expiredReservation = current.paymentStatus === 'expired'
-      && (current.status === 'cancelled' || (current.status === 'pending_payment' && current.reservationExpiresAt && Date.parse(current.reservationExpiresAt) <= Date.now()));
-    if (!activeReservation && !expiredReservation) return null;
-    const normalizedReference = bankReference.trim().toLowerCase();
-    if (database.orders.some((entry) => entry.id !== current.id && entry.manualPaymentReference?.toLowerCase() === normalizedReference)) return 'duplicate' as const;
-    if (expiredReservation) {
-      const available = current.items.every((item) => {
-        const product = database.products.find((entry) => entry.id === item.productId);
-        return product && product.stock >= item.quantity;
-      });
-      if (!available) return 'stock_unavailable' as const;
-      for (const item of current.items) database.products.find((entry) => entry.id === item.productId)!.stock -= item.quantity;
-    }
-    current.status = 'paid';
-    current.paymentStatus = 'paid';
-    current.manualPaymentReference = bankReference.trim();
-    current.paymentVerificationMethod = 'manual_bank_reconciliation';
-    current.paymentVerifiedAt = new Date().toISOString();
-    delete current.reservationExpiresAt;
-    return structuredClone(current);
-  });
-  if (order === 'duplicate') { response.status(409).json({ error: 'This bank reference has already been recorded for another order' }); return; }
-  if (order === 'stock_unavailable') { response.status(409).json({ error: 'The payment must be manually reconciled, but the original items are no longer in stock Contact the customer before fulfillment' }); return; }
-  if (!order) { response.status(409).json({ error: 'Only an unpaid, pending UPI order can be confirmed Check the order and bank settlement' }); return; }
-  void enqueueOrderEmail(order.id, 'payment_confirmed').catch((error) => console.error('Payment confirmation email queue failed:', error));
-  response.json({ order });
 });
 
 api.patch('/owner/orders/:id/return', requireOwner, ownerLimit, async (request, response) => {

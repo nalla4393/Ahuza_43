@@ -27,10 +27,6 @@
 .customer-order>div strong{font-size:11px}
 .customer-order>div span{font-size:10px;color:var(--muted);overflow-wrap:anywhere}
 .customer-order-actions{display:grid;gap:8px;min-width:180px}
-.receipt-upload-form{display:grid;gap:7px;padding-top:8px;border-top:1px solid var(--line)}
-.receipt-upload-form label{display:grid;gap:5px;color:var(--muted);font-size:10px}
-.receipt-upload-form input[type=file]{max-width:100%;font-size:10px}
-.receipt-upload-form small,.customer-order-actions>small{font-size:9px;line-height:1.4;color:var(--muted);overflow-wrap:anywhere}
 .invoice-button{flex:none;padding:9px 10px;border:0;background:#3a493c;color:#fff;font-size:10px;cursor:pointer}
 .invoice-button:disabled{background:#d9d8cf;color:#777b71;cursor:not-allowed}
 .payment-panel{display:grid;justify-items:center;gap:12px;padding:22px 16px;text-align:center}
@@ -107,3 +103,4 @@
 .customer-upi input{height:40px;padding:0 10px;border:1px solid var(--line);background:transparent}
 .customer-upi .upi-actions{display:flex;flex-wrap:wrap;gap:10px}
 .customer-upi .upi-message{margin:0;font-size:12px}
+.customer-order-actions>small{font-size:9px;line-height:1.4;color:var(--muted);overflow-wrap:anywhere}

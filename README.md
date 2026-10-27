@@ -36,7 +36,7 @@ The AI owner agent reads current store data and can propose inventory updates, o
 
 Online checkout uses the Ahuza Pay gateway (`AHUZA_PAY_URL`). The backend calculates the order amount from current catalog prices, reserves stock for 60 minutes, creates the order on Ahuza Pay server-to-server and returns its hosted `payUrl`; the browser is redirected there to pay. If Ahuza Pay cannot be reached the order is cancelled and stock released.
 
-The order is marked `paid` only when Ahuza Pay reports `order_confirmed` for it (checked when the customer's status endpoint is polled). Browser redirects, screenshots, receipts or customer claims are never payment proof. The owner-only **Confirm after bank verification** action and receipt review in Owner Studio remain available as a manual fallback.
+The order is marked `paid` only when Ahuza Pay reports `order_confirmed` for it (checked when the customer's status endpoint is polled). Browser redirects, screenshots, receipts or customer claims are never payment proof.
 
 Set these server variables (never use a `VITE_` prefix):
 
@@ -51,9 +51,8 @@ Without both values, online checkout is disabled while cash on delivery remains 
 
 **Customer UPI IDs (optional).** Signed-in customers can save a UPI ID under *My account*, or type one at checkout (optionally saving it). It is encrypted at rest (AES-256-GCM, key derived from `CUSTOMER_DATA_KEY`, falling back to `SESSION_SECRET`), is not sent to Ahuza Pay, and is shown only to the owner on that order to help match the bank credit. Customers can delete their saved ID at any time. Changing the key makes saved IDs unreadable.
 
-Cash on delivery remains available. COD orders are saved as `confirmed` with payment status `pending` and reserve inventory. In **Owner Studio → Orders & receipts**, mark the order delivered, then use **Mark cash collected / paid** after cash has been received. COD revenue is counted only after the owner records payment.
+Cash on delivery remains available. COD orders are saved as `confirmed` with payment status `pending` and reserve inventory. In **Owner Studio → Orders**, mark the order delivered, then use **Mark cash collected / paid** after cash has been received. COD revenue is counted only after the owner records payment.
 
-Customers may optionally submit an image of payment proof for owner review. AI may extract visible details, but neither an AI result nor a receipt review confirms payment. Independently check the bank settlement before using the owner-only confirmation.
 
 ## Build and run
 
@@ -91,8 +90,6 @@ After DNS is correct, add `https://www.ahuzawear.com/` as a URL-prefix property 
 - `GET /api/products`, `GET /api/products/:id`
 - `POST /api/auth/signup`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
 - `GET /api/payments/config`, `POST /api/payments/orders`, `GET /api/payments/orders/:id/status`, `POST /api/payments/orders/:id/cancel` (Ahuza Pay hosted payment; customer status is never trusted for confirmation)
-- `PATCH /api/owner/orders/:id/upi-payment` (owner-only; records manual bank reconciliation and requires the bank UTR/reference)
-- `POST /api/orders/:id/payment-receipts` (authenticated JPEG/PNG/WebP image, maximum 5 MB); owners review extracted details via `GET /api/owner/payment-receipts` and `PATCH /api/owner/payment-receipts/:id`
 - `GET /api/orders`, `GET /api/orders/:id`, `GET /api/orders/:id/invoice` (PDF after payment confirmation), `POST /api/orders/:id/returns`
 - Storefront content: `GET /api/storefront`; owner edits via `PATCH /api/owner/content`
 - Owner: `GET/PATCH/POST /api/owner/inventory`, `GET/PATCH /api/owner/orders`, `GET /api/owner/analytics`, `GET/PATCH /api/owner/integrations`, `GET/PATCH /api/owner/support-tickets`, `POST /api/owner/chat`, `POST /api/owner/agent/execute` to approve proposed actions, `POST /api/owner/email-agent/draft`, `POST /api/owner/email-agent/send`, `POST /api/owner/social-post`, and `POST /api/owner/automations/test` for non-conversion webhook diagnostics.
