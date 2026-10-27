@@ -60,3 +60,24 @@ export async function getAhuzaPayStatus(orderId: string): Promise<AhuzaPayStatus
     ...(typeof body.transaction_reference === 'string' ? { transactionReference: body.transaction_reference } : {}),
   };
 }
+
+export type AhuzaPayPayee = { vpa: string; payeeName: string; source: string };
+
+function toPayee(body: Record<string, any>): AhuzaPayPayee {
+  return { vpa: String(body.vpa ?? ''), payeeName: String(body.payee_name ?? ''), source: String(body.source ?? '') };
+}
+
+export async function getAhuzaPayPayee(): Promise<AhuzaPayPayee> {
+  return toPayee(await callAhuzaPay('/api/merchant/payee', { method: 'GET' }));
+}
+
+export async function updateAhuzaPayPayee(input: { vpa?: string; payeeName?: string }): Promise<AhuzaPayPayee> {
+  return toPayee(await callAhuzaPay('/api/merchant/payee', {
+    method: 'PUT',
+    body: { ...(input.vpa === undefined ? {} : { vpa: input.vpa }), ...(input.payeeName === undefined ? {} : { payee_name: input.payeeName }) },
+  }));
+}
+
+export async function resetAhuzaPayPayee(): Promise<AhuzaPayPayee> {
+  return toPayee(await callAhuzaPay('/api/merchant/payee', { method: 'DELETE' }));
+}

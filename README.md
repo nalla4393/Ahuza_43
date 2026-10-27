@@ -47,6 +47,10 @@ AHUZA_PAY_API_KEY=<same value as MERCHANT_API_KEY on the Ahuza Pay service, 32+ 
 
 Without both values, online checkout is disabled while cash on delivery remains available.
 
+**Owner Studio → UPI payee** lets the owner view, change, save and remove the receiving UPI ID and payee name. It calls Ahuza Pay's `/api/merchant/payee` from the server (the owner key stays `OWNER_API_KEY`). "Remove" deletes the saved value and falls back to Ahuza Pay's `UPI_VPA` server default.
+
+**Customer UPI IDs (optional).** Signed-in customers can save a UPI ID under *My account*, or type one at checkout (optionally saving it). It is encrypted at rest (AES-256-GCM, key derived from `CUSTOMER_DATA_KEY`, falling back to `SESSION_SECRET`), is not sent to Ahuza Pay, and is shown only to the owner on that order to help match the bank credit. Customers can delete their saved ID at any time. Changing the key makes saved IDs unreadable.
+
 Cash on delivery remains available. COD orders are saved as `confirmed` with payment status `pending` and reserve inventory. In **Owner Studio → Orders & receipts**, mark the order delivered, then use **Mark cash collected / paid** after cash has been received. COD revenue is counted only after the owner records payment.
 
 Customers may optionally submit an image of payment proof for owner review. AI may extract visible details, but neither an AI result nor a receipt review confirms payment. Independently check the bank settlement before using the owner-only confirmation.

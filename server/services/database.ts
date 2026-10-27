@@ -60,6 +60,7 @@ export type Customer = {
   passwordHash: string;
   createdAt: string;
   wishlist?: string[];
+  savedUpiIdEnc?: string;
 };
 
 export type StockAlert = {
@@ -100,6 +101,7 @@ export type Order = {
   discountAmount?: number;
   taxAmount?: number;
   paymentReference?: string;
+  payerUpiIdEnc?: string;
   paymentVerifiedAt?: string;
   manualPaymentReference?: string;
   paymentVerificationMethod?: 'manual_bank_reconciliation' | 'ahuza_pay';

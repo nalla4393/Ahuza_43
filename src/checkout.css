@@ -97,3 +97,13 @@
 .owner-order-review{margin-top:10px;padding:10px;border-top:1px solid var(--line)}
 .owner-order-review strong{color:#8a6820}
 .owner-order-review p{overflow-wrap:anywhere}
+
+.payer-upi{display:grid;gap:6px}
+.payer-upi>label:first-child{display:grid;gap:4px;font-size:11px}
+.upi-assurance{margin:0;color:#4d5a4f;font-size:11px;line-height:1.5}
+.customer-upi{display:grid;gap:10px;padding:18px 0;border-bottom:1px solid var(--line)}
+.customer-upi h3{margin:0;font-size:13px}
+.customer-upi label{display:grid;gap:4px;font-size:12px}
+.customer-upi input{height:40px;padding:0 10px;border:1px solid var(--line);background:transparent}
+.customer-upi .upi-actions{display:flex;flex-wrap:wrap;gap:10px}
+.customer-upi .upi-message{margin:0;font-size:12px}
