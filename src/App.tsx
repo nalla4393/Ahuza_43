@@ -107,7 +107,6 @@ export default function App() {
   const [accountUpiInput, setAccountUpiInput] = useState('');
   const [accountUpiMessage, setAccountUpiMessage] = useState('');
   const [payerUpiInput, setPayerUpiInput] = useState('');
-  const [saveUpiChoice, setSaveUpiChoice] = useState(false);
   const [newsletterBusy, setNewsletterBusy] = useState(false);
   const [newsletterMessage, setNewsletterMessage] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'upi' | 'cod'>('upi');
@@ -445,7 +444,7 @@ export default function App() {
         body: JSON.stringify({
           items: cart.map(({ productId, quantity, size }) => ({ productId, quantity, ...(size ? { size } : {}) })),
           paymentMethod,
-          ...(paymentMethod === 'upi' && payerUpiInput.trim() ? { payerUpiId: payerUpiInput.trim(), saveUpiId: saveUpiChoice } : {}),
+          ...(paymentMethod === 'upi' && payerUpiInput.trim() ? { payerUpiId: payerUpiInput.trim() } : {}),
           marketingConsent,
           shippingAddress: sameAsBilling ? billingAddress : deliveryAddress,
           billingAddress,
@@ -463,7 +462,6 @@ export default function App() {
       setPaymentMessage(paymentMethod === 'cod'
         ? 'Your order is confirmed Please pay the delivery partner in cash when your order arrives'
         : 'Complete your payment on the Ahuza Pay page The order is confirmed once AHUZA verifies the payment');
-      if (paymentMethod === 'upi' && saveUpiChoice && payerUpiInput.trim()) setSavedUpiId(payerUpiInput.trim());
       if (paymentMethod === 'cod') setCart([]);
       else window.location.assign(order.payUrl!);
     } catch (error) {
@@ -821,7 +819,7 @@ export default function App() {
               <fieldset className="payment-method-options"><legend>{storefrontText('checkoutPaymentMethod')}</legend><label><input type="radio" name="paymentMethod" value="upi" checked={paymentMethod === 'upi'} onChange={() => setPaymentMethod('upi')} disabled={!paymentConfiguration?.configured} /> {storefrontText('checkoutPayUpi')}</label><label><input type="radio" name="paymentMethod" value="cod" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} /> {storefrontText('checkoutCod')}</label></fieldset>
               {paymentMethod === 'upi' && !paymentConfiguration?.configured && <p className="payment-config-warning" role="status">{paymentConfiguration ? storefrontText('checkoutUpiUnavailable') : storefrontText('checkoutUpiChecking')}</p>}
               {paymentMethod === 'upi' && paymentConfiguration?.configured && <p className="payment-config-warning">{storefrontText('checkoutUpiNote')}</p>}
-              {paymentMethod === 'upi' && paymentConfiguration?.configured && <div className="payer-upi"><label>Your UPI ID (optional)<input value={payerUpiInput} onChange={(event) => setPayerUpiInput(event.target.value)} placeholder="name@bank" autoComplete="off" inputMode="email" maxLength={256} /></label>{payerUpiInput.trim() && payerUpiInput.trim() !== savedUpiId && upiSavingAvailable && <label className="consent-check"><input type="checkbox" checked={saveUpiChoice} onChange={(event) => setSaveUpiChoice(event.target.checked)} /> Save this UPI ID to my account for next time</label>}<small className="upi-assurance">Your UPI ID is stored encrypted and is used only to match your payment to your order. We never sell it, share it with anyone, or use it for marketing. Saving is optional, and you can delete it any time.</small></div>}
+              {paymentMethod === 'upi' && paymentConfiguration?.configured && payerUpiInput.trim() && <p className="upi-assurance">Your saved UPI ID is optional order-matching information only. Choose whether to pay by UPI ID or UPI number on the secure Ahuza Pay page.</p>}
               <label className="consent-check"><input type="checkbox" checked={marketingConsent} onChange={(event) => setMarketingConsent(event.target.checked)} />{storefrontText('checkoutConsent')}</label><button className="dark-button checkout-button" disabled={busy || (paymentMethod === 'upi' && paymentConfiguration?.configured !== true)}>{busy ? storefrontText('checkoutPlacing') : customer ? paymentMethod === 'cod' ? storefrontText('checkoutPlaceCod') : paymentConfiguration?.configured ? storefrontText('checkoutContinueUpi') : storefrontText('checkoutUpiUnavailableButton') : storefrontText('checkoutSignIn')} <ArrowRight size={16} /></button></form><small>{storefrontText('checkoutPolicy')}</small></div>
           </>}
         </aside>
