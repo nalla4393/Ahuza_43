@@ -14,7 +14,7 @@ import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
 import { buildAhuzaPayOrder, createAhuzaPayOrder, getAhuzaPayConfiguration, getAhuzaPayPayee, resetAhuzaPayPayee, updateAhuzaPayPayee } from './services/ahuzaPay.js';
 import { customerDataConfigured, decryptCustomerValue, encryptCustomerValue, isValidUpiId } from './services/customerData.js';
-import { syncAhuzaPayPayment } from './services/paymentSync.js';
+import { confirmUpiPaymentByOwner, syncAhuzaPayPayment } from './services/paymentSync.js';
 import { buildInvoicePdf } from './services/invoice.js';
 import { storefrontCopyFields } from '../shared/storefrontCopy.js';
 
@@ -871,6 +871,12 @@ api.patch('/owner/orders/:id/status', requireOwner, ownerLimit, async (request, 
   const notificationKind = status === 'shipped' || status === 'out_for_delivery' || status === 'delivered' ? status : null;
   if (result.changed && email && notificationKind) void enqueueOrderEmail(result.order.id, notificationKind).catch((error) => console.error(`${status} email queue failed:`, error));
   response.json({ order: result.order });
+});
+
+api.patch('/owner/orders/:id/confirm-upi-payment', requireOwner, ownerLimit, async (request, response) => {
+  const result = await confirmUpiPaymentByOwner(String(request.params.id));
+  if (!result.ok) { response.status(409).json({ error: result.error }); return; }
+  response.json({ order: (await getDatabase()).orders.find((entry) => entry.id === request.params.id) });
 });
 
 api.patch('/owner/orders/:id/cod-payment', requireOwner, ownerLimit, async (request, response) => {

@@ -51,3 +51,28 @@ export async function reconcileAhuzaPayOrders(): Promise<void> {
     });
   }
 }
+
+// Owner-approved confirmation for a UPI order whose bank credit was checked by hand (UTR matched in the bank app).
+export async function confirmUpiPaymentByOwner(orderId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await mutateDatabase((database) => {
+    const current = database.orders.find((entry) => entry.id === orderId);
+    if (!current || current.paymentMethod !== 'upi') return 'Only UPI orders can be confirmed here' as const;
+    if (current.paymentStatus === 'paid') return 'This order is already paid' as const;
+    if (!['pending_payment', 'cancelled'].includes(current.status)) return 'This order cannot be confirmed in its current status' as const;
+    if (current.status === 'cancelled') {
+      const available = current.items.every((item) => (database.products.find((entry) => entry.id === item.productId)?.stock ?? 0) >= item.quantity);
+      if (!available) return 'Not enough stock to restore this cancelled order' as const;
+      for (const item of current.items) database.products.find((entry) => entry.id === item.productId)!.stock -= item.quantity;
+    }
+    current.status = 'paid';
+    current.paymentStatus = 'paid';
+    current.paymentVerificationMethod = 'manual_bank_reconciliation';
+    current.paymentVerifiedAt = new Date().toISOString();
+    delete current.reservationExpiresAt;
+    return true as const;
+  });
+  if (result !== true) return { ok: false, error: result ?? 'Order not found' };
+  await enqueueOrderEmail(orderId, 'payment_confirmed').catch((error) => console.error('Payment confirmation email queue failed:', error));
+  await enqueueOrderEmail(orderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
+  return { ok: true };
+}

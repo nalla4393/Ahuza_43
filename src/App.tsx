@@ -486,7 +486,7 @@ export default function App() {
       setPaymentStatus(paymentMethod === 'cod' ? 'confirmed' : 'pending');
       setPaymentMessage(paymentMethod === 'cod'
         ? 'Your order is confirmed Please pay the delivery partner in cash when your order arrives'
-        : 'Complete your payment on the Ahuza Pay page The order is confirmed once AHUZA verifies the payment');
+        : 'Complete your payment on the Ahuza Pay page Your order is confirmed automatically as soon as the bank credit is matched');
       if (paymentMethod === 'cod') setCart([]);
       else window.location.assign(order.payUrl!);
     } catch (error) {
