@@ -43,6 +43,11 @@ export async function reconcileAhuzaPayOrders(): Promise<void> {
   const candidates = (await getDatabase()).orders.filter((order) => order.paymentMethod === 'upi' && order.paymentStatus !== 'paid'
     && (order.status === 'pending_payment' || (order.status === 'cancelled' && Date.parse(order.createdAt) >= recentCutoff)));
   for (const candidate of candidates) {
-    await syncAhuzaPayPayment(candidate.id).catch((error) => console.error(`Ahuza Pay reconcile failed for order ${candidate.id}:`, error instanceof Error ? error.message : error));
+    await syncAhuzaPayPayment(candidate.id).catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      // Ahuza Pay never received this order (for example the payment link could not be created), so there is nothing to confirm.
+      if (message.startsWith('AHUZA_PAY_404')) return;
+      console.error(`Ahuza Pay reconcile failed for order ${candidate.id}:`, message);
+    });
   }
 }
