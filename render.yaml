@@ -36,7 +36,9 @@ services:
       - key: SMTP_PASS
         sync: false
       - key: EMAIL_FROM
-        sync: false
+        value: Ahuza Apparel <orders@ahuzawear.com>
+      - key: SUPPORT_EMAIL
+        value: info@ahuzawear.com
       - key: AHUZA_PAY_URL
         value: https://ahuza-pay-production.up.railway.app
       - key: AHUZA_PAY_API_KEY

@@ -14,7 +14,7 @@ async function postJson(url: string, body: unknown, headers: Record<string, stri
 
 export async function notifySupportTicket(ticket: SupportTicket): Promise<void> {
   if (!isEmailConfigured()) throw new Error('Email is not configured.');
-  await sendEmail('Info@ahuzawear.com', `Customer support ticket ${ticket.id}`, `A customer support ticket needs follow-up.\n\nReference: ${ticket.id}\nCategory: ${ticket.category}\nCustomer: ${ticket.email}\nCreated: ${ticket.createdAt}\n\n${ticket.message}\n\nPlease respond within 48 working hours.`);
+  await sendEmail(supportEmail(), `Customer support ticket ${ticket.id}`, `A customer support ticket needs follow-up.\n\nReference: ${ticket.id}\nCategory: ${ticket.category}\nCustomer: ${ticket.email}\nCreated: ${ticket.createdAt}\n\n${ticket.message}\n\nPlease respond within 48 working hours.`);
 }
 
 export async function recordMarketingEvent(event: Omit<StoreEvent, 'id' | 'createdAt'>): Promise<void> {
@@ -28,13 +28,17 @@ export function isEmailConfigured(): boolean {
   return Boolean(process.env.RESEND_API_KEY?.trim() || (process.env.SMTP_HOST?.trim() && process.env.SMTP_USER?.trim() && process.env.SMTP_PASS));
 }
 
+export const supportEmail = (): string => process.env.SUPPORT_EMAIL?.trim() || 'info@ahuzawear.com';
+
+// Order and marketing mail is sent from EMAIL_FROM (orders@); replies are routed to the support inbox.
 export async function sendEmail(to: string, subject: string, text: string, attachments: EmailAttachment[] = []): Promise<void> {
+  const replyTo = supportEmail();
   const from = process.env.EMAIL_FROM || (process.env.SMTP_USER ? `Ahuza Apparel <${process.env.SMTP_USER}>` : 'Ahuza Apparel <onboarding@resend.dev>');
   if (process.env.SMTP_HOST?.trim() && process.env.SMTP_USER?.trim() && process.env.SMTP_PASS) {
     const port = Number(process.env.SMTP_PORT) || 465;
     const transport = nodemailer.createTransport({ host: process.env.SMTP_HOST.trim(), port, secure: port === 465, auth: { user: process.env.SMTP_USER.trim(), pass: process.env.SMTP_PASS }, connectionTimeout: 10000, socketTimeout: 15000 });
     await transport.sendMail({
-      from, to, subject, text,
+      from, to, replyTo, subject, text,
       attachments: attachments.map(({ filename, content, contentType }) => ({ filename, content, contentType })),
     });
     return;
@@ -45,7 +49,7 @@ export async function sendEmail(to: string, subject: string, text: string, attac
     return;
   }
   await postJson('https://api.resend.com/emails', {
-    from, to: [to], subject, text,
+    from, to: [to], reply_to: replyTo, subject, text,
     ...(attachments.length ? {
       attachments: attachments.map(({ filename, content, contentType }) => ({
         filename, content: content.toString('base64'), content_type: contentType,
