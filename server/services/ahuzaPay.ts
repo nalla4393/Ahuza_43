@@ -1,6 +1,6 @@
 import type { Order, ShippingAddress } from './database.js';
 
-export type AhuzaPayStatus = { confirmed: boolean; closed: boolean; transactionReference?: string };
+export type AhuzaPayStatus = { confirmed: boolean; closed: boolean; transactionReference?: string; paymentStatus: string; orderConfirmed: boolean };
 
 export function getAhuzaPayConfiguration(): { configured: boolean; baseUrl: string; apiKey: string } {
   const baseUrl = ((process.env.AHUZA_PAY_URL || process.env.AHUZA_PAY_BASE_URL)?.trim() || '').replace(/\/+$/, '');
@@ -54,9 +54,13 @@ export async function createAhuzaPayOrder(payload: ReturnType<typeof buildAhuzaP
 
 export async function getAhuzaPayStatus(orderId: string): Promise<AhuzaPayStatus> {
   const body = await callAhuzaPay(`/api/merchant/orders/${encodeURIComponent(orderId)}`, { method: 'GET' });
+  const paymentStatus = typeof body.payment_status === 'string' ? body.payment_status.trim().toUpperCase() : '';
+  const orderConfirmed = body.order_confirmed === true || body.order_confirmed === 'true';
   return {
-    confirmed: body.order_confirmed === true && body.payment_status === 'PAID',
-    closed: ['CANCELLED', 'EXPIRED', 'FAILED'].includes(body.payment_status),
+    confirmed: orderConfirmed && paymentStatus === 'PAID',
+    closed: ['CANCELLED', 'EXPIRED', 'FAILED'].includes(paymentStatus),
+    paymentStatus,
+    orderConfirmed,
     ...(typeof body.transaction_reference === 'string' ? { transactionReference: body.transaction_reference } : {}),
   };
 }

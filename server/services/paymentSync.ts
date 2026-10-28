@@ -10,7 +10,10 @@ export async function syncAhuzaPayPayment(orderId: string, userId?: string): Pro
   if (!order || order.paymentMethod !== 'upi' || order.paymentStatus === 'paid' || !getAhuzaPayConfiguration().configured) return false;
   if (!['pending_payment', 'cancelled'].includes(order.status)) return false;
   const remote = await getAhuzaPayStatus(order.id);
-  if (!remote.confirmed) return false;
+  if (!remote.confirmed) {
+    console.info(`Ahuza Pay order ${order.id} not confirmed yet: payment_status=${remote.paymentStatus || 'none'} order_confirmed=${remote.orderConfirmed}`);
+    return false;
+  }
   const paid = await mutateDatabase((database) => {
     const current = database.orders.find(matches);
     if (!current || current.paymentStatus === 'paid' || !['pending_payment', 'cancelled'].includes(current.status)) return null;
