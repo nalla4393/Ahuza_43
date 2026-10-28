@@ -11,6 +11,7 @@ export async function syncAhuzaPayPayment(orderId: string, userId?: string): Pro
   if (!['pending_payment', 'cancelled'].includes(order.status)) return false;
   const remote = await getAhuzaPayStatus(order.id);
   if (!remote.confirmed) {
+    if (remote.closed) return false;
     console.info(`Ahuza Pay order ${order.id} not confirmed yet: payment_status=${remote.paymentStatus || 'none'} order_confirmed=${remote.orderConfirmed}`);
     return false;
   }
