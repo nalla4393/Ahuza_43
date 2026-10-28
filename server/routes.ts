@@ -480,6 +480,8 @@ api.get('/orders/:id', requireCustomer, async (request, response) => {
 });
 
 api.get('/orders', requireCustomer, async (request, response) => {
+  const pending = (await getDatabase()).orders.filter((order) => order.userId === request.session.userId && order.paymentMethod === 'upi' && order.paymentStatus !== 'paid' && ['pending_payment', 'cancelled'].includes(order.status));
+  await Promise.all(pending.map((order) => syncAhuzaPayPayment(order.id, request.session.userId!).catch((error) => console.error('Ahuza Pay order list sync failed:', error))));
   const database = await getDatabase();
   const orders = database.orders
     .filter((order) => order.userId === request.session.userId)
