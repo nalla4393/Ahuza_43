@@ -3,7 +3,7 @@ import type { Order, ShippingAddress } from './database.js';
 export type AhuzaPayStatus = { confirmed: boolean; closed: boolean; transactionReference?: string };
 
 export function getAhuzaPayConfiguration(): { configured: boolean; baseUrl: string; apiKey: string } {
-  const baseUrl = (process.env.AHUZA_PAY_URL?.trim() || '').replace(/\/+$/, '');
+  const baseUrl = ((process.env.AHUZA_PAY_URL || process.env.AHUZA_PAY_BASE_URL)?.trim() || '').replace(/\/+$/, '');
   const apiKey = process.env.AHUZA_PAY_API_KEY?.trim() || '';
   return { configured: /^https:\/\//.test(baseUrl) && apiKey.length >= 32, baseUrl, apiKey };
 }

@@ -10,6 +10,7 @@ import { uploadRoot } from './server/services/images.js';
 import { api, expireReservationsOnStartup } from './server/routes.js';
 import { expirePendingOrders, startFollowUpScheduler } from './server/services/integrations.js';
 import { startSocialScheduler } from './server/services/social.js';
+import { reconcileAhuzaPayOrders } from './server/services/paymentSync.js';
 import { sendRestockAlerts } from './server/services/stock-alerts.js';
 
 const app = express();
@@ -94,6 +95,8 @@ app.use((error: unknown, _request: express.Request, response: express.Response, 
 });
 
 void expireReservationsOnStartup().catch((error) => console.error('Reservation cleanup failed:', error));
+const paymentSyncTimer = setInterval(() => void reconcileAhuzaPayOrders().catch((error) => console.error('Payment reconcile failed:', error)), 15 * 1000);
+paymentSyncTimer.unref();
 const reservationTimer = setInterval(() => void expirePendingOrders().catch((error) => console.error('Reservation cleanup failed:', error)), 60 * 1000);
 reservationTimer.unref();
 startFollowUpScheduler();

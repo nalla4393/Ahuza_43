@@ -12,8 +12,9 @@ import { publishSocialPost, runSchedule, socialStatus, validateSchedule } from '
 import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
 import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
-import { buildAhuzaPayOrder, createAhuzaPayOrder, getAhuzaPayConfiguration, getAhuzaPayPayee, getAhuzaPayStatus, resetAhuzaPayPayee, updateAhuzaPayPayee } from './services/ahuzaPay.js';
+import { buildAhuzaPayOrder, createAhuzaPayOrder, getAhuzaPayConfiguration, getAhuzaPayPayee, resetAhuzaPayPayee, updateAhuzaPayPayee } from './services/ahuzaPay.js';
 import { customerDataConfigured, decryptCustomerValue, encryptCustomerValue, isValidUpiId } from './services/customerData.js';
+import { syncAhuzaPayPayment } from './services/paymentSync.js';
 import { buildInvoicePdf } from './services/invoice.js';
 import { storefrontCopyFields } from '../shared/storefrontCopy.js';
 
@@ -432,32 +433,6 @@ async function createPaymentOrder(request: Request, response: Response): Promise
 api.get('/payments/config', (_request, response) => {
   response.json({ configured: getAhuzaPayConfiguration().configured, automaticVerification: true });
 });
-
-// Marks a pending order paid only when Ahuza Pay itself reports a bank-verified payment.
-async function syncAhuzaPayPayment(orderId: string, userId: string): Promise<void> {
-  const order = (await getDatabase()).orders.find((entry) => entry.id === orderId && entry.userId === userId);
-  if (!order || order.paymentMethod !== 'upi' || order.paymentStatus === 'paid' || !getAhuzaPayConfiguration().configured) return;
-  if (!['pending_payment', 'cancelled'].includes(order.status)) return;
-  const remote = await getAhuzaPayStatus(order.id);
-  if (!remote.confirmed) return;
-  const paid = await mutateDatabase((database) => {
-    const current = database.orders.find((entry) => entry.id === orderId && entry.userId === userId);
-    if (!current || current.paymentStatus === 'paid' || !['pending_payment', 'cancelled'].includes(current.status)) return null;
-    if (current.status === 'cancelled') {
-      const available = current.items.every((item) => database.products.find((entry) => entry.id === item.productId)!.stock >= item.quantity);
-      if (!available) return null;
-      for (const item of current.items) database.products.find((entry) => entry.id === item.productId)!.stock -= item.quantity;
-    }
-    current.status = 'paid';
-    current.paymentStatus = 'paid';
-    current.paymentVerificationMethod = 'ahuza_pay';
-    if (remote.transactionReference) current.manualPaymentReference = remote.transactionReference;
-    current.paymentVerifiedAt = new Date().toISOString();
-    delete current.reservationExpiresAt;
-    return true;
-  });
-  if (paid) void enqueueOrderEmail(orderId, 'payment_confirmed').catch((error) => console.error('Payment confirmation email queue failed:', error));
-}
 
 api.post('/payments/orders', requireCustomer, paymentLimit, async (request, response) => {
   await createPaymentOrder(request, response);
