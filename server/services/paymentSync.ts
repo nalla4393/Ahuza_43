@@ -32,6 +32,7 @@ export async function syncAhuzaPayPayment(orderId: string, userId?: string): Pro
   });
   if (!paid) return false;
   await enqueueOrderEmail(orderId, 'payment_confirmed').catch((error) => console.error('Payment confirmation email queue failed:', error));
+  await enqueueOrderEmail(orderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
   return true;
 }
 

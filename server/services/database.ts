@@ -113,7 +113,7 @@ export type Order = {
   review?: { rating: number; comment?: string; createdAt: string };
 };
 
-export type OrderEmailKind = 'order_placed' | 'payment_confirmed' | 'shipped' | 'out_for_delivery' | 'delivered' | 'follow_up';
+export type OrderEmailKind = 'order_placed' | 'payment_confirmed' | 'shipped' | 'out_for_delivery' | 'delivered' | 'follow_up' | 'owner_new_order';
 export type OrderEmailNotification = {
   id: string;
   orderId: string;

@@ -59,6 +59,7 @@ export async function sendEmail(to: string, subject: string, text: string, attac
 }
 
 const orderEmailSubjects: Record<OrderEmailKind, (id: string) => string> = {
+  owner_new_order: (id) => `New AHUZA order received ${id}`,
   order_placed: (id) => `We've received your Ahuza order ${id}`,
   payment_confirmed: (id) => `Payment confirmed for your Ahuza order ${id}`,
   shipped: (id) => `Your Ahuza order ${id} is on its way`,
@@ -66,6 +67,12 @@ const orderEmailSubjects: Record<OrderEmailKind, (id: string) => string> = {
   delivered: (id) => `Your Ahuza order ${id} has been delivered`,
   follow_up: (id) => `How are you enjoying your Ahuza order ${id}?`,
 };
+
+function ownerOrderEmail(order: Order, customerEmail: string): string {
+  const lines = order.items.map((item) => `- ${item.name}${item.size ? ` (${item.size})` : ''} x ${item.quantity}`).join('\n');
+  const address = [order.shippingAddress.addressLine1, order.shippingAddress.addressLine2, order.shippingAddress.city, order.shippingAddress.state, order.shippingAddress.postalCode].filter(Boolean).join(', ');
+  return `You have received a new order.\n\nOrder: ${order.id}\nPayment: ${order.paymentMethod === 'cod' ? 'Cash on delivery' : `UPI (${order.paymentStatus})`}\nTotal: ${order.currency} ${(order.amount / 100).toFixed(2)}\n\nItems:\n${lines}\n\nCustomer: ${order.shippingAddress.name}\nEmail: ${customerEmail}\nPhone: ${order.shippingAddress.phone}\nShip to: ${address}\n\nManage it in the owner dashboard.`;
+}
 
 function fallbackOrderEmail(kind: OrderEmailKind, order: Order): string {
   const total = `${order.currency} ${(order.amount / 100).toFixed(2)}`;
@@ -81,6 +88,10 @@ function fallbackOrderEmail(kind: OrderEmailKind, order: Order): string {
 
 export async function sendOrderEmail(kind: OrderEmailKind | 'follow_up', order: Order, email: string): Promise<void> {
   if (!isEmailConfigured()) return;
+  if (kind === 'owner_new_order') {
+    await sendEmail(process.env.OWNER_EMAIL?.trim() || supportEmail(), orderEmailSubjects[kind](order.id), ownerOrderEmail(order, email));
+    return;
+  }
   if (kind === 'payment_confirmed' && (order.paymentStatus !== 'paid' || !order.paymentVerifiedAt)) return;
   const details = JSON.stringify({
     customerName: order.shippingAddress.name,

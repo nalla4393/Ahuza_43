@@ -404,6 +404,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   const customerEmail = (await getDatabase()).customers.find((entry) => entry.id === request.session.userId)?.email;
   if (paymentMethod === 'cod') {
     if (placed && customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
+    void enqueueOrderEmail(localOrderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
     response.status(201).json({ orderId: localOrderId, paymentMethod, status: 'confirmed', amount, currency: 'INR' });
     return;
   }
@@ -813,6 +814,26 @@ function validTrackingUrl(value: unknown): value is string {
     return parsed.protocol === 'https:' && !parsed.username && !parsed.password;
   } catch { return false; }
 }
+
+api.delete('/owner/orders/:id', requireOwner, ownerLimit, async (request, response) => {
+  const removed = await mutateDatabase((database) => {
+    const index = database.orders.findIndex((entry) => entry.id === request.params.id);
+    if (index < 0) return false;
+    const order = database.orders[index]!;
+    // Stock is still held for orders that were never shipped or cancelled; give it back.
+    if (['pending_payment', 'paid', 'confirmed'].includes(order.status)) {
+      for (const item of order.items) {
+        const product = database.products.find((entry) => entry.id === item.productId);
+        if (product) product.stock += item.quantity;
+      }
+    }
+    database.orders.splice(index, 1);
+    database.orderEmailNotifications = (database.orderEmailNotifications || []).filter((entry) => entry.orderId !== order.id);
+    return true;
+  });
+  if (!removed) { response.status(404).json({ error: 'Order not found' }); return; }
+  response.status(204).end();
+});
 
 api.patch('/owner/orders/:id/status', requireOwner, ownerLimit, async (request, response) => {
   const status = request.body?.status;

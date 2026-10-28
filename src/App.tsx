@@ -90,7 +90,12 @@ export default function App() {
   const [ordersError, setOrdersError] = useState('');
   const [reviewBusy, setReviewBusy] = useState('');
   const [reviewMessages, setReviewMessages] = useState<Record<string, string>>({});
-  const [paymentOrder, setPaymentOrder] = useState<PaymentOrder | null>(null);
+  const [paymentOrder, setPaymentOrder] = useState<PaymentOrder | null>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('ahuza.pendingPayment') || 'null') as PaymentOrder | null;
+      return saved?.paymentMethod === 'upi' && saved.orderId ? saved : null;
+    } catch { return null; }
+  });
   const [paymentStatus, setPaymentStatus] = useState('pending');
   const [paymentMessage, setPaymentMessage] = useState('');
   const [paymentConfiguration, setPaymentConfiguration] = useState<PaymentConfiguration | null>(null);
@@ -243,6 +248,18 @@ export default function App() {
       return [{ ...line, quantity: Math.min(line.quantity, product.stock, 10) }];
     }));
   }, [products]);
+
+  // The browser leaves for Ahuza Pay, so remember the pending order to resume checking when the customer returns.
+  useEffect(() => {
+    try {
+      if (paymentOrder?.paymentMethod === 'upi' && paymentStatus !== 'paid') localStorage.setItem('ahuza.pendingPayment', JSON.stringify(paymentOrder));
+      else localStorage.removeItem('ahuza.pendingPayment');
+    } catch { /* storage unavailable */ }
+  }, [paymentOrder, paymentStatus]);
+
+  useEffect(() => {
+    if (paymentOrder) setCartOpen(true);
+  }, []);
 
   useEffect(() => {
     if (!paymentOrder || !['pending', 'failed', 'cancelled'].includes(paymentStatus)) return;

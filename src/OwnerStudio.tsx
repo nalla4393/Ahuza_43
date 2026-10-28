@@ -1,7 +1,7 @@
 import AdStudio from './AdStudio';
 import SocialScheduler from './SocialScheduler';
 import MarketingAutomations from './MarketingAutomations';
-import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import { ArrowLeft, BarChart3, Box, Check, CreditCard, Headphones, Image, LoaderCircle, Mail, MessageCircle, Megaphone, PackageCheck, Plus, Send, Settings2, Sparkles, X } from 'lucide-react';
 import { removeSentenceFullStops } from './siteCopy';
 import ProductImageManager from './ProductImageManager';
@@ -194,6 +194,16 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
     finally { setLoading(false); }
   }
 
+  async function refreshOrders(ownerKey: string) {
+    try { setOrders((await ownerRequest<{ orders: Order[] }>(ownerKey, '/api/owner/orders')).orders); } catch { /* keep the current list */ }
+  }
+
+  useEffect(() => {
+    if (!ready || !key) return;
+    const timer = window.setInterval(() => void refreshOrders(key), 10000);
+    return () => window.clearInterval(timer);
+  }, [ready, key]);
+
   async function loadPayee(ownerKey: string) {
     try {
       const result = await ownerRequest<{ payee: { vpa: string; payeeName: string; source: string } }>(ownerKey, '/api/owner/payee');
@@ -322,6 +332,16 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
     try {
       const result = await ownerRequest<{ content: Content }>(key, '/api/owner/content', { method: 'PATCH', body: JSON.stringify(content) });
       setContent(result.content); onContentChange(result.content); notify('Storefront content published');
+    } catch (reason) { fail(reason); }
+    finally { setBusyAction(false); }
+  }
+
+  async function deleteOrder(order: Order) {
+    if (!window.confirm(`Permanently delete order ${order.id.slice(0, 8)} for ${order.shippingAddress.name}? This cannot be undone.`)) return;
+    setBusyAction(true);
+    try {
+      await ownerRequest<unknown>(key, `/api/owner/orders/${encodeURIComponent(order.id)}`, { method: 'DELETE' });
+      setOrders((current) => current.filter((entry) => entry.id !== order.id)); notify('Order deleted');
     } catch (reason) { fail(reason); }
     finally { setBusyAction(false); }
   }
@@ -493,12 +513,13 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
           </section>
         </section>}
         {tab === 'orders' && <section className="studio-section studio-orders">
+          <button className="studio-button" type="button" onClick={() => void refreshOrders(key)}>Refresh orders</button>
           {orders.length === 0 && <section className="studio-panel"><p className="studio-muted">There are no orders yet</p></section>}
           {orders.map((order) => <article className="studio-panel studio-order" key={order.id}>
             <div className="studio-order-heading"><div><span className="studio-eyebrow">{order.id}</span><h2>{order.shippingAddress.name}</h2><p>{new Date(order.createdAt).toLocaleString()} · {money(order.amount / 100)}</p><p>{order.paymentMethod === 'cod' ? 'Cash on delivery' : 'UPI'} · payment {order.paymentStatus || 'pending'}{order.paymentReference ? ` · reference ${order.paymentReference}` : ''}</p>{order.payerUpiId && <p>Customer UPI ID (to match the bank credit): {order.payerUpiId}</p>}</div><span className={`order-status status-${order.status}`}>{order.status.replaceAll('_', ' ')}</span></div>
             <div className="studio-order-details"><div><h3>Delivery</h3><p>{order.shippingAddress.addressLine1}{order.shippingAddress.addressLine2 ? `, ${order.shippingAddress.addressLine2}` : ''}<br />{order.shippingAddress.city}, {order.shippingAddress.state} {order.shippingAddress.postalCode}<br />{order.shippingAddress.phone}</p><label>Tracking number<input value={order.trackingNumber || ''} onChange={(event) => setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, trackingNumber: event.target.value } : entry))} placeholder="Carrier tracking reference" maxLength={100} /></label><label>Carrier tracking link<input type="url" value={order.trackingUrl || ''} onChange={(event) => setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, trackingUrl: event.target.value } : entry))} placeholder="https://carrier.example/track/…" maxLength={2000} onBlur={(event) => { if (event.target.value && !event.target.value.startsWith('https://')) fail(new Error('Tracking link must start with https://')); }} /></label></div><div><h3>Items</h3>{order.items.map((item, index) => <p key={`${item.sku}-${index}`}>{item.quantity} × {item.name}{item.size ? ` · Size ${item.size}` : ''} <small>({item.sku})</small></p>)}{order.review && <div className="owner-order-review"><strong>Customer rating: {'★'.repeat(order.review.rating)}{'☆'.repeat(5 - order.review.rating)}</strong>{order.review.comment && <p>{order.review.comment}</p>}<small>{new Date(order.review.createdAt).toLocaleString()}</small></div>}</div></div>
                         {order.returnRequest && <div className="studio-return"><div><strong>{order.returnRequest.action} requested · {order.returnRequest.status}</strong><p>{order.returnRequest.reason}</p></div>{order.returnRequest.status === 'requested' && <div className="studio-return-actions"><button onClick={() => void resolveReturn(order, 'approved')} disabled={busyAction}>Approve</button><button onClick={() => void resolveReturn(order, 'rejected')} disabled={busyAction}>Decline</button></div>}</div>}
-            <div className="studio-order-actions">{(order.status === 'paid' || (order.paymentMethod === 'cod' && order.status === 'confirmed')) && <button className="studio-primary" onClick={() => void updateOrder(order, 'shipped')} disabled={busyAction}>Mark shipped <PackageCheck size={15} /></button>}{order.status === 'shipped' && <button className="studio-primary" onClick={() => void updateOrder(order, 'out_for_delivery')} disabled={busyAction}>Mark out for delivery <PackageCheck size={15} /></button>}{order.status === 'out_for_delivery' && <button className="studio-primary" onClick={() => void updateOrder(order, 'delivered')} disabled={busyAction}>Mark delivered <Check size={15} /></button>}{order.paymentMethod === 'cod' && order.status === 'delivered' && order.paymentStatus === 'pending' && <button className="studio-secondary" onClick={() => void markCodPaid(order)} disabled={busyAction}>Mark cash collected / paid <Check size={15} /></button>}<small>Status updates email the customer Mark out for delivery when the carrier reports it; carrier status is not automatically connected</small><small>Returns and replacements are accepted within 7 days after delivery</small></div>
+            <div className="studio-order-actions"><button className="studio-secondary" onClick={() => void deleteOrder(order)} disabled={busyAction}>Delete order</button>{(order.status === 'paid' || (order.paymentMethod === 'cod' && order.status === 'confirmed')) && <button className="studio-primary" onClick={() => void updateOrder(order, 'shipped')} disabled={busyAction}>Mark shipped <PackageCheck size={15} /></button>}{order.status === 'shipped' && <button className="studio-primary" onClick={() => void updateOrder(order, 'out_for_delivery')} disabled={busyAction}>Mark out for delivery <PackageCheck size={15} /></button>}{order.status === 'out_for_delivery' && <button className="studio-primary" onClick={() => void updateOrder(order, 'delivered')} disabled={busyAction}>Mark delivered <Check size={15} /></button>}{order.paymentMethod === 'cod' && order.status === 'delivered' && order.paymentStatus === 'pending' && <button className="studio-secondary" onClick={() => void markCodPaid(order)} disabled={busyAction}>Mark cash collected / paid <Check size={15} /></button>}<small>Status updates email the customer Mark out for delivery when the carrier reports it; carrier status is not automatically connected</small><small>Returns and replacements are accepted within 7 days after delivery</small></div>
           </article>)}
         </section>}
         {tab === 'support' && <section className="studio-section studio-orders">{supportTickets.length === 0 ? <section className="studio-panel"><p className="studio-muted">No customer support tickets yet</p></section> : supportTickets.map((ticket) => <article className="studio-panel" key={ticket.id}><div className="studio-panel-heading"><div><span className="studio-eyebrow">{ticket.id}</span><h2>{ticket.category === 'delivery' ? 'Delivery issue' : ticket.category === 'complaint' ? 'Customer complaint' : 'Customer request'}</h2><span>{ticket.email} · {new Date(ticket.createdAt).toLocaleString()}</span></div><span className={`order-status status-${ticket.status}`}>{ticket.status}</span></div><p className="studio-ticket-message">{ticket.message}</p>{ticket.status === 'open' && <button className="studio-secondary" onClick={() => void resolveSupportTicket(ticket)} disabled={busyAction}>Mark resolved <Check size={15} /></button>}</article>)}</section>}
