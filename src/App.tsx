@@ -282,7 +282,7 @@ export default function App() {
         if (result.status === 'paid') {
           setCart([]);
           setOrdersRefresh((value) => value + 1);
-          setPaymentMessage('AHUZA has confirmed the bank settlement Your order is confirmed');
+          setPaymentMessage('Order confirmed and payment received. A confirmation email is on its way');
         } else if (result.status === 'expired' || result.status === 'cancelled') {
           setPaymentMessage(result.orderStatus === 'pending_payment'
             ? 'The UPI attempt was cancelled Inventory remains reserved briefly in case a bank credit is delayed Do not reuse the link; contact AHUZA if you sent money'
@@ -505,7 +505,7 @@ export default function App() {
       if (!response.ok || !result.status) throw new Error(result.error || 'Could not refresh order status');
       setPaymentStatus(result.status);
       setPaymentMessage(result.status === 'paid'
-        ? 'AHUZA has confirmed the bank settlement Your order is confirmed'
+        ? 'Order confirmed and payment received. A confirmation email is on its way'
         : result.status === 'cancelled' || result.status === 'expired'
           ? 'This order is closed Do not use its old UPI link'
           : 'Payment is still pending An authorized AHUZA owner must verify the settled credit in the bank account');

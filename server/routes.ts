@@ -448,12 +448,12 @@ api.post('/payments/ahuza-pay/notify', paymentLimit, async (request, response) =
   if (expected.length === 0 || supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) { response.status(401).json({ error: 'Authentication required' }); return; }
   const orderId = request.body?.external_order_id;
   if (typeof orderId !== 'string' || !orderId || orderId.length > 64) { response.status(400).json({ error: 'external_order_id is required' }); return; }
-  const confirmed = await syncAhuzaPayPayment(orderId).catch((error) => { console.error('Ahuza Pay notify sync failed:', error); return false; });
+  const confirmed = await syncAhuzaPayPayment(orderId, undefined, 'ahuza_pay_notify').catch((error) => { console.error('Ahuza Pay notify sync failed:', error); return false; });
   response.json({ confirmed });
 });
 
 api.get('/payments/orders/:id/status', requireCustomer, paymentLimit, async (request, response) => {
-  await syncAhuzaPayPayment(String(request.params.id), request.session.userId!).catch((error) => console.error('Ahuza Pay status sync failed:', error));
+  await syncAhuzaPayPayment(String(request.params.id), request.session.userId!, 'customer_check').catch((error) => console.error('Ahuza Pay status sync failed:', error));
   const order = (await getDatabase()).orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
   response.json({ orderId: order.id, status: order.paymentStatus || 'pending', orderStatus: order.status, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt, verification: order.paymentVerificationMethod || 'awaiting_ahuza_pay' });
@@ -494,7 +494,7 @@ api.get('/orders/:id', requireCustomer, async (request, response) => {
 
 api.get('/orders', requireCustomer, async (request, response) => {
   const pending = (await getDatabase()).orders.filter((order) => order.userId === request.session.userId && order.paymentMethod === 'upi' && order.paymentStatus !== 'paid' && ['pending_payment', 'cancelled'].includes(order.status));
-  await Promise.all(pending.map((order) => syncAhuzaPayPayment(order.id, request.session.userId!).catch((error) => console.error('Ahuza Pay order list sync failed:', error))));
+  await Promise.all(pending.map((order) => syncAhuzaPayPayment(order.id, request.session.userId!, 'customer_check').catch((error) => console.error('Ahuza Pay order list sync failed:', error))));
   const database = await getDatabase();
   const orders = database.orders
     .filter((order) => order.userId === request.session.userId)
@@ -890,6 +890,15 @@ api.patch('/owner/orders/:id/confirm-upi-payment', requireOwner, ownerLimit, asy
   const result = await confirmUpiPaymentByOwner(String(request.params.id));
   if (!result.ok) { response.status(409).json({ error: result.error }); return; }
   response.json({ order: (await getDatabase()).orders.find((entry) => entry.id === request.params.id) });
+});
+
+api.get('/owner/payment-agent', requireOwner, ownerLimit, async (_request, response) => {
+  const database = await getDatabase();
+  const log = (database.paymentAgentLog || []).slice(0, 50);
+  const heldIds = new Set(log.filter((entry) => entry.decision === 'held_out_of_stock').map((entry) => entry.orderId));
+  const held = database.orders.filter((order) => heldIds.has(order.id) && order.paymentStatus !== 'paid')
+    .map((order) => ({ id: order.id, amount: order.amount, items: order.items.map((item) => ({ name: item.name, quantity: item.quantity })) }));
+  response.json({ log, held });
 });
 
 api.patch('/owner/orders/:id/cod-payment', requireOwner, ownerLimit, async (request, response) => {

@@ -130,7 +130,7 @@ export const storefrontCopyFields = [
   { id: 'checkoutSignIn', label: 'Checkout: sign in button', group: 'Checkout', defaultValue: 'Sign in to checkout' },
   { id: 'checkoutPolicy', label: 'Checkout: payment and returns policy', group: 'Checkout', defaultValue: 'Pay via direct UPI intent or in cash when your COD order is delivered Returns and replacements within 7 days of delivery' },
   { id: 'payOrderConfirmed', label: 'Payment status: order confirmed', group: 'Payment messages', defaultValue: 'Order confirmed' },
-  { id: 'payConfirmed', label: 'Payment status: payment confirmed', group: 'Payment messages', defaultValue: 'Payment confirmed' },
+  { id: 'payConfirmed', label: 'Payment status: payment confirmed', group: 'Payment messages', defaultValue: 'Order confirmed and payment received' },
   { id: 'payFailed', label: 'Payment status: attempt failed', group: 'Payment messages', defaultValue: 'UPI attempt reported failed' },
   { id: 'payClosed', label: 'Payment status: request closed', group: 'Payment messages', defaultValue: 'Payment request closed' },
   { id: 'payUpiPending', label: 'Payment status: UPI pending', group: 'Payment messages', defaultValue: 'UPI payment pending' },

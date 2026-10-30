@@ -1,40 +1,12 @@
 import { getDatabase, mutateDatabase } from './database.js';
-import { getAhuzaPayConfiguration, getAhuzaPayStatus } from './ahuzaPay.js';
+import { getAhuzaPayConfiguration } from './ahuzaPay.js';
+import { recordAgentEvent, verifyPaymentAndConfirm, type PaymentAgentTrigger } from './paymentAgent.js';
 import { enqueueOrderEmail } from './integrations.js';
 
-// Marks a pending UPI order paid only when Ahuza Pay itself reports a bank-verified payment,
-// then queues the payment confirmation email (which carries the invoice PDF).
-export async function syncAhuzaPayPayment(orderId: string, userId?: string): Promise<boolean> {
-  const matches = (entry: { id: string; userId: string }) => entry.id === orderId && (userId === undefined || entry.userId === userId);
-  const order = (await getDatabase()).orders.find(matches);
-  if (!order || order.paymentMethod !== 'upi' || order.paymentStatus === 'paid' || !getAhuzaPayConfiguration().configured) return false;
-  if (!['pending_payment', 'cancelled'].includes(order.status)) return false;
-  const remote = await getAhuzaPayStatus(order.id);
-  if (!remote.confirmed) {
-    if (remote.closed) return false;
-    console.info(`Ahuza Pay order ${order.id} not confirmed yet: payment_status=${remote.paymentStatus || 'none'} order_confirmed=${remote.orderConfirmed}`);
-    return false;
-  }
-  const paid = await mutateDatabase((database) => {
-    const current = database.orders.find(matches);
-    if (!current || current.paymentStatus === 'paid' || !['pending_payment', 'cancelled'].includes(current.status)) return null;
-    if (current.status === 'cancelled') {
-      const available = current.items.every((item) => database.products.find((entry) => entry.id === item.productId)!.stock >= item.quantity);
-      if (!available) return null;
-      for (const item of current.items) database.products.find((entry) => entry.id === item.productId)!.stock -= item.quantity;
-    }
-    current.status = 'paid';
-    current.paymentStatus = 'paid';
-    current.paymentVerificationMethod = 'ahuza_pay';
-    if (remote.transactionReference) current.manualPaymentReference = remote.transactionReference;
-    current.paymentVerifiedAt = new Date().toISOString();
-    delete current.reservationExpiresAt;
-    return true;
-  });
-  if (!paid) return false;
-  await enqueueOrderEmail(orderId, 'payment_confirmed').catch((error) => console.error('Payment confirmation email queue failed:', error));
-  await enqueueOrderEmail(orderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
-  return true;
+// Delegates to the payment verification agent, which confirms a pending UPI order only when Ahuza Pay
+// reports a bank-verified payment and Owner Studio stock covers it.
+export async function syncAhuzaPayPayment(orderId: string, userId?: string, trigger: PaymentAgentTrigger = 'poll'): Promise<boolean> {
+  return verifyPaymentAndConfirm(orderId, trigger, userId);
 }
 
 // Background reconciliation so orders are confirmed without the customer keeping the page open.
@@ -70,6 +42,7 @@ export async function confirmUpiPaymentByOwner(orderId: string): Promise<{ ok: t
     current.paymentVerificationMethod = 'manual_bank_reconciliation';
     current.paymentVerifiedAt = new Date().toISOString();
     delete current.reservationExpiresAt;
+    recordAgentEvent(database, { orderId: current.id, trigger: 'owner_manual', decision: 'confirmed', detail: 'Owner confirmed the bank credit by hand' });
     return true as const;
   });
   if (result !== true) return { ok: false, error: result ?? 'Order not found' };
