@@ -61,7 +61,7 @@ export async function sendEmail(to: string, subject: string, text: string, attac
 const orderEmailSubjects: Record<OrderEmailKind, (id: string) => string> = {
   owner_new_order: (id) => `New AHUZA order received ${id}`,
   order_placed: (id) => `We've received your Ahuza order ${id}`,
-  payment_confirmed: (id) => `Payment received and order confirmed ${id}`,
+  payment_confirmed: (id) => `Thank you! Your Ahuza order ${id} is confirmed`,
   shipped: (id) => `Your Ahuza order ${id} is on its way`,
   out_for_delivery: (id) => `Your Ahuza order ${id} is out for delivery`,
   delivered: (id) => `Your Ahuza order ${id} has been delivered`,
@@ -72,6 +72,34 @@ function ownerOrderEmail(order: Order, customerEmail: string): string {
   const lines = order.items.map((item) => `- ${item.name}${item.size ? ` (${item.size})` : ''} x ${item.quantity}`).join('\n');
   const address = [order.shippingAddress.addressLine1, order.shippingAddress.addressLine2, order.shippingAddress.city, order.shippingAddress.state, order.shippingAddress.postalCode].filter(Boolean).join(', ');
   return `You have received a new order.\n\nOrder: ${order.id}\nPayment: ${order.paymentMethod === 'cod' ? 'Cash on delivery' : `UPI (${order.paymentStatus})`}\nTotal: ${order.currency} ${(order.amount / 100).toFixed(2)}\n\nItems:\n${lines}\n\nCustomer: ${order.shippingAddress.name}\nEmail: ${customerEmail}\nPhone: ${order.shippingAddress.phone}\nShip to: ${address}\n\nManage it in the owner dashboard.`;
+}
+
+function firstName(order: Order): string {
+  return order.shippingAddress.name.trim().split(/\s+/)[0] || 'there';
+}
+
+// Fixed, reviewed wording for the combined payment-and-order confirmation, so it never varies or mentions anything pending.
+function paymentConfirmedEmail(order: Order): string {
+  const items = order.items.map((item) => `- ${item.name}${item.size ? ` (${item.size})` : ''} × ${item.quantity}`).join('\n');
+  return `Hi ${firstName(order)},
+
+Thank you so much for choosing AHUZA. We're delighted to let you know that your payment of ${order.currency} ${(order.amount / 100).toFixed(2)} has reached us and your order ${order.id} is confirmed.
+
+Your order
+${items}
+
+What happens next
+Our team is now preparing your order with care. Once it's handed to our delivery partner, we'll send you a short note with tracking details, so you'll always know where it is.
+
+Your invoice and payment receipt are attached as a PDF. You can also find them anytime under Account > Order history at www.ahuzawear.com.
+
+If you have any questions, or would like to change something, just reply to this email. We're always happy to help.
+
+Thank you for being part of the AHUZA family. We hope you love what's on its way to you.
+
+Warm regards,
+Team AHUZA
+AHUZA Apparel · www.ahuzawear.com`;
 }
 
 function fallbackOrderEmail(kind: OrderEmailKind, order: Order): string {
@@ -105,14 +133,16 @@ export async function sendOrderEmail(kind: OrderEmailKind | 'follow_up', order: 
     trackingNumber: order.trackingNumber || 'Not provided',
     trackingUrl: order.trackingUrl || 'Not provided',
   });
+  if (kind === 'payment_confirmed') {
+    const invoice = { filename: `ahuza-invoice-${order.id}.pdf`, content: await buildInvoicePdf(order, email), contentType: 'application/pdf' as const };
+    await sendEmail(email, orderEmailSubjects[kind](order.id), paymentConfirmedEmail(order), [invoice]);
+    return;
+  }
   let body: string;
   try { body = await generateOrderEmailBody(kind, details); }
   catch (error) { console.error('AI email draft failed; using template:', error instanceof Error ? error.message : error); body = fallbackOrderEmail(kind, order); }
   body = appendOrderEmailDetails(kind, order, body);
-  const attachments = kind === 'payment_confirmed' && order.paymentStatus === 'paid' && order.paymentVerifiedAt
-    ? [{ filename: `ahuza-invoice-${order.id}.pdf`, content: await buildInvoicePdf(order, email), contentType: 'application/pdf' as const }]
-    : [];
-  await sendEmail(email, orderEmailSubjects[kind](order.id), body, attachments);
+  await sendEmail(email, orderEmailSubjects[kind](order.id), body);
 }
 
 export function appendOrderEmailDetails(kind: OrderEmailKind, order: Order, body: string): string {

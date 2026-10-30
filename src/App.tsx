@@ -1,5 +1,5 @@
 import { useEffect, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react';
-import { User, ArrowRight, ArrowUpRight, Heart, MessageCircle, Mail, MapPin, Menu, Minus, Phone, Plus, Search, ShoppingBag, SlidersHorizontal, X } from 'lucide-react';
+import { User, ArrowRight, ArrowUpRight, Heart, MessageCircle, Mail, MapPin, Menu, Minus, Phone, Plus, Search, ShoppingBag, SlidersHorizontal, X, CheckCircle2 } from 'lucide-react';
 import OwnerStudio from './OwnerStudio';
 import CustomerSupportChat from './CustomerSupportChat';
 import ProductRail from './ProductRail';
@@ -282,7 +282,7 @@ export default function App() {
         if (result.status === 'paid') {
           setCart([]);
           setOrdersRefresh((value) => value + 1);
-          setPaymentMessage('Order confirmed and payment received. A confirmation email is on its way');
+          setPaymentMessage('Your payment has been received and your order is confirmed. A confirmation email with your invoice is on its way');
         } else if (result.status === 'expired' || result.status === 'cancelled') {
           setPaymentMessage(result.orderStatus === 'pending_payment'
             ? 'The UPI attempt was cancelled Inventory remains reserved briefly in case a bank credit is delayed Do not reuse the link; contact AHUZA if you sent money'
@@ -505,7 +505,7 @@ export default function App() {
       if (!response.ok || !result.status) throw new Error(result.error || 'Could not refresh order status');
       setPaymentStatus(result.status);
       setPaymentMessage(result.status === 'paid'
-        ? 'Order confirmed and payment received. A confirmation email is on its way'
+        ? 'Your payment has been received and your order is confirmed. A confirmation email with your invoice is on its way'
         : result.status === 'cancelled' || result.status === 'expired'
           ? 'This order is closed Do not use its old UPI link'
           : 'Payment is still pending An authorized AHUZA owner must verify the settled credit in the bank account');
@@ -826,6 +826,7 @@ export default function App() {
         <aside className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="bag-title">
           <div className="drawer-heading"><div><p className="eyebrow dark-eyebrow">AHUZA Apparel</p><h2 id="bag-title">{storefrontText('bagTitle')} <span>({cartCount})</span></h2></div><button className="icon-button" aria-label="Close bag" onClick={() => setCartOpen(false)}><X size={21} /></button></div>
           {paymentOrder ? <section className="payment-panel" aria-live="polite">
+            {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && <CheckCircle2 className="payment-success-icon" size={46} aria-hidden="true" />}
             <p className="eyebrow dark-eyebrow">{paymentOrder.paymentMethod === 'cod' ? storefrontText('checkoutCod') : 'Ahuza Pay checkout'}</p>
             <h3>{paymentOrder.paymentMethod === 'cod' ? storefrontText('payOrderConfirmed') : paymentStatus === 'paid' ? storefrontText('payConfirmed') : paymentStatus === 'failed' ? storefrontText('payFailed') : paymentStatus === 'expired' || paymentStatus === 'cancelled' ? storefrontText('payClosed') : paymentStatus === 'pending' ? storefrontText('payUpiPending') : storefrontText('payPending')}</h3>
             <p>{paymentMessage || storefrontText('payWaiting')}</p>
@@ -833,7 +834,8 @@ export default function App() {
             {paymentOrder.paymentMethod === 'upi' && ['pending', 'failed', 'cancelled'].includes(paymentStatus) && <>{paymentStatus !== 'cancelled' && <a className="dark-button" href={paymentOrder.payUrl} onClick={() => setPaymentMessage(storefrontText('payAppOpened'))}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : storefrontText('checkoutPayUpi')}</a>}<p className="payment-pending"><span className="payment-spinner" /> {storefrontText('payChecking')}</p><button className="invoice-button" type="button" disabled={busy} onClick={() => void refreshPaymentStatus()}>{storefrontText('payRefresh')}</button>{paymentStatus === 'pending' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void reportPaymentFailure()}>{storefrontText('payReportFailure')}</button>}{paymentStatus !== 'cancelled' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void cancelPayment()}>{storefrontText('payCancel')}</button>}</>}
             {paymentStatus === 'failed' && <p>{storefrontText('payFailureNote')}</p>}
             {(paymentOrder.paymentMethod === 'cod' || paymentStatus === 'paid' || paymentStatus === 'cancelled' || paymentStatus === 'expired') && <button className="dark-button" type="button" onClick={() => { setPaymentOrder(null); setPaymentStatus('pending'); setCartOpen(false); }}>{paymentStatus === 'cancelled' ? storefrontText('payReturn') : 'Done'}</button>}
-            {paymentOrder.paymentMethod === 'upi' && <small>{storefrontText('payVerificationNote')}</small>}
+            {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && <p className="payment-next-steps">Thank you for choosing AHUZA. We are preparing your order with care and will email you tracking details as soon as it is on its way. Your invoice and receipt are in your inbox and under Account › Order history.</p>}
+            {paymentOrder.paymentMethod === 'upi' && paymentStatus !== 'paid' && <small>{storefrontText('payVerificationNote')}</small>}
           </section> : cartLines.length === 0 ? <div className="empty-bag"><ShoppingBag size={25} /><p>{storefrontText('bagEmpty')}</p><button className="dark-button" onClick={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>{storefrontText('bagExplore')}</button></div> : <>
             <div className="bag-lines">{cartLines.map(({ product, quantity, size }) => <div className="bag-line" key={`${product.id}-${size || 'standard'}`}><img src={mainImage(product)?.variants[0]?.url || product.imageUrl} alt="" /><div className="bag-line-copy"><h3>{product.name}</h3><p>{formatPrice(product.price)}{size ? ` · Size ${size}` : ''}</p><div className="quantity-control"><button type="button" aria-label={`Remove one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, -1)}><Minus size={13} /></button><span>{quantity}</span><button type="button" aria-label={`Add one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, 1)} disabled={cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0) >= Math.min(product.stock, 10)}><Plus size={13} /></button></div></div><span className="line-total">{formatPrice(product.price * quantity)}</span></div>)}</div>
             <div className="bag-footer"><div className="subtotal"><span>{storefrontText('bagSubtotal')}</span><strong>{formatPrice(cartTotal)}</strong></div><div className="subtotal"><span>{storefrontText('bagShipping')}</span><strong>{estimatedShipping ? formatPrice(estimatedShipping) : storefrontText('bagComplimentary')}</strong></div><div className="subtotal"><span>{storefrontText('bagTotal')}</span><strong>{formatPrice(cartTotal + estimatedShipping)}</strong></div><p>{storefrontText('bagShippingNote')}</p><form className="checkout-details" onSubmit={(event) => { event.preventDefault(); void checkout(); }}>
