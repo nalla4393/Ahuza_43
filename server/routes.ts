@@ -427,7 +427,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     response.status(502).json({ error: 'Could not start the payment Please try again shortly' });
     return;
   }
-  if (placed && customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
+  // UPI customers get a single combined confirmation email, sent once the bank credit is matched.
   response.status(201).json({ orderId: localOrderId, paymentMethod, paymentReference, payUrl, amount, currency: 'INR', expiresAt: expiresAt!.toISOString(), status: 'pending' });
 }
 

@@ -61,7 +61,7 @@ export async function sendEmail(to: string, subject: string, text: string, attac
 const orderEmailSubjects: Record<OrderEmailKind, (id: string) => string> = {
   owner_new_order: (id) => `New AHUZA order received ${id}`,
   order_placed: (id) => `We've received your Ahuza order ${id}`,
-  payment_confirmed: (id) => `Payment confirmed for your Ahuza order ${id}`,
+  payment_confirmed: (id) => `Payment received and order confirmed ${id}`,
   shipped: (id) => `Your Ahuza order ${id} is on its way`,
   out_for_delivery: (id) => `Your Ahuza order ${id} is out for delivery`,
   delivered: (id) => `Your Ahuza order ${id} has been delivered`,
@@ -79,7 +79,7 @@ function fallbackOrderEmail(kind: OrderEmailKind, order: Order): string {
   if (kind === 'order_placed') return order.paymentMethod === 'cod'
     ? `Hi ${order.shippingAddress.name}, your order ${order.id} (${total}) has been placed successfully and is confirmed. Order reference: ${order.id}. Track progress after signing into your AHUZA account and opening Order history.\n\nAHUZA Customer Care`
     : `Hi ${order.shippingAddress.name}, we've received your order ${order.id} (${total}). Reference: ${order.paymentReference || order.id}. Your payment is not confirmed yet; we will email you once it is verified. Track progress in your AHUZA account under Order history.\n\nAHUZA Customer Care`;
-  if (kind === 'payment_confirmed') return `Hi ${order.shippingAddress.name}, your payment for order ${order.id} (${total}) is verified and your order is confirmed.\n\nAHUZA Customer Care`;
+  if (kind === 'payment_confirmed') return `Hi ${order.shippingAddress.name}, your payment for order ${order.id} (${total}) has been received and your order is confirmed. We are now getting it ready and it will be picked up for delivery soon.\n\nAHUZA Customer Care`;
   if (kind === 'shipped') return `Hi ${order.shippingAddress.name}, your order ${order.id} has shipped.${order.trackingNumber ? ` Tracking number: ${order.trackingNumber}.` : ''}${order.trackingUrl ? ` Track your delivery: ${order.trackingUrl}` : ''}\n\nAHUZA Customer Care`;
   if (kind === 'out_for_delivery') return `Hi ${order.shippingAddress.name}, your order ${order.id} is out for delivery.${order.trackingNumber ? ` Tracking number: ${order.trackingNumber}.` : ''}${order.trackingUrl ? ` Track your delivery: ${order.trackingUrl}` : ''}\n\nAHUZA Customer Care`;
   if (kind === 'delivered') return `Hi ${order.shippingAddress.name}, your order ${order.id} has been marked delivered. We hope you love it. Please sign in to your AHUZA account and open Account > Order history to rate and review your purchase.\n\nAHUZA Customer Care`;
@@ -123,7 +123,7 @@ export function appendOrderEmailDetails(kind: OrderEmailKind, order: Order, body
   const details = kind === 'order_placed'
     ? `Order reference: ${order.id}\nPayment reference: ${order.paymentReference || order.id}\nTrack progress by signing in at www.ahuzawear.com and opening Account > Order history.`
     : kind === 'payment_confirmed' && order.paymentStatus === 'paid' && order.paymentVerifiedAt
-      ? `Order reference: ${order.id}\nYour invoice and payment receipt are attached as a PDF. You can also download them from Account > Order history after signing in at www.ahuzawear.com.`
+      ? `Order reference: ${order.id}\nYour invoice and payment receipt are attached as a PDF. We will email you again when your order ships. You can also download them from Account > Order history after signing in at www.ahuzawear.com.`
       : kind === 'payment_confirmed'
         ? `Order reference: ${order.id}`
     : `Order reference: ${order.id}${tracking ? `\n${tracking}` : ''}${kind === 'delivered' ? '\nPlease sign in at www.ahuzawear.com and open Account > Order history to rate and review your order.' : ''}`;
