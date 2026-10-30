@@ -822,6 +822,19 @@ export default function App() {
         <div className="footer-bottom"><a className="wordmark" href="#home">AHUZA</a><span>© AHUZA Apparel 2026</span><a className="footer-terms" href="/terms.html">Terms and Conditions</a><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
       </footer>
 
+      {paymentOrder?.paymentMethod === 'upi' && paymentStatus === 'paid' && <div className="payment-success-page" role="dialog" aria-modal="true" aria-labelledby="payment-success-title">
+        <div className="payment-success-card">
+          <div className="payment-success-brand"><span>AHUZA</span><small>APPAREL</small></div>
+          <div className="payment-success-body">
+            <CheckCircle2 className="payment-success-icon" size={64} aria-hidden="true" />
+            <h2 id="payment-success-title">Payment successful</h2>
+            <p className="payment-success-lead">Thank you for choosing AHUZA. Your order is being placed.</p>
+            <p><strong>{formatPrice(paymentOrder.amount / 100)}</strong>{paymentOrder.paymentReference ? ` · Reference ${paymentOrder.paymentReference}` : ` · Order ${paymentOrder.orderId.slice(0, 8)}`}</p>
+            <p>We will send you a confirmation email about your payment, with your invoice attached. Please check your inbox, and your spam or promotions folder as well.</p>
+            <button className="dark-button" type="button" onClick={() => { setPaymentOrder(null); setPaymentStatus('pending'); setCartOpen(false); }}>Continue shopping</button>
+          </div>
+        </div>
+      </div>}
       {cartOpen && <div className="overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setCartOpen(false); }}>
         <aside className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="bag-title">
           <div className="drawer-heading"><div><p className="eyebrow dark-eyebrow">AHUZA Apparel</p><h2 id="bag-title">{storefrontText('bagTitle')} <span>({cartCount})</span></h2></div><button className="icon-button" aria-label="Close bag" onClick={() => setCartOpen(false)}><X size={21} /></button></div>

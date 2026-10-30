@@ -109,3 +109,15 @@
 .payment-panel .dark-button{background:#c43d58;border-color:#c43d58}
 .payment-panel .dark-button:hover{background:#a92f49;border-color:#a92f49}
 .payment-next-steps{font-size:14px;line-height:1.6;max-width:30ch}
+
+.payment-success-page{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:16px;background:#f6f3ec;overflow:auto}
+.payment-success-card{width:min(100%,520px);background:#fff;box-shadow:0 18px 50px rgba(34,40,34,.12)}
+.payment-success-brand{display:grid;justify-items:center;gap:4px;padding:26px 24px;background:#c43d58;color:#fff}
+.payment-success-brand span{font-size:30px;font-weight:700;letter-spacing:.14em}
+.payment-success-brand small{font-size:11px;letter-spacing:.22em;color:#f6dfe4}
+.payment-success-body{display:grid;justify-items:center;gap:14px;padding:34px 28px 38px;text-align:center;color:#222822}
+.payment-success-body h2,.payment-success-body p{margin:0}
+.payment-success-body h2{font-size:28px;color:#c43d58}
+.payment-success-lead{font-size:17px;font-weight:700}
+.payment-success-body p{line-height:1.6;max-width:38ch}
+.payment-success-body .dark-button{margin-top:8px;background:#c43d58;border-color:#c43d58}
