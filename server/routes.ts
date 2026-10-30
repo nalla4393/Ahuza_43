@@ -439,6 +439,19 @@ api.post('/payments/orders', requireCustomer, paymentLimit, async (request, resp
   await createPaymentOrder(request, response);
 });
 
+// Ahuza Pay calls this the moment a bank credit is matched. It only triggers a re-check: the order is
+// marked paid solely when Ahuza Pay itself reports PAID, so a forged call cannot confirm anything.
+api.post('/payments/ahuza-pay/notify', paymentLimit, async (request, response) => {
+  const expected = Buffer.from(getAhuzaPayConfiguration().apiKey);
+  const header = request.get('authorization') || '';
+  const supplied = Buffer.from(header.startsWith('Bearer ') ? header.slice(7).trim() : '');
+  if (expected.length === 0 || supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) { response.status(401).json({ error: 'Authentication required' }); return; }
+  const orderId = request.body?.external_order_id;
+  if (typeof orderId !== 'string' || !orderId || orderId.length > 64) { response.status(400).json({ error: 'external_order_id is required' }); return; }
+  const confirmed = await syncAhuzaPayPayment(orderId).catch((error) => { console.error('Ahuza Pay notify sync failed:', error); return false; });
+  response.json({ confirmed });
+});
+
 api.get('/payments/orders/:id/status', requireCustomer, paymentLimit, async (request, response) => {
   await syncAhuzaPayPayment(String(request.params.id), request.session.userId!).catch((error) => console.error('Ahuza Pay status sync failed:', error));
   const order = (await getDatabase()).orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
