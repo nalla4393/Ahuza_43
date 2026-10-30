@@ -287,23 +287,38 @@ export default function App() {
           setPaymentMessage(result.orderStatus === 'pending_payment'
             ? 'The UPI attempt was cancelled Inventory remains reserved briefly in case a bank credit is delayed Do not reuse the link; contact AHUZA if you sent money'
             : 'This order is closed or expired Do not use its old UPI payment link Contact AHUZA if you already sent a payment');
-          if (result.orderStatus === 'pending_payment') timer = window.setTimeout(() => void poll(), 15000);
+          if (result.orderStatus === 'pending_payment') timer = window.setTimeout(() => void poll(), 4000);
         } else if (result.status === 'failed') {
           setPaymentMessage('The UPI attempt was reported as failed; this is not bank verification If money was debited, contact AHUZA with the bank reference before retrying');
-          timer = window.setTimeout(() => void poll(), 15000);
+          timer = window.setTimeout(() => void poll(), 4000);
         } else {
           setPaymentMessage('Payment is pending UPI app success screens are not verified; AHUZA will confirm only after the settled amount appears in its bank account');
-          timer = window.setTimeout(() => void poll(), 15000);
+          timer = window.setTimeout(() => void poll(), 4000);
         }
       } catch (error) {
         if (!stopped) {
           setPaymentMessage(error instanceof Error ? error.message : 'Could not refresh the order status');
-          timer = window.setTimeout(() => void poll(), 15000);
+          timer = window.setTimeout(() => void poll(), 4000);
         }
       }
     };
     void poll();
-    return () => { stopped = true; window.clearTimeout(timer); };
+    // Browsers throttle timers while the customer is in their UPI app, so re-check the moment they return.
+    const recheck = () => {
+      if (document.visibilityState === 'hidden' || stopped) return;
+      window.clearTimeout(timer);
+      void poll();
+    };
+    document.addEventListener('visibilitychange', recheck);
+    window.addEventListener('focus', recheck);
+    window.addEventListener('pageshow', recheck);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', recheck);
+      window.removeEventListener('focus', recheck);
+      window.removeEventListener('pageshow', recheck);
+    };
   }, [paymentOrder, paymentStatus]);
 
   useEffect(() => {
