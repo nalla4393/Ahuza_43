@@ -31,14 +31,14 @@ export function isEmailConfigured(): boolean {
 export const supportEmail = (): string => process.env.SUPPORT_EMAIL?.trim() || 'info@ahuzawear.com';
 
 // Order and marketing mail is sent from EMAIL_FROM (orders@); replies are routed to the support inbox.
-export async function sendEmail(to: string, subject: string, text: string, attachments: EmailAttachment[] = []): Promise<void> {
+export async function sendEmail(to: string, subject: string, text: string, attachments: EmailAttachment[] = [], html?: string): Promise<void> {
   const replyTo = supportEmail();
   const from = process.env.EMAIL_FROM || (process.env.SMTP_USER ? `Ahuza Apparel <${process.env.SMTP_USER}>` : 'Ahuza Apparel <onboarding@resend.dev>');
   if (process.env.SMTP_HOST?.trim() && process.env.SMTP_USER?.trim() && process.env.SMTP_PASS) {
     const port = Number(process.env.SMTP_PORT) || 465;
     const transport = nodemailer.createTransport({ host: process.env.SMTP_HOST.trim(), port, secure: port === 465, auth: { user: process.env.SMTP_USER.trim(), pass: process.env.SMTP_PASS }, connectionTimeout: 10000, socketTimeout: 15000 });
     await transport.sendMail({
-      from, to, replyTo, subject, text,
+      from, to, replyTo, subject, text, ...(html ? { html } : {}),
       attachments: attachments.map(({ filename, content, contentType }) => ({ filename, content, contentType })),
     });
     return;
@@ -49,7 +49,7 @@ export async function sendEmail(to: string, subject: string, text: string, attac
     return;
   }
   await postJson('https://api.resend.com/emails', {
-    from, to: [to], reply_to: replyTo, subject, text,
+    from, to: [to], reply_to: replyTo, subject, text, ...(html ? { html } : {}),
     ...(attachments.length ? {
       attachments: attachments.map(({ filename, content, contentType }) => ({
         filename, content: content.toString('base64'), content_type: contentType,
@@ -102,6 +102,34 @@ Team AHUZA
 AHUZA Apparel · www.ahuzawear.com`;
 }
 
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
+
+// Branded HTML version of the confirmation: AHUZA wordmark and rose (#c43d58) on the storefront's cream and ink.
+function paymentConfirmedHtml(order: Order): string {
+  const rows = order.items.map((item) => `<tr><td style="padding:8px 0;border-bottom:1px solid #e6e2d8;color:#222822;font-size:15px">${escapeHtml(item.name)}${item.size ? ` <span style="color:#777b71">(${escapeHtml(item.size)})</span>` : ''}</td><td style="padding:8px 0;border-bottom:1px solid #e6e2d8;color:#222822;font-size:15px;text-align:right">× ${item.quantity}</td></tr>`).join('');
+  const total = `${order.currency} ${(order.amount / 100).toFixed(2)}`;
+  return `<!doctype html><html><body style="margin:0;padding:0;background:#f6f3ec;font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f3ec"><tr><td align="center" style="padding:28px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff">
+<tr><td style="background:#c43d58;padding:26px 32px;text-align:center"><span style="font-size:30px;font-weight:700;letter-spacing:.14em;color:#ffffff">AHUZA</span><br><span style="font-size:11px;letter-spacing:.22em;color:#f6dfe4">APPAREL</span></td></tr>
+<tr><td style="padding:32px 32px 8px;color:#222822;font-size:16px;line-height:1.65">
+<p style="margin:0 0 6px;font-size:13px;letter-spacing:.14em;color:#c43d58;font-weight:700">ORDER CONFIRMED</p>
+<h1 style="margin:0 0 18px;font-size:24px;line-height:1.3;color:#222822">Thank you, ${escapeHtml(firstName(order))}</h1>
+<p style="margin:0 0 16px">Thank you so much for choosing AHUZA. We're delighted to let you know that your payment of <strong>${total}</strong> has reached us and your order <strong style="color:#c43d58">${escapeHtml(order.id)}</strong> is confirmed.</p>
+<p style="margin:22px 0 6px;font-size:13px;letter-spacing:.12em;color:#777b71;font-weight:700">YOUR ORDER</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:22px">${rows}</table>
+<p style="margin:0 0 6px;font-size:13px;letter-spacing:.12em;color:#777b71;font-weight:700">WHAT HAPPENS NEXT</p>
+<p style="margin:0 0 16px">Our team is now preparing your order with care. Once it's handed to our delivery partner, we'll send you a short note with tracking details, so you'll always know where it is.</p>
+<p style="margin:0 0 16px">Your invoice and payment receipt are attached as a PDF. You can also find them anytime under Account &rsaquo; Order history at <a href="https://www.ahuzawear.com" style="color:#c43d58">www.ahuzawear.com</a>.</p>
+<p style="margin:0 0 16px">If you have any questions, or would like to change something, just reply to this email. We're always happy to help.</p>
+<p style="margin:0 0 4px">Thank you for being part of the AHUZA family. We hope you love what's on its way to you.</p>
+<p style="margin:22px 0 0">Warm regards,<br><strong>Team AHUZA</strong></p>
+</td></tr>
+<tr><td style="padding:24px 32px 30px"><a href="https://www.ahuzawear.com" style="display:inline-block;background:#c43d58;color:#ffffff;text-decoration:none;padding:12px 24px;font-size:14px;font-weight:700;letter-spacing:.06em">VISIT AHUZA</a></td></tr>
+<tr><td style="background:#222822;padding:18px 32px;text-align:center;color:#d9d8cf;font-size:12px">AHUZA Apparel · <a href="https://www.ahuzawear.com" style="color:#d9d8cf">www.ahuzawear.com</a></td></tr>
+</table></td></tr></table></body></html>`;
+}
+
 function fallbackOrderEmail(kind: OrderEmailKind, order: Order): string {
   const total = `${order.currency} ${(order.amount / 100).toFixed(2)}`;
   if (kind === 'order_placed') return order.paymentMethod === 'cod'
@@ -135,7 +163,7 @@ export async function sendOrderEmail(kind: OrderEmailKind | 'follow_up', order: 
   });
   if (kind === 'payment_confirmed') {
     const invoice = { filename: `ahuza-invoice-${order.id}.pdf`, content: await buildInvoicePdf(order, email), contentType: 'application/pdf' as const };
-    await sendEmail(email, orderEmailSubjects[kind](order.id), paymentConfirmedEmail(order), [invoice]);
+    await sendEmail(email, orderEmailSubjects[kind](order.id), paymentConfirmedEmail(order), [invoice], paymentConfirmedHtml(order));
     return;
   }
   let body: string;

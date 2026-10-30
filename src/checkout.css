@@ -105,5 +105,7 @@
 .customer-upi .upi-message{margin:0;font-size:12px}
 .customer-order-actions>small{font-size:9px;line-height:1.4;color:var(--muted);overflow-wrap:anywhere}
 
-.payment-success-icon{color:#2e7d4f}
+.payment-success-icon{color:#c43d58}
+.payment-panel .dark-button{background:#c43d58;border-color:#c43d58}
+.payment-panel .dark-button:hover{background:#a92f49;border-color:#a92f49}
 .payment-next-steps{font-size:14px;line-height:1.6;max-width:30ch}
