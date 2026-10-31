@@ -152,6 +152,8 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
   const [sitePublished, setSitePublished] = useState(true);
   const [payee, setPayee] = useState<{ vpa: string; payeeName: string; source: string } | null>(null);
   const [payeeError, setPayeeError] = useState('');
+  const [payText, setPayText] = useState('');
+  const [payTextSaved, setPayTextSaved] = useState('');
   const [payeeVpaInput, setPayeeVpaInput] = useState('');
   const [payeeNameInput, setPayeeNameInput] = useState('');
   const [imageSettings, setImageSettings] = useState<ImageSettings | null>(null);
@@ -190,6 +192,7 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
       setIntegrations(integrationResult.integrations);
       setReady(true);
       void loadPayee(ownerKey);
+      void loadPayText(ownerKey);
       setSocialProductId(inventoryResult.products.find((product) => product.active)?.id || '');
     } catch (reason) { fail(reason); }
     finally { setLoading(false); }
@@ -213,6 +216,23 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
       setPayeeNameInput(result.payee.payeeName);
       setPayeeError('');
     } catch (reason) { setPayee(null); setPayeeError(reason instanceof Error ? reason.message : 'Could not load the UPI payee'); }
+  }
+
+  async function loadPayText(ownerKey: string) {
+    try {
+      const result = await ownerRequest<{ text: string }>(ownerKey, '/api/owner/pay-text');
+      setPayText(result.text); setPayTextSaved(result.text);
+    } catch { /* payee panel already reports Ahuza Pay connection errors */ }
+  }
+
+  async function savePayText() {
+    setBusyAction(true);
+    try {
+      const result = await ownerRequest<{ text: string }>(key, '/api/owner/pay-text', { method: 'PUT', body: JSON.stringify({ text: payText }) });
+      setPayText(result.text); setPayTextSaved(result.text);
+      notify('Payment page text saved');
+    } catch (reason) { fail(reason); }
+    finally { setBusyAction(false); }
   }
 
   async function savePayee() {
@@ -509,6 +529,13 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
           <button className="studio-primary studio-publish" disabled={busyAction}>{busyAction ? 'Publishing…' : 'Publish storefront text'} <Check size={16} /></button>
         </form>}
         {tab === 'payments' && <section className="studio-section">
+          <section className="studio-panel studio-payee">
+            <div className="studio-panel-heading"><div><h2>Payment page text</h2><span>Shown to customers on the payment page after Continue to pay Leave empty to show nothing</span></div></div>
+            <label>Text<textarea value={payText} onChange={(event) => setPayText(event.target.value)} maxLength={600} rows={4} placeholder="For example: Scan the QR with any UPI app and pay the exact amount" /></label>
+            <div className="studio-payee-actions">
+              <button className="studio-primary" type="button" disabled={busyAction || payText.trim() === payTextSaved} onClick={() => void savePayText()}>Save text</button>
+            </div>
+          </section>
           <section className="studio-panel studio-payee">
             <div className="studio-panel-heading"><div><h2>Receiving UPI ID</h2><span>Customers pay this UPI ID through Ahuza Pay Changes apply to new payments immediately</span></div></div>
             {payeeError && <p className="studio-payment-caution" role="alert">{payeeError}</p>}

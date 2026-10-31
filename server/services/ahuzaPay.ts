@@ -85,3 +85,11 @@ export async function updateAhuzaPayPayee(input: { vpa?: string; payeeName?: str
 export async function resetAhuzaPayPayee(): Promise<AhuzaPayPayee> {
   return toPayee(await callAhuzaPay('/api/merchant/payee', { method: 'DELETE' }));
 }
+
+export async function getAhuzaPayPageText(): Promise<string> {
+  return String((await callAhuzaPay('/api/merchant/pay-text', { method: 'GET' })).text ?? '');
+}
+
+export async function updateAhuzaPayPageText(text: string): Promise<string> {
+  return String((await callAhuzaPay('/api/merchant/pay-text', { method: 'PUT', body: { text } })).text ?? '');
+}

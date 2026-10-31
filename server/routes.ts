@@ -12,7 +12,7 @@ import { publishSocialPost, runSchedule, socialStatus, validateSchedule } from '
 import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
 import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
-import { buildAhuzaPayOrder, createAhuzaPayOrder, getAhuzaPayConfiguration, getAhuzaPayPayee, resetAhuzaPayPayee, updateAhuzaPayPayee } from './services/ahuzaPay.js';
+import { buildAhuzaPayOrder, createAhuzaPayOrder, getAhuzaPayConfiguration, getAhuzaPayPageText, getAhuzaPayPayee, resetAhuzaPayPayee, updateAhuzaPayPageText, updateAhuzaPayPayee } from './services/ahuzaPay.js';
 import { customerDataConfigured, decryptCustomerValue, encryptCustomerValue, isValidUpiId } from './services/customerData.js';
 import { confirmUpiPaymentByOwner, syncAhuzaPayPayment } from './services/paymentSync.js';
 import { buildInvoicePdf } from './services/invoice.js';
@@ -806,6 +806,16 @@ api.put('/owner/payee', requireOwner, ownerLimit, async (request, response) => {
 
 api.delete('/owner/payee', requireOwner, ownerLimit, async (_request, response) => {
   try { response.json({ payee: await resetAhuzaPayPayee() }); } catch (error) { payeeError(response, error); }
+});
+
+api.get('/owner/pay-text', requireOwner, ownerLimit, async (_request, response) => {
+  try { response.json({ text: await getAhuzaPayPageText() }); } catch (error) { payeeError(response, error); }
+});
+
+api.put('/owner/pay-text', requireOwner, ownerLimit, async (request, response) => {
+  const text = request.body?.text;
+  if (typeof text !== 'string' || text.trim().length > 600) { response.status(400).json({ error: 'Text must be 600 characters or fewer' }); return; }
+  try { response.json({ text: await updateAhuzaPayPageText(text.trim()) }); } catch (error) { payeeError(response, error); }
 });
 
 api.get('/owner/integrations', requireOwner, ownerLimit, async (_request, response) => {
