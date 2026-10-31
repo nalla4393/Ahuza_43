@@ -116,9 +116,9 @@ ${open ? `${qr ? `<div class="qr" role="img" aria-label="UPI payment QR code for
 </div></div><script>
 const id=${JSON.stringify(order.external_order_id)};let t;
 async function poll(){try{const r=await fetch('/pay/'+encodeURIComponent(id)+'/status');const d=await r.json();
-if(d.payment_status==='PAID'){document.getElementById('st').textContent='Payment successful! Check your email for your order confirmation.';setTimeout(()=>location.href=${JSON.stringify(process.env.STORE_RETURN_URL || '/')},1500);return}
+if(d.payment_status==='PAID'){document.getElementById('st').textContent='Payment successful! Check your email for your order confirmation.';setTimeout(()=>location.href=${JSON.stringify(process.env.STORE_RETURN_URL || '/')},2500);return}
 if(d.payment_status!=='PENDING'){location.reload();return}}catch{}t=setTimeout(poll,2000)}
-${open ? 'poll();' : paid && process.env.STORE_RETURN_URL ? `setTimeout(()=>location.href=${JSON.stringify(process.env.STORE_RETURN_URL)},1500);` : ''}
+${open ? "poll();const again=()=>{if(document.visibilityState!=='hidden'){clearTimeout(t);poll()}};document.addEventListener('visibilitychange',again);addEventListener('focus',again);addEventListener('pageshow',again);" : paid && process.env.STORE_RETURN_URL ? `setTimeout(()=>location.href=${JSON.stringify(process.env.STORE_RETURN_URL)},1500);` : ''}
 </script></body></html>`;
 }
 
