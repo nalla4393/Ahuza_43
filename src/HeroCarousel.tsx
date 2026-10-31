@@ -120,7 +120,9 @@ export default function HeroCarousel({ slides }: { slides: BannerSlide[] }) {
             <div className="banner-shade" />
             <div className="banner-copy">
               <p className="banner-eyebrow">{slide.eyebrow}</p>
-              <h1 className="banner-title">{slide.title}</h1>
+              {slideIndex === 0
+                ? <h1 className="banner-title">{slide.title}</h1>
+                : <h2 className="banner-title">{slide.title}</h2>}
               <p className="banner-description">{slide.description}</p>
               <Countdown endsAt={slide.endsAt} />
               <span className="banner-cta">{slide.cta} <ArrowRight size={16} /></span>

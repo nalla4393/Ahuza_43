@@ -287,18 +287,18 @@ export default function App() {
           setPaymentMessage(result.orderStatus === 'pending_payment'
             ? 'The UPI attempt was cancelled Inventory remains reserved briefly in case a bank credit is delayed Do not reuse the link; contact AHUZA if you sent money'
             : 'This order is closed or expired Do not use its old UPI payment link Contact AHUZA if you already sent a payment');
-          if (result.orderStatus === 'pending_payment') timer = window.setTimeout(() => void poll(), 4000);
+          if (result.orderStatus === 'pending_payment') timer = window.setTimeout(() => void poll(), 2500);
         } else if (result.status === 'failed') {
           setPaymentMessage('The UPI attempt was reported as failed; this is not bank verification If money was debited, contact AHUZA with the bank reference before retrying');
-          timer = window.setTimeout(() => void poll(), 4000);
+          timer = window.setTimeout(() => void poll(), 2500);
         } else {
           setPaymentMessage('Payment is pending UPI app success screens are not verified; AHUZA will confirm only after the settled amount appears in its bank account');
-          timer = window.setTimeout(() => void poll(), 4000);
+          timer = window.setTimeout(() => void poll(), 2500);
         }
       } catch (error) {
         if (!stopped) {
           setPaymentMessage(error instanceof Error ? error.message : 'Could not refresh the order status');
-          timer = window.setTimeout(() => void poll(), 4000);
+          timer = window.setTimeout(() => void poll(), 2500);
         }
       }
     };
@@ -845,7 +845,7 @@ export default function App() {
             <h2 id="payment-success-title">Payment successful</h2>
             <p className="payment-success-lead">Thank you for choosing AHUZA. Your order is being placed.</p>
             <p><strong>{formatPrice(paymentOrder.amount / 100)}</strong>{paymentOrder.paymentReference ? ` · Reference ${paymentOrder.paymentReference}` : ` · Order ${paymentOrder.orderId.slice(0, 8)}`}</p>
-            <p>We will send you a confirmation email about your payment, with your invoice attached. Please check your inbox, and your spam or promotions folder as well.</p>
+            <p>Please check your email for payment confirmation and order approval. Your invoice will be attached. If you don’t see the email, check your spam or promotions folder.</p>
             <button className="dark-button" type="button" onClick={() => { setPaymentOrder(null); setPaymentStatus('pending'); setCartOpen(false); }}>Continue shopping</button>
           </div>
         </div>
@@ -862,7 +862,7 @@ export default function App() {
             {paymentOrder.paymentMethod === 'upi' && ['pending', 'failed', 'cancelled'].includes(paymentStatus) && <>{paymentStatus !== 'cancelled' && <a className="dark-button" href={paymentOrder.payUrl} onClick={() => setPaymentMessage(storefrontText('payAppOpened'))}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : storefrontText('checkoutPayUpi')}</a>}<p className="payment-pending"><span className="payment-spinner" /> {storefrontText('payChecking')}</p><button className="invoice-button" type="button" disabled={busy} onClick={() => void refreshPaymentStatus()}>{storefrontText('payRefresh')}</button>{paymentStatus === 'pending' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void reportPaymentFailure()}>{storefrontText('payReportFailure')}</button>}{paymentStatus !== 'cancelled' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void cancelPayment()}>{storefrontText('payCancel')}</button>}</>}
             {paymentStatus === 'failed' && <p>{storefrontText('payFailureNote')}</p>}
             {(paymentOrder.paymentMethod === 'cod' || paymentStatus === 'paid' || paymentStatus === 'cancelled' || paymentStatus === 'expired') && <button className="dark-button" type="button" onClick={() => { setPaymentOrder(null); setPaymentStatus('pending'); setCartOpen(false); }}>{paymentStatus === 'cancelled' ? storefrontText('payReturn') : 'Done'}</button>}
-            {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && <p className="payment-next-steps">Thank you for choosing AHUZA. We are preparing your order with care and will email you tracking details as soon as it is on its way. Your invoice and receipt are in your inbox and under Account › Order history.</p>}
+            {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && <p className="payment-next-steps">Thank you for choosing AHUZA. Please check your email for payment confirmation and order approval. Your invoice and receipt are also available under Account › Order history. We’ll email you tracking details as soon as your order is on its way.</p>}
             {paymentOrder.paymentMethod === 'upi' && paymentStatus !== 'paid' && <small>{storefrontText('payVerificationNote')}</small>}
           </section> : cartLines.length === 0 ? <div className="empty-bag"><ShoppingBag size={25} /><p>{storefrontText('bagEmpty')}</p><button className="dark-button" onClick={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>{storefrontText('bagExplore')}</button></div> : <>
             <div className="bag-lines">{cartLines.map(({ product, quantity, size }) => <div className="bag-line" key={`${product.id}-${size || 'standard'}`}><img src={mainImage(product)?.variants[0]?.url || product.imageUrl} alt="" /><div className="bag-line-copy"><h3>{product.name}</h3><p>{formatPrice(product.price)}{size ? ` · Size ${size}` : ''}</p><div className="quantity-control"><button type="button" aria-label={`Remove one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, -1)}><Minus size={13} /></button><span>{quantity}</span><button type="button" aria-label={`Add one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, 1)} disabled={cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0) >= Math.min(product.stock, 10)}><Plus size={13} /></button></div></div><span className="line-total">{formatPrice(product.price * quantity)}</span></div>)}</div>

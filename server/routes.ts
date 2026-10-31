@@ -44,6 +44,16 @@ function requireOwner(request: Request, response: Response, next: NextFunction):
   next();
 }
 
+function requireMacroDroid(request: Request, response: Response, next: NextFunction): void {
+  const expected = process.env.MACRODROID_WEBHOOK_SECRET || '';
+  if (!expected) { requireOwner(request, response, next); return; }
+  if (expected.length < 32) { response.status(503).json({ error: 'MacroDroid webhook secret must be at least 32 characters' }); return; }
+  const supplied = request.get('x-macrodroid-secret') || '';
+  const digest = (value: string) => createHash('sha256').update(value).digest();
+  if (!timingSafeEqual(digest(supplied), digest(expected))) { response.status(401).json({ error: 'MacroDroid authentication required' }); return; }
+  next();
+}
+
 function asyncError(response: Response, error: unknown): void {
   if (error instanceof Error && error.message === 'AI_NOT_CONFIGURED') { response.status(503).json({ error: 'AI integration is not configured Set OPENAI_API_KEY (or GEMINI_API_KEY) in the server environment' }); return; }
   console.error(error);
@@ -1258,18 +1268,19 @@ export async function expireReservationsOnStartup(): Promise<void> {
   await expirePendingOrders();
 }
 
-// MacroDroid Webhook Proxy
-api.post('/macrodroid-proxy', requireOwner, ownerLimit, async (request, response) => {
+// MacroDroid forwards bank-credit notifications; Ahuza Pay verifies and matches them before confirmation.
+api.post('/macrodroid-proxy', requireMacroDroid, paymentLimit, async (request, response) => {
   try {
-    const { amount_paise, reference } = request.body ?? {};
+    const { amount_paise, reference, note } = request.body ?? {};
 
     if (!Number.isSafeInteger(amount_paise) || amount_paise <= 0
-      || typeof reference !== 'string' || reference.trim().length === 0 || reference.length > 64) {
-      return response.status(400).json({ error: 'A positive amount_paise and reference are required' });
+      || typeof reference !== 'string' || reference.trim().length === 0 || reference.length > 64
+      || (note !== undefined && (typeof note !== 'string' || note.length > 256))) {
+      return response.status(400).json({ error: 'A positive amount_paise and reference are required; note must be up to 256 characters' });
     }
 
     const secret = process.env.BANK_WEBHOOK_SECRET;
-    const baseUrl = process.env.AHUZA_PAY_BASE_URL;
+    const baseUrl = process.env.AHUZA_PAY_URL || process.env.AHUZA_PAY_BASE_URL;
     if (!secret || !baseUrl) {
       return response.status(503).json({ error: 'Ahuza Pay webhook is not configured' });
     }
@@ -1278,7 +1289,7 @@ api.post('/macrodroid-proxy', requireOwner, ownerLimit, async (request, response
       return response.status(503).json({ error: 'Ahuza Pay webhook URL must use HTTP or HTTPS' });
     }
 
-    const rawBody = JSON.stringify({ amount_paise, reference: reference.trim() });
+    const rawBody = JSON.stringify({ amount_paise, reference: reference.trim(), ...(note === undefined ? {} : { note }) });
     const timestamp = String(Date.now());
 
     const signature = createHmac('sha256', secret)
