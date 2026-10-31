@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import express, { Router, type Request, type Response, type NextFunction } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { hashPassword, verifyPassword } from './services/auth.js';
@@ -1257,3 +1257,49 @@ api.post('/owner/marketing-automations/run', requireOwner, ownerLimit, async (_r
 export async function expireReservationsOnStartup(): Promise<void> {
   await expirePendingOrders();
 }
+
+// MacroDroid Webhook Proxy
+api.post('/macrodroid-proxy', requireOwner, ownerLimit, async (request, response) => {
+  try {
+    const { amount_paise, reference } = request.body ?? {};
+
+    if (!Number.isSafeInteger(amount_paise) || amount_paise <= 0
+      || typeof reference !== 'string' || reference.trim().length === 0 || reference.length > 64) {
+      return response.status(400).json({ error: 'A positive amount_paise and reference are required' });
+    }
+
+    const secret = process.env.BANK_WEBHOOK_SECRET;
+    const baseUrl = process.env.AHUZA_PAY_BASE_URL;
+    if (!secret || !baseUrl) {
+      return response.status(503).json({ error: 'Ahuza Pay webhook is not configured' });
+    }
+    const targetUrl = new URL('/api/bank/credit', baseUrl);
+    if (!['http:', 'https:'].includes(targetUrl.protocol)) {
+      return response.status(503).json({ error: 'Ahuza Pay webhook URL must use HTTP or HTTPS' });
+    }
+
+    const rawBody = JSON.stringify({ amount_paise, reference: reference.trim() });
+    const timestamp = String(Date.now());
+
+    const signature = createHmac('sha256', secret)
+      .update(`${timestamp}.${rawBody}`)
+      .digest('hex');
+
+    const webhookResponse = await fetch(targetUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Timestamp': timestamp,
+        'X-Signature': signature,
+      },
+      body: rawBody,
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    const data: unknown = await webhookResponse.json();
+    response.status(webhookResponse.status).json(data);
+  } catch (error) {
+    console.error('MacroDroid proxy error:', error);
+    response.status(502).json({ error: 'Unable to forward bank credit notification' });
+  }
+});
