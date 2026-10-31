@@ -91,17 +91,17 @@ async function payPage(order) {
   const amount = `₹${(order.total_amount_paise / 100).toFixed(2)}`;
   const qr = open ? await qrSvg(order) : '';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pay AHUZA</title>
-<style>body{font-family:system-ui,sans-serif;background:#f6f4f0;margin:0;display:grid;place-items:center;min-height:100vh}.c{background:#fff;max-width:380px;width:92%;padding:28px;border-radius:12px;box-shadow:0 4px 24px #0001;text-align:center}
-a.b,button{display:block;width:100%;box-sizing:border-box;padding:14px;margin-top:12px;border:0;border-radius:8px;background:#111;color:#fff;font-size:16px;text-decoration:none;cursor:pointer}.qr{margin:16px auto 0;width:240px;max-width:100%}.qr svg{width:100%;height:auto;display:block}small{color:#666}</style></head>
-<body><div class="c"><h2>AHUZA</h2><h1>${amount}</h1><p>Order ${esc(order.external_order_id.slice(0, 8))}</p>
-<p id="st">${paid ? 'Payment received. Thank you!' : open ? 'Waiting for your payment…' : `Order ${esc(order.payment_status.toLowerCase())}`}</p>
+<style>body{font-family:'DM Sans','Helvetica Neue',Arial,sans-serif;background:#f6f3ec;color:#222822;margin:0;display:grid;place-items:center;min-height:100vh}.c{background:#fff;max-width:400px;width:92%;border-radius:4px;box-shadow:0 4px 24px #0001;text-align:center;overflow:hidden}.h{background:#c43d58;color:#fff;padding:22px}.h b{display:block;font-size:28px;letter-spacing:.14em}.h span{font-size:11px;letter-spacing:.22em;color:#f6dfe4}.b2{padding:24px 28px 28px}h1{margin:0 0 4px;font-size:32px}p{margin:8px 0}.ok{width:64px;height:64px;border-radius:50%;background:#c43d58;color:#fff;font-size:36px;line-height:64px;margin:6px auto 14px}
+a.b,button{display:block;width:100%;box-sizing:border-box;padding:14px;margin-top:12px;border:0;border-radius:4px;background:#c43d58;color:#fff;font-size:16px;font-weight:700;letter-spacing:.04em;text-decoration:none;cursor:pointer}.qr{margin:16px auto 0;width:240px;max-width:100%}.qr svg{width:100%;height:auto;display:block}small{color:#777b71}#st{font-weight:700;color:#c43d58}</style></head>
+<body><div class="c"><div class="h"><b>AHUZA</b><span>APPAREL</span></div><div class="b2">${paid ? '<div class="ok">✓</div>' : ''}<h1>${amount}</h1><p>Order ${esc(order.external_order_id.slice(0, 8))}</p>
+<p id="st">${paid ? 'Payment successful. Thank you! Check your email for your order confirmation.' : open ? 'Waiting for your payment…' : `Order ${esc(order.payment_status.toLowerCase())}`}</p>
 ${open ? `${qr ? `<div class="qr" role="img" aria-label="UPI payment QR code for ${esc(amount)}">${qr}</div><p><small>Scan with any UPI app (GPay, PhonePe, Paytm, BHIM) and pay exactly ${esc(amount)}.</small></p>` : ''}
 <a class="b" id="open" href="${esc(upiLink(order))}">Open UPI app</a>
 <small>This page confirms automatically once the money reaches AHUZA's bank account.</small>` : ''}
-</div><script>
+</div></div><script>
 const id=${JSON.stringify(order.external_order_id)};let t;
 async function poll(){try{const r=await fetch('/pay/'+encodeURIComponent(id)+'/status');const d=await r.json();
-if(d.payment_status==='PAID'){document.getElementById('st').textContent='Payment received. Redirecting…';setTimeout(()=>location.href=${JSON.stringify(process.env.STORE_RETURN_URL || '/')},1500);return}
+if(d.payment_status==='PAID'){document.getElementById('st').textContent='Payment successful! Check your email for your order confirmation.';setTimeout(()=>location.href=${JSON.stringify(process.env.STORE_RETURN_URL || '/')},1500);return}
 if(d.payment_status!=='PENDING'){location.reload();return}}catch{}t=setTimeout(poll,2000)}
 ${open ? 'poll();' : paid && process.env.STORE_RETURN_URL ? `setTimeout(()=>location.href=${JSON.stringify(process.env.STORE_RETURN_URL)},1500);` : ''}
 </script></body></html>`;
