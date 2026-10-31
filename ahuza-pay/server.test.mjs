@@ -41,6 +41,9 @@ test('order is created, shows a UPI link, and is PAID only after a matching bank
   const html = await (await fetch(`${base}/pay/o-1`)).text();
   assert.match(html, /upi:\/\/pay\?pa=owner%40okbank/);
   assert.match(html, /Open UPI app/);
+  assert.match(html, /<svg/);
+  assert.doesNotMatch(html, /Copy UPI ID/);
+  assert.doesNotMatch(html.replace(/href="upi:[^"]*"/g, ''), /owner(@|%40)okbank/);
   const pending = await (await fetch(`${base}/api/merchant/orders/o-1`, { headers: merchant })).json();
   assert.deepEqual([pending.payment_status, pending.order_confirmed], ['PENDING', false]);
 

@@ -6,6 +6,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { timingSafeEqual, createHmac } from 'node:crypto';
 
+let QRCode = null;
+try { QRCode = (await import('qrcode')).default; } catch { /* QR code unavailable; the pay page falls back to the UPI app button */ }
+
 const PORT = Number(process.env.PORT) || 4100;
 const MERCHANT_API_KEY = process.env.MERCHANT_API_KEY || '';
 const BANK_WEBHOOK_SECRET = process.env.BANK_WEBHOOK_SECRET || '';
@@ -77,21 +80,26 @@ async function notifyStore(order) {
   console.error(`Store notify gave up for ${order.external_order_id}; the store will confirm on its next status poll`);
 }
 
-function payPage(order) {
+async function qrSvg(order) {
+  if (!QRCode) return '';
+  try { return await QRCode.toString(upiLink(order), { type: 'svg', margin: 1, width: 240, errorCorrectionLevel: 'M' }); } catch { return ''; }
+}
+
+async function payPage(order) {
   const paid = order.payment_status === 'PAID';
   const open = order.payment_status === 'PENDING';
   const amount = `₹${(order.total_amount_paise / 100).toFixed(2)}`;
+  const qr = open ? await qrSvg(order) : '';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pay AHUZA</title>
 <style>body{font-family:system-ui,sans-serif;background:#f6f4f0;margin:0;display:grid;place-items:center;min-height:100vh}.c{background:#fff;max-width:380px;width:92%;padding:28px;border-radius:12px;box-shadow:0 4px 24px #0001;text-align:center}
-a.b,button{display:block;width:100%;box-sizing:border-box;padding:14px;margin-top:12px;border:0;border-radius:8px;background:#111;color:#fff;font-size:16px;text-decoration:none;cursor:pointer}button.s{background:#eee;color:#111}small{color:#666}</style></head>
+a.b,button{display:block;width:100%;box-sizing:border-box;padding:14px;margin-top:12px;border:0;border-radius:8px;background:#111;color:#fff;font-size:16px;text-decoration:none;cursor:pointer}.qr{margin:16px auto 0;width:240px;max-width:100%}.qr svg{width:100%;height:auto;display:block}small{color:#666}</style></head>
 <body><div class="c"><h2>AHUZA</h2><h1>${amount}</h1><p>Order ${esc(order.external_order_id.slice(0, 8))}</p>
 <p id="st">${paid ? 'Payment received. Thank you!' : open ? 'Waiting for your payment…' : `Order ${esc(order.payment_status.toLowerCase())}`}</p>
-${open ? `<a class="b" id="open" href="${esc(upiLink(order))}">Open UPI app</a>
-<button class="s" id="copy" type="button">Copy UPI ID: ${esc(payee().vpa)}</button>
-<small>On a computer, scan or pay to the UPI ID from your phone. This page confirms automatically once the money reaches AHUZA's bank account.</small>` : ''}
+${open ? `${qr ? `<div class="qr" role="img" aria-label="UPI payment QR code for ${esc(amount)}">${qr}</div><p><small>Scan with any UPI app (GPay, PhonePe, Paytm, BHIM) and pay exactly ${esc(amount)}.</small></p>` : ''}
+<a class="b" id="open" href="${esc(upiLink(order))}">Open UPI app</a>
+<small>This page confirms automatically once the money reaches AHUZA's bank account.</small>` : ''}
 </div><script>
 const id=${JSON.stringify(order.external_order_id)};let t;
-document.getElementById('copy')?.addEventListener('click',()=>{navigator.clipboard?.writeText(${JSON.stringify(payee().vpa)});document.getElementById('copy').textContent='Copied'});
 async function poll(){try{const r=await fetch('/pay/'+encodeURIComponent(id)+'/status');const d=await r.json();
 if(d.payment_status==='PAID'){document.getElementById('st').textContent='Payment received. Redirecting…';setTimeout(()=>location.href=${JSON.stringify(process.env.STORE_RETURN_URL || '/')},1500);return}
 if(d.payment_status!=='PENDING'){location.reload();return}}catch{}t=setTimeout(poll,2000)}
@@ -113,7 +121,7 @@ const server = http.createServer(async (req, res) => {
       if (!order) return send(res, 404, 'Order not found', 'text/plain');
       refresh(order);
       if (pay[2]) return send(res, 200, { payment_status: order.payment_status });
-      return send(res, 200, payPage(order), 'text/html; charset=utf-8');
+      return send(res, 200, await payPage(order), 'text/html; charset=utf-8');
     }
 
     // Bank credit notification (from the bank/SMS/email forwarder owned by the merchant)
