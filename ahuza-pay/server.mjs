@@ -5,6 +5,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { timingSafeEqual, createHmac } from 'node:crypto';
+import { startBankMailWatcher } from './bankMail.mjs';
 
 let QRCode = null;
 try { QRCode = (await import('qrcode')).default; } catch { /* QR code unavailable; the pay page falls back to the UPI app button */ }
@@ -85,6 +86,20 @@ async function qrSvg(order) {
   try { return await QRCode.toString(upiLink(order), { type: 'svg', margin: 1, width: 240, errorCorrectionLevel: 'M' }); } catch { return ''; }
 }
 
+// Matches a bank credit to a pending order and marks it paid. Used by the signed webhook and the bank-mail watcher.
+function applyCredit(amount, reference, note) {
+  if (db.credits[reference]) return { matched: db.credits[reference], duplicate: true };
+  const pending = Object.values(db.orders).map(refresh).filter((o) => o.payment_status === 'PENDING' && o.total_amount_paise === amount);
+  // Prefer an explicit order id in the payment note; otherwise accept only an unambiguous amount match.
+  const order = pending.find((o) => note.includes(o.external_order_id)) || (pending.length === 1 ? pending[0] : null);
+  if (!order) return { matched: null, candidates: pending.length };
+  order.payment_status = 'PAID'; order.order_confirmed = true; order.transaction_reference = reference; order.paid_at = Date.now();
+  db.credits[reference] = order.external_order_id;
+  save();
+  void notifyStore(order);
+  return { matched: order.external_order_id };
+}
+
 async function payPage(order) {
   const paid = order.payment_status === 'PAID';
   const open = order.payment_status === 'PENDING';
@@ -132,17 +147,7 @@ const server = http.createServer(async (req, res) => {
       const amount = Number(body.amount_paise);
       const reference = String(body.reference || '').slice(0, 64);
       if (!Number.isInteger(amount) || amount <= 0 || !reference) return send(res, 400, { error: 'amount_paise and reference are required' });
-      if (db.credits[reference]) return send(res, 200, { matched: db.credits[reference], duplicate: true });
-      const pending = Object.values(db.orders).map(refresh).filter((o) => o.payment_status === 'PENDING' && o.total_amount_paise === amount);
-      const note = String(body.note || '');
-      // Prefer an explicit order id in the payment note; otherwise accept only an unambiguous amount match.
-      const order = pending.find((o) => note.includes(o.external_order_id)) || (pending.length === 1 ? pending[0] : null);
-      if (!order) return send(res, 200, { matched: null, candidates: pending.length });
-      order.payment_status = 'PAID'; order.order_confirmed = true; order.transaction_reference = reference; order.paid_at = Date.now();
-      db.credits[reference] = order.external_order_id;
-      save();
-      void notifyStore(order);
-      return send(res, 200, { matched: order.external_order_id });
+      return send(res, 200, applyCredit(amount, reference, String(body.note || '')));
     }
 
     // Merchant API (the store server)
@@ -191,3 +196,4 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => console.log(`Ahuza Pay listening on ${PORT}`));
+startBankMailWatcher({ onCredit: (credit) => { const result = applyCredit(credit.amount_paise, credit.reference, credit.note); console.log(`Bank mail credit ${credit.reference}: ${result.matched ? `matched ${result.matched}` : 'no matching order'}`); } });

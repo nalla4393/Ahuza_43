@@ -49,3 +49,7 @@ The "Open UPI app" button uses a `upi://pay` deep link, which only opens on a ph
 5. Make sure your bank-alert forwarder posts to `/api/bank/credit` — without it no order can become PAID.
 
 Run tests: `npm test`.
+
+## Bank credit emails (no phone needed)
+
+Set `IMAP_USER` and `IMAP_PASS` (a Gmail app password) on the Ahuza Pay service. It checks the inbox every 15 seconds for unread credit-alert emails from Axis Bank or Google Pay, matches the amount to a pending order and marks it paid. Only mail whose sender passes DKIM/SPF/DMARC is accepted. Optional: `IMAP_HOST` (default `imap.gmail.com`), `IMAP_POLL_SECONDS`, `BANK_MAIL_SENDERS` (comma-separated sender domains).

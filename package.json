@@ -11,7 +11,7 @@
     "build": "tsc --noEmit && vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=server-dist/server.js",
     "start": "NODE_ENV=production node start.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test server/services/*.test.ts && node --test ahuza-pay/server.test.mjs",
+    "test": "tsx --test server/services/*.test.ts && node --test ahuza-pay/server.test.mjs ahuza-pay/bankMail.test.mjs",
     "pay": "node ahuza-pay/server.mjs"
   },
   "dependencies": {
@@ -22,7 +22,9 @@
     "express-rate-limit": "^8.0.1",
     "express-session": "^1.18.2",
     "helmet": "^8.1.0",
+    "imapflow": "^2.10.0",
     "lucide-react": "^0.468.0",
+    "mailparser": "^3.14.1",
     "nodemailer": "^10.1.0",
     "pdfkit": "^0.20.2",
     "qrcode": "^1.5.4",
