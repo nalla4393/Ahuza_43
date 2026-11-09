@@ -12,10 +12,11 @@ import { publishSocialPost, runSchedule, socialStatus, validateSchedule } from '
 import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
 import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
-import { createInstamojoRequest, instamojoAmountInPaise, instamojoConfigured, instamojoWebhookConfigured, verifyInstamojoWebhook } from './services/instamojo.js';
+import { instamojoAmountInPaise, instamojoWebhookConfigured, verifyInstamojoWebhook } from './services/instamojo.js';
 import { customerDataConfigured, decryptCustomerValue, encryptCustomerValue, isValidUpiId } from './services/customerData.js';
 import { confirmInstamojoWebhookPayment, confirmUpiPaymentByOwner, outOfStockItems, syncInstamojoPayment } from './services/paymentSync.js';
 import { manualUpiConfiguration, manualUpiLink, paymentProvider } from './services/manualUpi.js';
+import { gmailPaymentAlertsConfigured } from './services/gmailPaymentAlerts.js';
 import { buildInvoicePdf } from './services/invoice.js';
 import { storefrontCopyFields } from '../shared/storefrontCopy.js';
 import { isValidCountryRegion } from '../shared/address.js';
@@ -332,7 +333,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   if (paymentMethod !== 'upi' && paymentMethod !== 'cod') { response.status(400).json({ error: 'Choose UPI or cash on delivery' }); return; }
   const provider = paymentProvider();
   const manualUpi = provider === 'manual_upi' ? manualUpiConfiguration() : null;
-  if (paymentMethod === 'upi' && (provider === 'invalid' || (provider === 'instamojo' && !instamojoConfigured()) || (provider === 'manual_upi' && !manualUpi))) {
+  if (paymentMethod === 'upi' && (provider === 'invalid' || !manualUpi)) {
     response.status(503).json({ error: 'Online payment is unavailable: payment configuration is incomplete' }); return;
   }
   const rawPayerUpi = request.body?.payerUpiId;
@@ -435,38 +436,12 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     response.status(201).json({ orderId: localOrderId, paymentMethod, paymentReference, payUrl, provider, amount, currency: 'INR', expiresAt: expiresAt!.toISOString(), status: 'pending' });
     return;
   }
-  let payUrl: string;
-  try {
-    const created = await createInstamojoRequest(placed!, customerEmail || '');
-    payUrl = created.payUrl;
-    await mutateDatabase((database) => {
-      const order = database.orders.find((entry) => entry.id === localOrderId);
-      if (!order) throw new Error('Order missing after Instamojo request creation');
-      order.instamojoRequestId = created.requestId;
-    });
-  } catch (error) {
-    console.error('Instamojo order creation failed:', error);
-    await mutateDatabase((database) => {
-      const order = database.orders.find((entry) => entry.id === localOrderId && entry.status === 'pending_payment');
-      if (!order) return;
-      for (const item of order.items) {
-        const product = database.products.find((entry) => entry.id === item.productId);
-        if (product) product.stock += item.quantity;
-      }
-      order.status = 'cancelled';
-      order.paymentStatus = 'cancelled';
-      delete order.reservationExpiresAt;
-    });
-    response.status(502).json({ error: 'Could not start the payment Please try again shortly' });
-    return;
-  }
-  // The storefront uses payUrl; longurl is also returned explicitly for API clients.
-  response.status(201).json({ orderId: localOrderId, paymentMethod, paymentReference, payUrl, longurl: payUrl, provider: 'instamojo', amount, currency: 'INR', expiresAt: expiresAt!.toISOString(), status: 'pending' });
+  response.status(503).json({ error: 'Ahuza Pay is not configured for UPI checkout' });
 }
 
 api.get('/payments/config', (_request, response) => {
   const provider = paymentProvider();
-  response.json({ configured: provider === 'manual_upi' ? !!manualUpiConfiguration() : provider === 'instamojo' && instamojoConfigured(), automaticVerification: provider === 'instamojo', provider });
+  response.json({ configured: provider === 'manual_upi' && !!manualUpiConfiguration(), automaticVerification: false, provider });
 });
 
 api.post('/payments/instamojo/webhook', express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {
@@ -822,6 +797,45 @@ api.patch('/owner/content', requireOwner, ownerLimit, async (request, response) 
 api.get('/owner/orders', requireOwner, ownerLimit, async (_request, response) => response.json({
   orders: (await getDatabase()).orders.map(({ payerUpiIdEnc, ...order }) => ({ ...order, ...(payerUpiIdEnc ? { payerUpiId: decryptCustomerValue(payerUpiIdEnc) || undefined } : {}) })),
 }));
+
+api.get('/owner/payment-alerts', requireOwner, ownerLimit, async (_request, response) => {
+  const database = await getDatabase();
+  const alerts = (database.bankPaymentAlerts || [])
+    .filter((alert) => alert.status === 'pending')
+    .sort((left, right) => right.receivedAt.localeCompare(left.receivedAt))
+    .map((alert) => ({
+      ...alert,
+      candidates: database.orders
+        .filter((order) => order.paymentMethod === 'upi'
+          && order.amount === alert.amount
+          && order.paymentStatus !== 'paid'
+          && ['pending_payment', 'cancelled'].includes(order.status)
+          && Date.parse(order.createdAt) <= Date.parse(alert.receivedAt))
+        .map((order) => ({ id: order.id, createdAt: order.createdAt, status: order.status, customerName: order.shippingAddress.name })),
+    }));
+  response.json({ configured: gmailPaymentAlertsConfigured(), alerts });
+});
+
+api.patch('/owner/payment-alerts/:id/orders/:orderId/confirm', requireOwner, ownerLimit, async (request, response) => {
+  const orderId = String(request.params.orderId);
+  const alert = (await getDatabase()).bankPaymentAlerts?.find((entry) => entry.id === request.params.id && entry.status === 'pending');
+  if (!alert) { response.status(404).json({ error: 'Payment alert not found or already reviewed' }); return; }
+  const result = await confirmUpiPaymentByOwner(orderId, alert.transactionReference, alert.id);
+  if (!result.ok) { response.status(409).json({ error: result.error }); return; }
+  response.json({ order: (await getDatabase()).orders.find((entry) => entry.id === orderId) });
+});
+
+api.patch('/owner/payment-alerts/:id/dismiss', requireOwner, ownerLimit, async (request, response) => {
+  const alert = await mutateDatabase((database) => {
+    const current = database.bankPaymentAlerts?.find((entry) => entry.id === request.params.id && entry.status === 'pending');
+    if (!current) return null;
+    current.status = 'dismissed';
+    current.reviewedAt = new Date().toISOString();
+    return current;
+  });
+  if (!alert) { response.status(404).json({ error: 'Payment alert not found or already reviewed' }); return; }
+  response.json({ alert });
+});
 
 api.get('/owner/integrations', requireOwner, ownerLimit, async (_request, response) => {
   response.json({ integrations: {
@@ -1277,3 +1291,4 @@ api.post('/owner/marketing-automations/run', requireOwner, ownerLimit, async (_r
 export async function expireReservationsOnStartup(): Promise<void> {
   await expirePendingOrders();
 }
+// This file contains the API routes for the server, including owner-specific marketing automation routes and utility functions.

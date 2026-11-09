@@ -16,6 +16,7 @@ type Order = { id: string; status: string; amount: number; currency: string; cre
 type Analytics = { eventCounts: Record<string, number>; orderCount: number; paidRevenue: number; currency: string; lowStock: { id: string; name: string; sku: string; stock: number }[] };
 type IntegrationStatus = { email: boolean; followUps: boolean; ai: boolean };
 type SupportTicket = { id: string; email: string; message: string; category: 'delivery' | 'complaint' | 'general'; status: 'open' | 'resolved'; createdAt: string };
+type PaymentAlert = { id: string; amount: number; transactionReference: string; receivedAt: string; candidates: { id: string; createdAt: string; status: string; customerName: string }[] };
 type EmailKind = 'alert' | 'thank_you' | 'follow_up';
 type EmailDraft = { orderId: string; kind: EmailKind; to: string; subject: string; body: string };
 type AgentAction =
@@ -132,6 +133,8 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
   const [error, setError] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [paymentAlerts, setPaymentAlerts] = useState<PaymentAlert[]>([]);
+  const [gmailAlertsConfigured, setGmailAlertsConfigured] = useState(false);
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [content, setContent] = useState<Content>(emptyContent);
@@ -160,10 +163,11 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
     setLoading(true);
     setError('');
     try {
-      const [analyticsResult, inventoryResult, ordersResult, supportResult, contentResult, integrationResult, siteStatusResult, imageSettingsResult] = await Promise.all([
+      const [analyticsResult, inventoryResult, ordersResult, paymentAlertsResult, supportResult, contentResult, integrationResult, siteStatusResult, imageSettingsResult] = await Promise.all([
         ownerRequest<{ analytics?: Analytics } & Analytics>(ownerKey, '/api/owner/analytics'),
         ownerRequest<{ products: Product[] }>(ownerKey, '/api/owner/inventory'),
         ownerRequest<{ orders: Order[] }>(ownerKey, '/api/owner/orders'),
+        ownerRequest<{ configured: boolean; alerts: PaymentAlert[] }>(ownerKey, '/api/owner/payment-alerts'),
         ownerRequest<{ tickets: SupportTicket[] }>(ownerKey, '/api/owner/support-tickets'),
         ownerRequest<{ content: Content }>(ownerKey, '/api/owner/content'),
         ownerRequest<{ integrations: IntegrationStatus }>(ownerKey, '/api/owner/integrations'),
@@ -176,6 +180,8 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
       setProducts(inventoryResult.products);
       onProductsChange(inventoryResult.products);
       setOrders(ordersResult.orders);
+      setPaymentAlerts(paymentAlertsResult.alerts);
+      setGmailAlertsConfigured(paymentAlertsResult.configured);
       setEmailOrderId((current) => current || ordersResult.orders.find((order) => ['paid', 'shipped', 'delivered'].includes(order.status))?.id || '');
       setSupportTickets(supportResult.tickets);
       setContent(contentResult.content);
@@ -190,7 +196,15 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
   }
 
   async function refreshOrders(ownerKey: string) {
-    try { setOrders((await ownerRequest<{ orders: Order[] }>(ownerKey, '/api/owner/orders')).orders); } catch { /* keep the current list */ }
+    try {
+      const [ordersResult, alertsResult] = await Promise.all([
+        ownerRequest<{ orders: Order[] }>(ownerKey, '/api/owner/orders'),
+        ownerRequest<{ configured: boolean; alerts: PaymentAlert[] }>(ownerKey, '/api/owner/payment-alerts'),
+      ]);
+      setOrders(ordersResult.orders);
+      setPaymentAlerts(alertsResult.alerts);
+      setGmailAlertsConfigured(alertsResult.configured);
+    } catch { /* keep the current lists */ }
   }
 
   useEffect(() => {
@@ -322,6 +336,28 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
       setOrders((current) => current.map((entry) => entry.id === order.id ? result.order : entry));
       notify('UPI payment confirmed; the customer confirmation email is queued');
       void loadDashboard(key);
+    } catch (reason) { fail(reason); }
+    finally { setBusyAction(false); }
+  }
+
+  async function confirmBankAlert(alert: PaymentAlert, order: PaymentAlert['candidates'][number]) {
+    if (!window.confirm(`First verify this ${money(alert.amount / 100)} credit and UTR ${alert.transactionReference} in your bank statement. Only continue if the credit belongs to order ${order.id}.`)) return;
+    setBusyAction(true);
+    try {
+      await ownerRequest<{ order: Order }>(key, `/api/owner/payment-alerts/${encodeURIComponent(alert.id)}/orders/${encodeURIComponent(order.id)}/confirm`, { method: 'PATCH' });
+      setPaymentAlerts((current) => current.filter((entry) => entry.id !== alert.id));
+      notify('Bank credit verified; payment confirmation email is queued');
+      void loadDashboard(key);
+    } catch (reason) { fail(reason); }
+    finally { setBusyAction(false); }
+  }
+
+  async function dismissBankAlert(alert: PaymentAlert) {
+    setBusyAction(true);
+    try {
+      await ownerRequest<unknown>(key, `/api/owner/payment-alerts/${encodeURIComponent(alert.id)}/dismiss`, { method: 'PATCH' });
+      setPaymentAlerts((current) => current.filter((entry) => entry.id !== alert.id));
+      notify('Payment alert dismissed');
     } catch (reason) { fail(reason); }
     finally { setBusyAction(false); }
   }
@@ -467,7 +503,17 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
           <button className="studio-primary studio-publish" disabled={busyAction}>{busyAction ? 'Publishing…' : 'Publish storefront text'} <Check size={16} /></button>
         </form>}
         {tab === 'payments' && <section className="studio-section">
-          <section className="studio-panel"><h2>Payments</h2><p>Ahuza Pay UPI orders require manual bank reconciliation in Orders. Instamojo orders are verified through Instamojo.</p></section>
+          <section className="studio-panel"><h2>Payments</h2><p>New UPI orders use Ahuza Pay and require bank-credit verification. Gmail alerts are candidates only and never mark an order paid automatically. Historical Instamojo orders are still reconciled through Instamojo.</p>
+            <div className="studio-panel-heading"><div><h3>Axis Bank Gmail alerts</h3><span>{gmailAlertsConfigured ? 'Read-only Gmail watcher is configured' : 'Configure Gmail OAuth credentials on the server to receive alerts'}</span></div><button className="studio-secondary" type="button" onClick={() => void refreshOrders(key)}>Refresh alerts</button></div>
+            {!gmailAlertsConfigured && <p className="studio-muted">Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, and GMAIL_REFRESH_TOKEN in the server environment. Use a refresh token authorized for Gmail read-only access.</p>}
+            {gmailAlertsConfigured && paymentAlerts.length === 0 && <p className="studio-muted">No unreviewed bank-credit alerts</p>}
+            {paymentAlerts.map((alert) => <article className="studio-list-row" key={alert.id}>
+              <div><strong>{money(alert.amount / 100)} · UTR {alert.transactionReference}</strong><small>Axis Bank email · {new Date(alert.receivedAt).toLocaleString()}</small>
+                {alert.candidates.length > 0 ? alert.candidates.map((candidate) => <div key={candidate.id}><small>{candidate.customerName} · order {candidate.id} · {new Date(candidate.createdAt).toLocaleString()} · {candidate.status}</small><button className="studio-primary" type="button" disabled={busyAction} onClick={() => void confirmBankAlert(alert, candidate)}>Verify bank credit and confirm order <Check size={15} /></button></div>) : <small>No open UPI order with this amount predates the alert. Check the bank statement and order history before taking action.</small>}
+              </div>
+              <button className="studio-secondary" type="button" disabled={busyAction} onClick={() => void dismissBankAlert(alert)}>Dismiss</button>
+            </article>)}
+          </section>
         </section>}
         {tab === 'orders' && <section className="studio-section studio-orders">
           <button className="studio-button" type="button" onClick={() => void refreshOrders(key)}>Refresh orders</button>

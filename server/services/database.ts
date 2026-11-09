@@ -127,6 +127,16 @@ export type OrderEmailNotification = {
   lastError?: string;
 };
 
+export type BankPaymentAlert = {
+  id: string;
+  amount: number;
+  transactionReference: string;
+  receivedAt: string;
+  status: 'pending' | 'confirmed' | 'dismissed';
+  matchedOrderId?: string;
+  reviewedAt?: string;
+};
+
 export type StoreEvent = { id: string; name: string; page?: string; campaign?: string; createdAt: string };
 
 export type SupportTicket = {
@@ -238,6 +248,9 @@ export type Database = {
   socialPosts?: SocialPost[];
   stockAlerts?: StockAlert[];
   orderEmailNotifications?: OrderEmailNotification[];
+  bankPaymentAlerts?: BankPaymentAlert[];
+  gmailProcessedMessageIds?: string[];
+  gmailLastScannedAt?: number;
 };
 
 const databasePath = path.resolve(process.env.DATA_FILE || 'data/ahuza-db.json');
@@ -266,7 +279,7 @@ let writeQueue: Promise<void> = Promise.resolve();
 let loaded: Database | undefined;
 
 function emptyDatabase(): Database {
-  return { products: structuredClone(seedProducts), seededProductIds: seedProducts.map((product) => product.id), customers: [], orders: [], events: [], supportTickets: [], sitePublished: true, content: structuredClone(defaultStorefrontContent), imageSettings: structuredClone(defaultImageSettings) };
+  return { products: structuredClone(seedProducts), seededProductIds: seedProducts.map((product) => product.id), customers: [], orders: [], events: [], supportTickets: [], sitePublished: true, content: structuredClone(defaultStorefrontContent), imageSettings: structuredClone(defaultImageSettings), bankPaymentAlerts: [], gmailProcessedMessageIds: [], gmailLastScannedAt: undefined };
 }
 
 export function mergeImageSettings(value: unknown): ImageSettings {
@@ -311,6 +324,9 @@ async function loadDatabase(): Promise<Database> {
       socialPosts: Array.isArray(parsed.socialPosts) ? parsed.socialPosts : [],
       stockAlerts: Array.isArray(parsed.stockAlerts) ? parsed.stockAlerts : [],
       orderEmailNotifications: Array.isArray(parsed.orderEmailNotifications) ? parsed.orderEmailNotifications : [],
+      bankPaymentAlerts: Array.isArray(parsed.bankPaymentAlerts) ? parsed.bankPaymentAlerts : [],
+      gmailProcessedMessageIds: Array.isArray(parsed.gmailProcessedMessageIds) ? parsed.gmailProcessedMessageIds : [],
+      gmailLastScannedAt: typeof parsed.gmailLastScannedAt === 'number' ? parsed.gmailLastScannedAt : undefined,
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;

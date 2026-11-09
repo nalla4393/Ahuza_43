@@ -11,6 +11,7 @@ import { api, expireReservationsOnStartup } from './server/routes.js';
 import { expirePendingOrders, startFollowUpScheduler } from './server/services/integrations.js';
 import { startSocialScheduler } from './server/services/social.js';
 import { reconcileInstamojoOrders } from './server/services/paymentSync.js';
+import { startGmailPaymentAlertWatcher } from './server/services/gmailPaymentAlerts.js';
 import { sendRestockAlerts } from './server/services/stock-alerts.js';
 
 const app = express();
@@ -95,6 +96,7 @@ app.use((error: unknown, _request: express.Request, response: express.Response, 
 });
 
 void expireReservationsOnStartup().catch((error) => console.error('Reservation cleanup failed:', error));
+startGmailPaymentAlertWatcher();
 const paymentSyncTimer = setInterval(() => void reconcileInstamojoOrders().catch((error) => console.error('Payment reconcile failed:', error)), 15 * 1000);
 paymentSyncTimer.unref();
 const reservationTimer = setInterval(() => void expirePendingOrders().catch((error) => console.error('Reservation cleanup failed:', error)), 60 * 1000);

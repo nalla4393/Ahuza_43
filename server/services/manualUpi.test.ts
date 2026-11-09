@@ -28,8 +28,10 @@ test('manual UPI configuration fails closed and link contains the server amount 
     assert.throws(() => manualUpiLink(config, NaN, 'ref'));
     process.env.PAYMENT_PROVIDER = 'unknown';
     assert.equal(paymentProvider(), 'invalid');
+    process.env.PAYMENT_PROVIDER = 'instamojo';
+    assert.equal(paymentProvider(), 'invalid');
     delete process.env.PAYMENT_PROVIDER;
-    assert.equal(paymentProvider(), 'instamojo');
+    assert.equal(paymentProvider(), 'manual_upi');
   } finally {
     for (const key of ['PAYMENT_PROVIDER', 'UPI_VPA', 'UPI_PAYEE_NAME']) {
       if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key];
@@ -104,6 +106,32 @@ test('manual checkout stays pending until an owner records a unique bank referen
     });
     assert.equal((await fetch(`${base}/api/owner/orders/${second.orderId}/confirm-upi-payment`, { method: 'PATCH', headers: ownerHeaders, body: JSON.stringify({ transactionReference: 'BANK987654' }) })).status, 200);
     assert.equal((await getDatabase()).products.find((entry) => entry.id === 'soft-form-shirt')?.stock, 0);
+
+    await mutateDatabase((database) => { database.products.find((entry) => entry.id === 'soft-form-shirt')!.stock = 1; });
+    const alertOrder = await (await create()).json() as { orderId: string; amount: number };
+    const alertId = 'gmail-message-test-1';
+    await mutateDatabase((database) => {
+      database.bankPaymentAlerts!.push({
+        id: alertId,
+        amount: alertOrder.amount,
+        transactionReference: 'UTR123456789012',
+        receivedAt: new Date(Date.now() + 1000).toISOString(),
+        status: 'pending',
+      });
+    });
+    const alertsResponse = await fetch(`${base}/api/owner/payment-alerts`, { headers: ownerHeaders });
+    const alerts = await alertsResponse.json() as { alerts: { id: string; candidates: { id: string }[] }[] };
+    assert.equal(alerts.alerts[0]?.id, alertId);
+    assert.equal(alerts.alerts[0]?.candidates.length, 1);
+    assert.equal(alerts.alerts[0]?.candidates[0]?.id, alertOrder.orderId);
+    const alertConfirm = await fetch(`${base}/api/owner/payment-alerts/${alertId}/orders/${alertOrder.orderId}/confirm`, {
+      method: 'PATCH',
+      headers: ownerHeaders,
+    });
+    assert.equal(alertConfirm.status, 200, await alertConfirm.text());
+    const reviewed = await getDatabase();
+    assert.equal(reviewed.orders.find((entry) => entry.id === alertOrder.orderId)?.paymentStatus, 'paid');
+    assert.equal(reviewed.bankPaymentAlerts?.find((entry) => entry.id === alertId)?.matchedOrderId, alertOrder.orderId);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await rm(directory, { recursive: true, force: true });

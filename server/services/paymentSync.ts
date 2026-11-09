@@ -93,7 +93,7 @@ export async function reconcileInstamojoOrders(): Promise<void> {
   }
 }
 
-export async function confirmUpiPaymentByOwner(orderId: string, transactionReference: string): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function confirmUpiPaymentByOwner(orderId: string, transactionReference: string, bankAlertId?: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const result = await mutateDatabase((database) => {
     const current = database.orders.find((entry) => entry.id === orderId);
     if (!current || current.paymentMethod !== 'upi') return 'Only UPI orders can be confirmed here' as const;
@@ -102,6 +102,15 @@ export async function confirmUpiPaymentByOwner(orderId: string, transactionRefer
     if (!OPEN_STATUSES.includes(current.status)) return 'This order cannot be confirmed in its current status' as const;
     if (!/^[a-zA-Z0-9-]{6,100}$/.test(transactionReference)) return 'Enter a valid bank transaction reference' as const;
     if (database.orders.some((entry) => entry.id !== orderId && entry.manualPaymentReference?.toLowerCase() === transactionReference.toLowerCase())) return 'This bank transaction reference is already used by another order' as const;
+    const bankAlert = bankAlertId
+      ? database.bankPaymentAlerts?.find((entry) => entry.id === bankAlertId && entry.status === 'pending')
+      : database.bankPaymentAlerts?.find((entry) => entry.transactionReference.toLowerCase() === transactionReference.toLowerCase()
+        && entry.amount === current.amount && entry.status === 'pending');
+    if (bankAlertId && (!bankAlert || bankAlert.amount !== current.amount
+      || bankAlert.transactionReference.toLowerCase() !== transactionReference.toLowerCase()
+      || Date.parse(current.createdAt) > Date.parse(bankAlert.receivedAt))) {
+      return 'This Gmail alert no longer matches the order; refresh payment alerts and review the bank statement' as const;
+    }
     if (current.status === 'cancelled') {
       if (outOfStockItems(database, current).length) return 'Not enough stock to restore this cancelled order' as const;
       for (const item of current.items) database.products.find((entry) => entry.id === item.productId)!.stock -= item.quantity;
@@ -112,6 +121,11 @@ export async function confirmUpiPaymentByOwner(orderId: string, transactionRefer
     current.manualPaymentReference = transactionReference;
     current.paymentVerifiedAt = new Date().toISOString();
     delete current.reservationExpiresAt;
+    if (bankAlert) {
+      bankAlert.status = 'confirmed';
+      bankAlert.matchedOrderId = orderId;
+      bankAlert.reviewedAt = current.paymentVerifiedAt;
+    }
     return true as const;
   });
   if (result !== true) return { ok: false, error: result ?? 'Order not found' };

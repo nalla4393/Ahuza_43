@@ -1,8 +1,8 @@
 import { isValidUpiId } from './customerData.js';
 
-export function paymentProvider(): 'instamojo' | 'manual_upi' | 'invalid' {
-  const provider = process.env.PAYMENT_PROVIDER?.trim() || 'instamojo';
-  return provider === 'instamojo' || provider === 'manual_upi' ? provider : 'invalid';
+export function paymentProvider(): 'manual_upi' | 'invalid' {
+  const provider = process.env.PAYMENT_PROVIDER?.trim() || 'manual_upi';
+  return provider === 'manual_upi' ? 'manual_upi' : 'invalid';
 }
 
 export function manualUpiConfiguration(): { vpa: string; payee: string } | null {

@@ -121,7 +121,7 @@ export const storefrontCopyFields = [
   { id: 'checkoutCod', label: 'Checkout: cash on delivery option', group: 'Checkout', defaultValue: 'Cash on delivery' },
   { id: 'checkoutUpiUnavailable', label: 'Checkout: UPI unavailable notice', group: 'Checkout', defaultValue: 'Online payment is unavailable right now Cash on delivery is still available' },
   { id: 'checkoutUpiChecking', label: 'Checkout: checking UPI notice', group: 'Checkout', defaultValue: 'Checking payment availability… Cash on delivery is available' },
-  { id: 'checkoutUpiNote', label: 'Checkout: UPI note', group: 'Checkout', defaultValue: 'Payment remains pending until Instamojo confirms it' },
+  { id: 'checkoutUpiNote', label: 'Checkout: UPI note', group: 'Checkout', defaultValue: 'Ahuza Pay UPI orders remain pending until the bank credit is verified' },
   { id: 'checkoutConsent', label: 'Checkout: marketing consent', group: 'Checkout', defaultValue: 'Share purchase conversion with AHUZA\'s ad partners' },
   { id: 'checkoutPlacing', label: 'Checkout: placing order button', group: 'Checkout', defaultValue: 'Placing your order…' },
   { id: 'checkoutPlaceCod', label: 'Checkout: place COD order button', group: 'Checkout', defaultValue: 'Place COD order' },
@@ -137,7 +137,7 @@ export const storefrontCopyFields = [
   { id: 'payPending', label: 'Payment status: pending', group: 'Payment messages', defaultValue: 'Payment pending' },
   { id: 'payWaiting', label: 'Payment: waiting message', group: 'Payment messages', defaultValue: 'Waiting for verified payment status…' },
   { id: 'payScan', label: 'Payment: scan instruction', group: 'Payment messages', defaultValue: 'Scan with a UPI app to pay on your phone' },
-  { id: 'payAppOpened', label: 'Payment: app opened message', group: 'Payment messages', defaultValue: 'Payment page opened After paying, return here Your order is confirmed automatically as soon as the bank credit is matched' },
+  { id: 'payAppOpened', label: 'Payment: app opened message', group: 'Payment messages', defaultValue: 'Payment app opened Return here after paying Your order will be confirmed after AHUZA verifies the bank credit' },
   { id: 'payTryAgain', label: 'Payment: try again button', group: 'Payment messages', defaultValue: 'Try Pay via UPI again' },
   { id: 'payChecking', label: 'Payment: checking status message', group: 'Payment messages', defaultValue: 'Checking AHUZA order status This does not read your UPI app or bank' },
   { id: 'payRefresh', label: 'Payment: refresh button', group: 'Payment messages', defaultValue: 'Refresh order status' },
@@ -145,7 +145,7 @@ export const storefrontCopyFields = [
   { id: 'payCancel', label: 'Payment: cancel button', group: 'Payment messages', defaultValue: 'Cancel unpaid order' },
   { id: 'payFailureNote', label: 'Payment: failure note', group: 'Payment messages', defaultValue: 'The failure status is customer-reported only If money was debited, contact AHUZA with the bank reference before retrying' },
   { id: 'payReturn', label: 'Payment: return to bag button', group: 'Payment messages', defaultValue: 'Return to bag' },
-  { id: 'payVerificationNote', label: 'Payment: verification note', group: 'Payment messages', defaultValue: 'Status updates automatically once your payment is matched to the bank credit A screenshot or customer claim is never treated as proof The payment link expires after 60 minutes' },
+  { id: 'payVerificationNote', label: 'Payment: verification note', group: 'Payment messages', defaultValue: 'AHUZA verifies UPI bank credits before confirming an order A screenshot or customer claim is not proof The payment request expires after 60 minutes' },
   { id: 'accountBack', label: 'Account: back to store', group: 'Account & orders', defaultValue: 'Back to store' },
   { id: 'accountEyebrow', label: 'Account: eyebrow', group: 'Account & orders', defaultValue: 'Your AHUZA account' },
   { id: 'accountWelcome', label: 'Account: welcome heading', group: 'Account & orders', defaultValue: 'Welcome back' },
@@ -183,12 +183,27 @@ export const defaultStorefrontCopy = Object.fromEntries(
   storefrontCopyFields.map(({ id, defaultValue }) => [id, defaultValue]),
 ) as StorefrontCopy;
 
+const obsoleteStorefrontCopy: Partial<Record<StorefrontCopyId, string[]>> = {
+  checkoutUpiNote: [
+    'Payment remains pending until Instamojo confirms it',
+    'UPI opens directly in your app Payment remains pending until AHUZA manually verifies the bank settlement',
+  ],
+  payAppOpened: [
+    'Payment page opened After paying, return here Your order is confirmed automatically as soon as the bank credit is matched',
+  ],
+  payVerificationNote: [
+    'Status updates automatically once your payment is matched to the bank credit A screenshot or customer claim is never treated as proof The payment link expires after 60 minutes',
+  ],
+};
+
 export function mergeStorefrontCopy(value: unknown): StorefrontCopy {
   const copy = { ...defaultStorefrontCopy };
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     for (const { id } of storefrontCopyFields) {
       const entry = (value as Record<string, unknown>)[id];
-      if (typeof entry === 'string') copy[id] = entry;
+      if (typeof entry === 'string') {
+        copy[id] = obsoleteStorefrontCopy[id]?.includes(entry) ? defaultStorefrontCopy[id] : entry;
+      }
     }
   }
   return copy;

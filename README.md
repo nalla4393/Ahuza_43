@@ -40,15 +40,16 @@ caches the latest rate for up to one hour and rejects rates older than seven day
 refreshes the estimate hourly and shows it as unavailable if the rate cannot be fetched.
 All checkout charges remain in INR.
 
-### Ahuza Pay (manual UPI verification)
+### Ahuza Pay Node (manual UPI verification)
 
-To enable the self-hosted UPI checkout, configure the storefront service with
-`PAYMENT_PROVIDER=manual_upi`, `UPI_VPA` (the receiving UPI ID), and
+The self-hosted UPI checkout is the default. Configure the storefront service
+with `PAYMENT_PROVIDER=manual_upi`, `UPI_VPA` (the receiving UPI ID), and
 `UPI_PAYEE_NAME` (the recipient name shown in the UPI app). Verify the UPI ID
 with a small controlled payment before accepting customer orders. The checkout
 displays a QR code to scan with a UPI app on another device. The QR code is not
-a payment processor and does not prove a payment was made. No separate Ahuza Pay server, bank API,
-bank-alert forwarding, or automatic settlement matching is used.
+a payment processor and does not prove a payment was made. The UPI app does not
+send Ahuza Pay Node a trusted settlement confirmation, so automatic payment
+verification is not available in this mode.
 
 Orders remain pending until an owner checks the actual bank statement, matches
 the credit to the customer and order, and enters the bank transaction reference
@@ -60,11 +61,31 @@ against the bank statement; confirmation can restore the order only if stock
 is still available. Otherwise arrange a refund or other resolution manually.
 Email notifications are queued when configured; delivery is not guaranteed.
 
-### Instamojo
+#### Gmail credit-alert review
 
-The default `PAYMENT_PROVIDER=instamojo` keeps the existing Instamojo flow.
+The optional Gmail reader uses the Gmail API with read-only OAuth access. Set
+`GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, and `GMAIL_REFRESH_TOKEN` on the server.
+The refresh token must have been authorized for the
+`https://www.googleapis.com/auth/gmail.readonly` scope. The watcher only accepts
+Axis Bank messages from `axisbank.com` with a passing Google DMARC result, and
+stores the amount, UTR, receipt time, and Gmail message ID—not the email body.
 
-The backend calculates the order amount, reserves stock, creates an Instamojo payment request and returns its `longurl` as `payUrl`. The browser redirects to Instamojo. The store polls Instamojo's authenticated API and confirms the order only after a matching successful payment is reported; browser redirects are not proof of payment.
+Parsed alerts appear in **Owner Studio → Payments** as candidates. They never
+mark an order paid automatically: an owner must verify the credit in the bank
+statement and explicitly associate it with an order. Amount-only matching can
+be ambiguous and an authenticated email is not proof that a credit belongs to a
+specific checkout. If OAuth is incomplete or Gmail cannot be reached, alerts
+are not processed and orders remain pending for manual bank reconciliation.
+
+### Legacy Instamojo integration
+
+Instamojo is not available for new checkout orders. Existing Instamojo payment
+requests can still be reconciled while their API credentials are configured;
+setting `PAYMENT_PROVIDER=instamojo` will not enable Instamojo checkout.
+
+For those existing orders, the store polls Instamojo's authenticated API and
+confirms payment only after a matching successful transaction is reported.
+Browser redirects are not proof of payment.
 
 Set these server variables (never use a `VITE_` prefix):
 
@@ -72,13 +93,16 @@ Set these server variables (never use a `VITE_` prefix):
 INSTAMOJO_API_KEY=<your API key>
 INSTAMOJO_AUTH_TOKEN=<your authentication token>
 INSTAMOJO_SALT=<your webhook salt>
-INSTAMOJO_REDIRECT_URL=https://www.ahuzawear.com/
 INSTAMOJO_WEBHOOK_URL=https://www.ahuzawear.com/api/payments/instamojo/webhook
 ```
 
-Without the API key and auth token, online checkout is disabled while cash on delivery remains available. Set all three credentials in the production service environment to enable signed webhooks; the webhook URL must be publicly reachable over HTTPS. If no webhook salt is set, authenticated status checks remain the verification path. Customer redirects are never treated as proof of payment.
+These credentials are needed only to reconcile historical Instamojo orders;
+they do not enable new Instamojo checkout. The webhook URL must be publicly
+reachable over HTTPS to receive signed notifications. Authenticated status
+checks remain available when the webhook salt is not set.
 
-Payment methods and settlement details are managed in Instamojo. Orders created using the old Ahuza Pay service cannot be reconciled automatically through Instamojo; review their settlement separately. Bank-email and MacroDroid gateway integrations have been removed.
+Orders created by the old standalone Ahuza Pay service cannot be reconciled
+through Instamojo; review their settlement separately.
 
 Cash on delivery remains available. COD orders are saved as `confirmed` with payment status `pending` and reserve inventory. In **Owner Studio → Orders**, mark the order delivered, then use **Mark cash collected / paid** after cash has been received. COD revenue is counted only after the owner records payment.
 
@@ -99,10 +123,10 @@ GitHub Pages cannot host this application because it needs the Express API for t
 
 1. Create a Railway project and an empty service for this application. In the service settings, set the build command to `npm ci && npm run build`, the start command to `npm start`, and the health-check path to `/api/health`. Do not enable Railway's own GitHub auto-deploy; GitHub Actions performs the deploy after verification.
 2. Add a Railway volume to the service mounted at `/app/.data`. Set `DATA_FILE=/app/.data/ahuza-db.json` and `SESSION_FILE_PATH=/app/.data/sessions` so the database and customer sessions survive deploys and restarts. Keep this as a single service instance; the JSON database and file-backed sessions are not safe for multiple instances.
-3. Add `SESSION_SECRET` (a stable random value of at least 32 characters) and `OWNER_API_KEY` in Railway's service variables. Railway supplies `PORT`. Configure either Instamojo or the manual UPI variables above to enable online checkout.
+3. Add `SESSION_SECRET` (a stable random value of at least 32 characters) and `OWNER_API_KEY` in Railway's service variables. Railway supplies `PORT`. Configure `UPI_VPA` and `UPI_PAYEE_NAME` for Ahuza Pay checkout. Add the Gmail OAuth variables above to enable bank-credit alert review.
 4. Create a Railway project token. In the GitHub repository, add it under **Settings → Secrets and variables → Actions → Secrets** as `RAILWAY_TOKEN`. Add the Railway web service name or ID under **Settings → Secrets and variables → Actions → Variables** as `RAILWAY_SERVICE`. Do not commit or paste the token into the repository.
 5. Push to `main` or manually run **Actions → Verify and deploy to Railway**. The workflow runs `npm test` and `npm run build` first, then deploys only if those checks pass. Once Railway assigns a public domain, verify `/api/health` and the storefront.
-6. Before accepting online payments, configure the selected payment method and complete a small live transaction end to end, including bank reconciliation for manual UPI.
+6. Before accepting online payments, configure Ahuza Pay and complete a small live transaction end to end, including bank reconciliation.
 
 Configure a Railway volume and stable secrets before treating the deployment as production-ready.
 
@@ -118,7 +142,7 @@ After DNS is correct, add `https://www.ahuzawear.com/` as a URL-prefix property 
 
 - `GET /api/products`, `GET /api/products/:id`
 - `POST /api/auth/signup`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
-- `GET /api/payments/config`, `POST /api/payments/orders`, `GET /api/payments/orders/:id/status`, `POST /api/payments/orders/:id/cancel` (Instamojo hosted payment; customer status is never trusted for confirmation)
+- `GET /api/payments/config`, `POST /api/payments/orders`, `GET /api/payments/orders/:id/status`, `POST /api/payments/orders/:id/cancel` (Ahuza Pay UPI checkout; customer status is never trusted for confirmation)
 - `GET /api/orders`, `GET /api/orders/:id`, `GET /api/orders/:id/invoice` (PDF after payment confirmation), `POST /api/orders/:id/returns`
 - Storefront content: `GET /api/storefront`; owner edits via `PATCH /api/owner/content`
 - Owner: `GET/PATCH/POST /api/owner/inventory`, `GET/PATCH /api/owner/orders`, `GET /api/owner/analytics`, `GET/PATCH /api/owner/integrations`, `GET/PATCH /api/owner/support-tickets`, `POST /api/owner/chat`, `POST /api/owner/agent/execute` to approve proposed actions, `POST /api/owner/email-agent/draft`, `POST /api/owner/email-agent/send`, `POST /api/owner/social-post`, and `POST /api/owner/automations/test` for non-conversion webhook diagnostics.

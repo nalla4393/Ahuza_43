@@ -18,3 +18,15 @@ test('storefront copy ignores unknown and non-string persisted fields', () => {
   assert.equal(copy.contactTitle, defaultStorefrontCopy.contactTitle);
   assert.equal(Object.hasOwn(copy, 'notAField'), false);
 });
+
+test('replaces only the obsolete UPI checkout message', () => {
+  const legacy = {
+    checkoutUpiNote: 'UPI opens directly in your app Payment remains pending until AHUZA manually verifies the bank settlement',
+    payAppOpened: 'Payment page opened After paying, return here Your order is confirmed automatically as soon as the bank credit is matched',
+  };
+  const merged = mergeStorefrontCopy(legacy);
+  assert.equal(merged.checkoutUpiNote, defaultStorefrontCopy.checkoutUpiNote);
+  assert.equal(merged.payAppOpened, defaultStorefrontCopy.payAppOpened);
+  assert.equal(mergeStorefrontCopy({ checkoutUpiNote: 'Payment remains pending until Instamojo confirms it' }).checkoutUpiNote, defaultStorefrontCopy.checkoutUpiNote);
+  assert.equal(mergeStorefrontCopy({ checkoutUpiNote: 'Custom payment information' }).checkoutUpiNote, 'Custom payment information');
+});
