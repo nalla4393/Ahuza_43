@@ -5,6 +5,7 @@ import CustomerSupportChat from './CustomerSupportChat';
 import ShoppingAssistant, { type AssistantTrip } from './ShoppingAssistant';
 import ProductRail from './ProductRail';
 import HeroCarousel, { type BannerSlide } from './HeroCarousel';
+import PaymentQr from './PaymentQr';
 import { defaultImageSettings, imageSettingsVars, mainImage, srcSet, type ImageSettings, type ProductImage } from './imageTypes';
 import { defaultStorefrontCopy, type StorefrontCopyId } from '../shared/storefrontCopy';
 
@@ -95,6 +96,7 @@ export default function App() {
   const [assistantTrip, setAssistantTrip] = useState<AssistantTrip | null>(null);
   const tripNumber = useRef(0);
   const bagButton = useRef<HTMLButtonElement>(null);
+  const cartDrawer = useRef<HTMLElement>(null);
   const [exchangeRate, setExchangeRate] = useState<{ usdPerInr: number; date: string } | null>(null);
   useEffect(() => {
     const controller = new AbortController();
@@ -143,10 +145,11 @@ export default function App() {
       return saved?.paymentMethod === 'upi' && saved.orderId ? saved : null;
     } catch { return null; }
   });
-  const [paymentStatus, setPaymentStatus] = useState('pending');
+  const [paymentStatus, setPaymentStatus] = useState(paymentOrder ? 'checking' : 'pending');
   const [paymentOrderStatus, setPaymentOrderStatus] = useState('');
   const [ordersRefresh, setOrdersRefresh] = useState(0);
   const [paymentMessage, setPaymentMessage] = useState('');
+  const [checkoutError, setCheckoutError] = useState('');
   const [paymentConfiguration, setPaymentConfiguration] = useState<PaymentConfiguration | null>(null);
   const [sitePublished, setSitePublished] = useState<boolean | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
@@ -311,7 +314,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!paymentOrder || !['pending', 'failed', 'cancelled'].includes(paymentStatus)) return;
+    if (paymentOrder && cartOpen) cartDrawer.current?.scrollTo({ top: 0 });
+  }, [paymentOrder?.orderId, cartOpen]);
+
+  useEffect(() => {
+    if (!paymentOrder || !['checking', 'pending', 'failed', 'cancelled'].includes(paymentStatus)) return;
     let stopped = false;
     let timer = 0;
     const poll = async () => {
@@ -534,9 +541,10 @@ export default function App() {
   }
 
   async function checkout() {
+    setCheckoutError('');
     if (!customer) {
       setAccountOpen(true);
-      setNotice('Sign in to continue to checkout');
+      setCheckoutError('Sign in to continue to checkout.');
       return;
     }
     setBusy(true);
@@ -565,7 +573,7 @@ export default function App() {
       setPaymentMessage(paymentMethod === 'cod'
         ? 'Your order is confirmed Please pay the delivery partner in cash when your order arrives'
         : order.provider === 'manual_upi'
-          ? 'Open your UPI app to pay. AHUZA will confirm your order after manually checking the bank credit.'
+          ? 'Scan the QR code with a UPI app. AHUZA will confirm your order after manually checking the bank credit.'
           : 'Complete your payment on Instamojo. Your order is confirmed after the payment is verified.');
       if (paymentMethod === 'cod') setCart([]);
       else {
@@ -573,7 +581,7 @@ export default function App() {
         if (order.provider !== 'manual_upi') window.location.assign(order.payUrl!);
       }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Could not start checkout');
+      setCheckoutError(error instanceof Error ? error.message : 'Could not start checkout');
     } finally {
       setBusy(false);
     }
@@ -924,7 +932,7 @@ export default function App() {
         </div>
       </div>}
       {cartOpen && <div className="overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setCartOpen(false); }}>
-        <aside className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="bag-title">
+        <aside ref={cartDrawer} className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="bag-title">
           <div className="drawer-heading"><div><p className="eyebrow dark-eyebrow">AHUZA Apparel</p><h2 id="bag-title">{storefrontText('bagTitle')} <span>({cartCount})</span></h2></div><button className="icon-button" aria-label="Close bag" onClick={() => setCartOpen(false)}><X size={21} /></button></div>
           {paymentOrder ? <section className="payment-panel" aria-live="polite">
             {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && <CheckCircle2 className="payment-success-icon" size={46} aria-hidden="true" />}
@@ -932,7 +940,7 @@ export default function App() {
             <h3>{paymentOrder.paymentMethod === 'cod' ? storefrontText('payOrderConfirmed') : paymentStatus === 'paid' && paymentOrderStatus === 'cancelled' ? 'Payment received — order needs review' : paymentStatus === 'paid' ? storefrontText('payConfirmed') : paymentStatus === 'failed' ? storefrontText('payFailed') : paymentStatus === 'expired' || paymentStatus === 'cancelled' ? storefrontText('payClosed') : paymentStatus === 'pending' ? storefrontText('payUpiPending') : storefrontText('payPending')}</h3>
             <p>{paymentMessage || storefrontText('payWaiting')}</p>
             <p><strong>{formatPrice(paymentOrder.amount / 100)}</strong>{paymentOrder.paymentReference ? ` · Reference ${paymentOrder.paymentReference}` : ` · Order ${paymentOrder.orderId.slice(0, 8)}`}</p>
-            {paymentOrder.paymentMethod === 'upi' && ['pending', 'failed', 'cancelled'].includes(paymentStatus) && <>{paymentStatus !== 'cancelled' && (!paymentOrder.expiresAt || Date.parse(paymentOrder.expiresAt) > Date.now()) && <a className="dark-button" href={paymentOrder.payUrl} onClick={() => setPaymentMessage(paymentOrder.provider === 'manual_upi' ? 'After paying, return here. AHUZA will manually check the bank credit before confirming your order.' : storefrontText('payAppOpened'))}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : storefrontText('checkoutPayUpi')}</a>}<p className="payment-pending"><span className="payment-spinner" /> {storefrontText('payChecking')}</p><button className="invoice-button" type="button" disabled={busy} onClick={() => void refreshPaymentStatus()}>{storefrontText('payRefresh')}</button>{paymentStatus === 'pending' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void reportPaymentFailure()}>{storefrontText('payReportFailure')}</button>}{paymentStatus !== 'cancelled' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void cancelPayment()}>{storefrontText('payCancel')}</button>}</>}
+            {paymentOrder.paymentMethod === 'upi' && ['pending', 'failed', 'cancelled'].includes(paymentStatus) && <>{paymentStatus !== 'cancelled' && (!paymentOrder.expiresAt || Date.parse(paymentOrder.expiresAt) > Date.now()) && (paymentOrder.provider === 'manual_upi' && paymentOrder.payUrl?.startsWith('upi://pay?') ? <PaymentQr payUrl={paymentOrder.payUrl} /> : paymentOrder.provider !== 'manual_upi' && <a className="dark-button" href={paymentOrder.payUrl} onClick={() => setPaymentMessage(storefrontText('payAppOpened'))}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : storefrontText('checkoutPayUpi')}</a>)}<p className="payment-pending"><span className="payment-spinner" /> {storefrontText('payChecking')}</p><button className="invoice-button" type="button" disabled={busy} onClick={() => void refreshPaymentStatus()}>{storefrontText('payRefresh')}</button>{paymentOrder.provider !== 'manual_upi' && paymentStatus === 'pending' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void reportPaymentFailure()}>{storefrontText('payReportFailure')}</button>}{paymentStatus !== 'cancelled' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void cancelPayment()}>{storefrontText('payCancel')}</button>}</>}
             {paymentStatus === 'failed' && <p>{storefrontText('payFailureNote')}</p>}
             {(paymentOrder.paymentMethod === 'cod' || paymentStatus === 'paid' || paymentStatus === 'cancelled' || paymentStatus === 'expired') && <button className="dark-button" type="button" onClick={() => { setPaymentOrder(null); setPaymentStatus('pending'); setCartOpen(false); }}>{paymentStatus === 'cancelled' ? storefrontText('payReturn') : 'Done'}</button>}
             {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && paymentOrderStatus === 'cancelled' && <p className="payment-next-steps">Please contact AHUZA if you need an update about fulfillment or refund arrangements.</p>}
@@ -949,6 +957,7 @@ export default function App() {
               <fieldset className="payment-method-options"><legend>{storefrontText('checkoutPaymentMethod')}</legend><label><input type="radio" name="paymentMethod" value="upi" checked={paymentMethod === 'upi'} onChange={() => setPaymentMethod('upi')} disabled={!paymentConfiguration?.configured} /> {storefrontText('checkoutPayUpi')}</label><label><input type="radio" name="paymentMethod" value="cod" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} /> {storefrontText('checkoutCod')}</label></fieldset>
               {paymentMethod === 'upi' && !paymentConfiguration?.configured && <p className="payment-config-warning" role="status">{paymentConfiguration ? storefrontText('checkoutUpiUnavailable') : storefrontText('checkoutUpiChecking')}</p>}
               {paymentMethod === 'upi' && paymentConfiguration?.configured && <p className="payment-config-warning">{paymentConfiguration.automaticVerification ? 'Payment remains pending until Instamojo confirms it. Confirmation can take time.' : 'Payment remains pending until AHUZA manually verifies the bank credit. Confirmation can take time.'}</p>}
+              {checkoutError && <p className="payment-config-warning" role="alert">{checkoutError}</p>}
               <label className="consent-check"><input type="checkbox" checked={marketingConsent} onChange={(event) => setMarketingConsent(event.target.checked)} />{storefrontText('checkoutConsent')}</label><button className="dark-button checkout-button" disabled={busy || (paymentMethod === 'upi' && paymentConfiguration?.configured !== true)}>{busy ? storefrontText('checkoutPlacing') : customer ? paymentMethod === 'cod' ? storefrontText('checkoutPlaceCod') : paymentConfiguration?.configured ? storefrontText('checkoutContinueUpi') : storefrontText('checkoutUpiUnavailableButton') : storefrontText('checkoutSignIn')} <ArrowRight size={16} /></button></form><small>{storefrontText('checkoutPolicy')}</small></div>
           </>}
         </aside>

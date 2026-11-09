@@ -40,6 +40,8 @@
 .payment-panel .payment-test-warning{color:#7c5200}
 .payment-config-warning{margin:0}
 .payment-panel a{color:#3a493c;font-size:12px}
+.payment-qr{display:grid;justify-items:center;gap:8px;max-width:100%}
+.payment-qr svg{display:block;width:min(224px,100%);height:auto;background:#fff}
 @keyframes payment-spin{to{transform:rotate(360deg)}}
 
 @media(max-width:760px){

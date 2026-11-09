@@ -45,9 +45,9 @@ All checkout charges remain in INR.
 To enable the self-hosted UPI checkout, configure the storefront service with
 `PAYMENT_PROVIDER=manual_upi`, `UPI_VPA` (the receiving UPI ID), and
 `UPI_PAYEE_NAME` (the recipient name shown in the UPI app). Verify the UPI ID
-with a small controlled payment before accepting customer orders. The link opens
-an installed UPI app on a compatible device; it is not itself a payment processor
-and does not prove a payment was made. No separate Ahuza Pay server, bank API,
+with a small controlled payment before accepting customer orders. The checkout
+displays a QR code to scan with a UPI app on another device. The QR code is not
+a payment processor and does not prove a payment was made. No separate Ahuza Pay server, bank API,
 bank-alert forwarding, or automatic settlement matching is used.
 
 Orders remain pending until an owner checks the actual bank statement, matches
