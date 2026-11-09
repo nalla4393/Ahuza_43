@@ -39,6 +39,11 @@
 .payment-test-warning,.payment-config-warning{padding:10px 12px;background:#fff1cf;color:#7c5200;font-size:11px;line-height:1.5}
 .payment-panel .payment-test-warning{color:#7c5200}
 .payment-config-warning{margin:0}
+.manual-payment-instructions{padding:10px 12px;background:#fff1cf;color:#7c5200;font-size:11px;line-height:1.5;text-align:left;overflow-wrap:anywhere}
+.manual-payment-instructions p{margin:6px 0}
+.manual-payment-instructions ol{margin:6px 0 0;padding-left:18px}
+.manual-payment-instructions li+li{margin-top:5px}
+.payment-panel .manual-payment-instructions p{font-size:11px;line-height:1.5;color:inherit}
 .payment-panel a{color:#3a493c;font-size:12px}
 .payment-qr{display:grid;justify-items:center;gap:8px;max-width:100%}
 .payment-qr svg{display:block;width:min(224px,100%);height:auto;background:#fff}

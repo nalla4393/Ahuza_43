@@ -54,7 +54,11 @@ verification is not available in this mode.
 Orders remain pending until an owner checks the actual bank statement, matches
 the credit to the customer and order, and enters the bank transaction reference
 in **Owner Studio → Orders → Confirm UPI payment received**. Never confirm from
-a screenshot or amount alone. A transaction reference cannot be reused for a
+a screenshot or amount alone. Before UPI checkout and on the pending-payment
+screen, customers are told to email a payment screenshot, order number and bank
+reference to the storefront contact email if the payment-successful page does
+not appear. The screenshot is for reference only; never ask for a UPI PIN or OTP.
+A transaction reference cannot be reused for a
 different order. Pending orders reserve stock for 60 minutes; customers must not
 pay after expiry. If a payment arrives after cancellation or expiry, review it
 against the bank statement; confirmation can restore the order only if stock
