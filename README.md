@@ -32,13 +32,37 @@ The chat menus, preloaded options and messages are unchanged. Typed questions ar
 
 The AI owner agent reads current store data and can propose inventory updates, order-status changes, and customer-email drafts. Write actions require owner approval; email drafts must still be reviewed before sending. Exact inventory commands such as `set stock AH-SFS-001 to 20` work without Gemini and produce an approval proposal. Set `GEMINI_API_KEY` for natural-language planning and email drafting. Configure `RESEND_API_KEY` in `.env` to enable Resend email.
 
-## Online payments (Instamojo)
+## Online payments
 
 Checkout supports billing addresses worldwide but delivery is currently limited to India.
 Product pages show approximate USD prices using the INR/USD rate from Frankfurter; the server
 caches the latest rate for up to one hour and rejects rates older than seven days. The browser
 refreshes the estimate hourly and shows it as unavailable if the rate cannot be fetched.
 All checkout charges remain in INR.
+
+### Ahuza Pay (manual UPI verification)
+
+To enable the self-hosted UPI checkout, configure the storefront service with
+`PAYMENT_PROVIDER=manual_upi`, `UPI_VPA` (the receiving UPI ID), and
+`UPI_PAYEE_NAME` (the recipient name shown in the UPI app). Verify the UPI ID
+with a small controlled payment before accepting customer orders. The link opens
+an installed UPI app on a compatible device; it is not itself a payment processor
+and does not prove a payment was made. No separate Ahuza Pay server, bank API,
+bank-alert forwarding, or automatic settlement matching is used.
+
+Orders remain pending until an owner checks the actual bank statement, matches
+the credit to the customer and order, and enters the bank transaction reference
+in **Owner Studio → Orders → Confirm UPI payment received**. Never confirm from
+a screenshot or amount alone. A transaction reference cannot be reused for a
+different order. Pending orders reserve stock for 60 minutes; customers must not
+pay after expiry. If a payment arrives after cancellation or expiry, review it
+against the bank statement; confirmation can restore the order only if stock
+is still available. Otherwise arrange a refund or other resolution manually.
+Email notifications are queued when configured; delivery is not guaranteed.
+
+### Instamojo
+
+The default `PAYMENT_PROVIDER=instamojo` keeps the existing Instamojo flow.
 
 The backend calculates the order amount, reserves stock, creates an Instamojo payment request and returns its `longurl` as `payUrl`. The browser redirects to Instamojo. The store polls Instamojo's authenticated API and confirms the order only after a matching successful payment is reported; browser redirects are not proof of payment.
 
@@ -75,10 +99,10 @@ GitHub Pages cannot host this application because it needs the Express API for t
 
 1. Create a Railway project and an empty service for this application. In the service settings, set the build command to `npm ci && npm run build`, the start command to `npm start`, and the health-check path to `/api/health`. Do not enable Railway's own GitHub auto-deploy; GitHub Actions performs the deploy after verification.
 2. Add a Railway volume to the service mounted at `/app/.data`. Set `DATA_FILE=/app/.data/ahuza-db.json` and `SESSION_FILE_PATH=/app/.data/sessions` so the database and customer sessions survive deploys and restarts. Keep this as a single service instance; the JSON database and file-backed sessions are not safe for multiple instances.
-3. Add `SESSION_SECRET` (a stable random value of at least 32 characters) and `OWNER_API_KEY` in Railway's service variables. Railway supplies `PORT`. Online checkout stays disabled until the Instamojo credentials are configured.
+3. Add `SESSION_SECRET` (a stable random value of at least 32 characters) and `OWNER_API_KEY` in Railway's service variables. Railway supplies `PORT`. Configure either Instamojo or the manual UPI variables above to enable online checkout.
 4. Create a Railway project token. In the GitHub repository, add it under **Settings → Secrets and variables → Actions → Secrets** as `RAILWAY_TOKEN`. Add the Railway web service name or ID under **Settings → Secrets and variables → Actions → Variables** as `RAILWAY_SERVICE`. Do not commit or paste the token into the repository.
 5. Push to `main` or manually run **Actions → Verify and deploy to Railway**. The workflow runs `npm test` and `npm run build` first, then deploys only if those checks pass. Once Railway assigns a public domain, verify `/api/health` and the storefront.
-6. Before accepting online payments, set the Instamojo credentials and complete a small live transaction end to end.
+6. Before accepting online payments, configure the selected payment method and complete a small live transaction end to end, including bank reconciliation for manual UPI.
 
 Configure a Railway volume and stable secrets before treating the deployment as production-ready.
 

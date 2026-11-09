@@ -48,7 +48,7 @@ const orderStatusLabel = (order: { status: string; paymentStatus?: string; payme
   if (order.status === 'pending_payment') return 'Awaiting payment confirmation';
   return `${order.status.replaceAll('_', ' ')}${order.paymentStatus === 'paid' ? ' · payment received' : ''}`;
 };
-type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; paymentReference?: string; payUrl?: string; amount: number; currency: string; expiresAt?: string; status?: string; orderStatus?: string };
+type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; provider?: 'instamojo' | 'manual_upi'; paymentReference?: string; payUrl?: string; amount: number; currency: string; expiresAt?: string; status?: string; orderStatus?: string };
 type PaymentConfiguration = { configured: boolean; automaticVerification: boolean };
 
 type AddressValues = { name: string; addressLine1: string; addressLine2: string; city: string; state: string; country: string; postalCode: string; phone: string };
@@ -298,7 +298,7 @@ export default function App() {
     }));
   }, [products]);
 
-  // Remember the pending order while the customer is on the hosted payment page.
+  // Remember the pending order while the customer is in the payment app.
   useEffect(() => {
     try {
       if (paymentOrder?.paymentMethod === 'upi' && paymentStatus !== 'paid') localStorage.setItem('ahuza.pendingPayment', JSON.stringify(paymentOrder));
@@ -556,7 +556,7 @@ export default function App() {
       if (!response.ok || !order.orderId || order.paymentMethod !== paymentMethod || typeof order.amount !== 'number') {
         throw new Error(order.error || 'Could not start checkout');
       }
-      if (paymentMethod === 'upi' && (!order.paymentReference || !order.payUrl?.startsWith('https://'))) {
+      if (paymentMethod === 'upi' && (!order.paymentReference || !(order.provider === 'manual_upi' ? order.payUrl?.startsWith('upi://pay?') : order.payUrl?.startsWith('https://')))) {
         throw new Error('The server returned an incomplete payment request');
       }
       setPaymentOrder(order);
@@ -564,11 +564,13 @@ export default function App() {
       setPaymentOrderStatus(paymentMethod === 'cod' ? 'confirmed' : 'pending_payment');
       setPaymentMessage(paymentMethod === 'cod'
         ? 'Your order is confirmed Please pay the delivery partner in cash when your order arrives'
-        : 'Complete your payment on Instamojo. Your order is confirmed after the payment is verified.');
+        : order.provider === 'manual_upi'
+          ? 'Open your UPI app to pay. AHUZA will confirm your order after manually checking the bank credit.'
+          : 'Complete your payment on Instamojo. Your order is confirmed after the payment is verified.');
       if (paymentMethod === 'cod') setCart([]);
       else {
         localStorage.setItem('ahuza.pendingPayment', JSON.stringify(order));
-        window.location.assign(order.payUrl!);
+        if (order.provider !== 'manual_upi') window.location.assign(order.payUrl!);
       }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not start checkout');
@@ -592,7 +594,9 @@ export default function App() {
           ? 'Your payment has been received and your order is confirmed. A confirmation email with your invoice is on its way'
         : result.status === 'cancelled' || result.status === 'expired'
           ? 'This order is closed Do not use its old UPI link'
-          : 'Payment is still pending An authorized AHUZA owner must verify the settled credit in the bank account');
+          : paymentOrder.provider === 'manual_upi'
+            ? 'Payment is pending. AHUZA must manually verify the settled bank credit. Contact AHUZA with your bank reference if you have paid.'
+            : 'Payment is still pending. Instamojo has not confirmed it yet.');
     } catch (error) { setPaymentMessage(error instanceof Error ? error.message : 'Could not refresh order status'); }
     finally { setBusy(false); }
   }
@@ -783,7 +787,7 @@ export default function App() {
             </div>
             : <button key={label} type="button" onClick={() => openNavItem(label)}>{label}</button>)}
         </nav>
-        <a className="wordmark brand-logo-link" href="#home" aria-label="AHUZA home"><img className="brand-logo" src="/ahuza-brand-logo.png" alt="" width="839" height="720" /><span className="wordmark-tagline">{storefrontText('headerBrandTagline')}</span></a>
+        <a className="wordmark brand-logo-link" href="#home" aria-label="AHUZA home"><span className="brand-logo-row"><span className="wordmark-star" aria-hidden="true">☆</span><img className="brand-logo" src="/ahuza-brand-logo.png" alt="" width="839" height="720" /></span><span className="wordmark-tagline">{storefrontText('headerBrandTagline')}</span></a>
         <form className="header-search" role="search" onSubmit={(event) => { event.preventDefault(); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>
           <label className="sr-only" htmlFor="header-search-input">Search AHUZA</label>
           <input id="header-search-input" type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); if (event.target.value) setCatalogOpen(true); }} placeholder={storefrontText('searchPlaceholder')} autoComplete="off" />
@@ -906,7 +910,7 @@ export default function App() {
         <div className="footer-bottom"><a className="wordmark footer-brand-logo" href="#home" aria-label="AHUZA home"><img className="brand-logo" src="/ahuza-brand-logo.png" alt="" width="839" height="720" loading="lazy" /></a><span>© AHUZA Apparel 2026</span><a className="footer-terms" href="/terms.html">Terms and Conditions</a><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
       </footer>
 
-      {paymentOrder?.paymentMethod === 'upi' && paymentStatus === 'paid' && <div className="payment-success-page" role="dialog" aria-modal="true" aria-labelledby="payment-success-title">
+      {paymentOrder?.paymentMethod === 'upi' && paymentStatus === 'paid' && paymentOrderStatus !== 'cancelled' && <div className="payment-success-page" role="dialog" aria-modal="true" aria-labelledby="payment-success-title">
         <div className="payment-success-card">
           <div className="payment-success-brand"><span>AHUZA</span><small>APPAREL</small></div>
           <div className="payment-success-body">
@@ -924,16 +928,16 @@ export default function App() {
           <div className="drawer-heading"><div><p className="eyebrow dark-eyebrow">AHUZA Apparel</p><h2 id="bag-title">{storefrontText('bagTitle')} <span>({cartCount})</span></h2></div><button className="icon-button" aria-label="Close bag" onClick={() => setCartOpen(false)}><X size={21} /></button></div>
           {paymentOrder ? <section className="payment-panel" aria-live="polite">
             {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && <CheckCircle2 className="payment-success-icon" size={46} aria-hidden="true" />}
-            <p className="eyebrow dark-eyebrow">{paymentOrder.paymentMethod === 'cod' ? storefrontText('checkoutCod') : 'Instamojo checkout'}</p>
+            <p className="eyebrow dark-eyebrow">{paymentOrder.paymentMethod === 'cod' ? storefrontText('checkoutCod') : paymentOrder.provider === 'manual_upi' ? 'Ahuza Pay · UPI' : 'Instamojo checkout'}</p>
             <h3>{paymentOrder.paymentMethod === 'cod' ? storefrontText('payOrderConfirmed') : paymentStatus === 'paid' && paymentOrderStatus === 'cancelled' ? 'Payment received — order needs review' : paymentStatus === 'paid' ? storefrontText('payConfirmed') : paymentStatus === 'failed' ? storefrontText('payFailed') : paymentStatus === 'expired' || paymentStatus === 'cancelled' ? storefrontText('payClosed') : paymentStatus === 'pending' ? storefrontText('payUpiPending') : storefrontText('payPending')}</h3>
             <p>{paymentMessage || storefrontText('payWaiting')}</p>
             <p><strong>{formatPrice(paymentOrder.amount / 100)}</strong>{paymentOrder.paymentReference ? ` · Reference ${paymentOrder.paymentReference}` : ` · Order ${paymentOrder.orderId.slice(0, 8)}`}</p>
-            {paymentOrder.paymentMethod === 'upi' && ['pending', 'failed', 'cancelled'].includes(paymentStatus) && <>{paymentStatus !== 'cancelled' && <a className="dark-button" href={paymentOrder.payUrl} onClick={() => setPaymentMessage(storefrontText('payAppOpened'))}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : storefrontText('checkoutPayUpi')}</a>}<p className="payment-pending"><span className="payment-spinner" /> {storefrontText('payChecking')}</p><button className="invoice-button" type="button" disabled={busy} onClick={() => void refreshPaymentStatus()}>{storefrontText('payRefresh')}</button>{paymentStatus === 'pending' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void reportPaymentFailure()}>{storefrontText('payReportFailure')}</button>}{paymentStatus !== 'cancelled' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void cancelPayment()}>{storefrontText('payCancel')}</button>}</>}
+            {paymentOrder.paymentMethod === 'upi' && ['pending', 'failed', 'cancelled'].includes(paymentStatus) && <>{paymentStatus !== 'cancelled' && (!paymentOrder.expiresAt || Date.parse(paymentOrder.expiresAt) > Date.now()) && <a className="dark-button" href={paymentOrder.payUrl} onClick={() => setPaymentMessage(paymentOrder.provider === 'manual_upi' ? 'After paying, return here. AHUZA will manually check the bank credit before confirming your order.' : storefrontText('payAppOpened'))}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : storefrontText('checkoutPayUpi')}</a>}<p className="payment-pending"><span className="payment-spinner" /> {storefrontText('payChecking')}</p><button className="invoice-button" type="button" disabled={busy} onClick={() => void refreshPaymentStatus()}>{storefrontText('payRefresh')}</button>{paymentStatus === 'pending' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void reportPaymentFailure()}>{storefrontText('payReportFailure')}</button>}{paymentStatus !== 'cancelled' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void cancelPayment()}>{storefrontText('payCancel')}</button>}</>}
             {paymentStatus === 'failed' && <p>{storefrontText('payFailureNote')}</p>}
             {(paymentOrder.paymentMethod === 'cod' || paymentStatus === 'paid' || paymentStatus === 'cancelled' || paymentStatus === 'expired') && <button className="dark-button" type="button" onClick={() => { setPaymentOrder(null); setPaymentStatus('pending'); setCartOpen(false); }}>{paymentStatus === 'cancelled' ? storefrontText('payReturn') : 'Done'}</button>}
             {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && paymentOrderStatus === 'cancelled' && <p className="payment-next-steps">Please contact AHUZA if you need an update about fulfillment or refund arrangements.</p>}
             {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && paymentOrderStatus !== 'cancelled' && <p className="payment-next-steps">Thank you for choosing AHUZA. Please check your email for payment confirmation and order approval. Your invoice and receipt are also available under Account › Order history. We’ll email you tracking details as soon as your order is on its way.</p>}
-            {paymentOrder.paymentMethod === 'upi' && paymentStatus !== 'paid' && <small>{storefrontText('payVerificationNote')}</small>}
+            {paymentOrder.paymentMethod === 'upi' && paymentStatus !== 'paid' && <small>{paymentOrder.provider === 'manual_upi' ? 'Manual confirmation is required. Do not pay after the 60-minute reservation expires. If you have already paid, contact AHUZA with your order and bank transaction reference.' : storefrontText('payVerificationNote')}</small>}
           </section> : cartLines.length === 0 ? <div className="empty-bag"><ShoppingBag size={25} /><p>{storefrontText('bagEmpty')}</p><button className="dark-button" onClick={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>{storefrontText('bagExplore')}</button></div> : <>
             <div className="bag-lines">{cartLines.map(({ product, quantity, size }) => <div className="bag-line" key={`${product.id}-${size || 'standard'}`}><img src={mainImage(product)?.variants[0]?.url || product.imageUrl} alt="" /><div className="bag-line-copy"><h3>{product.name}</h3><p>{formatPrice(product.price)}{size ? ` · Size ${size}` : ''}</p><div className="quantity-control"><button type="button" aria-label={`Remove one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, -1)}><Minus size={13} /></button><span>{quantity}</span><button type="button" aria-label={`Add one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, 1)} disabled={cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0) >= Math.min(product.stock, 10)}><Plus size={13} /></button></div></div><span className="line-total">{formatPrice(product.price * quantity)}</span></div>)}</div>
             <div className="bag-footer"><div className="subtotal"><span>{storefrontText('bagSubtotal')}</span><strong>{formatPrice(cartTotal)}</strong></div><div className="subtotal"><span>{storefrontText('bagShipping')}</span><strong>{estimatedShipping ? formatPrice(estimatedShipping) : storefrontText('bagComplimentary')}</strong></div><div className="subtotal"><span>{storefrontText('bagTotal')}</span><strong>{formatPrice(cartTotal + estimatedShipping)}</strong></div><p>{storefrontText('bagShippingNote')}</p><form className="checkout-details" onSubmit={(event) => { event.preventDefault(); void checkout(); }}>
@@ -944,7 +948,7 @@ export default function App() {
               {(sameAsBilling ? billingAddress : deliveryAddress).country !== 'India' && <p className="payment-config-warning" role="alert">Delivery is currently available only within India.</p>}
               <fieldset className="payment-method-options"><legend>{storefrontText('checkoutPaymentMethod')}</legend><label><input type="radio" name="paymentMethod" value="upi" checked={paymentMethod === 'upi'} onChange={() => setPaymentMethod('upi')} disabled={!paymentConfiguration?.configured} /> {storefrontText('checkoutPayUpi')}</label><label><input type="radio" name="paymentMethod" value="cod" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} /> {storefrontText('checkoutCod')}</label></fieldset>
               {paymentMethod === 'upi' && !paymentConfiguration?.configured && <p className="payment-config-warning" role="status">{paymentConfiguration ? storefrontText('checkoutUpiUnavailable') : storefrontText('checkoutUpiChecking')}</p>}
-              {paymentMethod === 'upi' && paymentConfiguration?.configured && <p className="payment-config-warning">Payment remains pending until Instamojo confirms it. Confirmation can take time.</p>}
+              {paymentMethod === 'upi' && paymentConfiguration?.configured && <p className="payment-config-warning">{paymentConfiguration.automaticVerification ? 'Payment remains pending until Instamojo confirms it. Confirmation can take time.' : 'Payment remains pending until AHUZA manually verifies the bank credit. Confirmation can take time.'}</p>}
               <label className="consent-check"><input type="checkbox" checked={marketingConsent} onChange={(event) => setMarketingConsent(event.target.checked)} />{storefrontText('checkoutConsent')}</label><button className="dark-button checkout-button" disabled={busy || (paymentMethod === 'upi' && paymentConfiguration?.configured !== true)}>{busy ? storefrontText('checkoutPlacing') : customer ? paymentMethod === 'cod' ? storefrontText('checkoutPlaceCod') : paymentConfiguration?.configured ? storefrontText('checkoutContinueUpi') : storefrontText('checkoutUpiUnavailableButton') : storefrontText('checkoutSignIn')} <ArrowRight size={16} /></button></form><small>{storefrontText('checkoutPolicy')}</small></div>
           </>}
         </aside>

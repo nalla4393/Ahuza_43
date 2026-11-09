@@ -217,6 +217,7 @@ html,body,body *{font-family:var(--site-font) !important}
 .site-footer .footer-bottom{border-top-color:rgb(255 255 255 / 24%)}
 
 .site-header>.brand-logo-link{display:flex;flex-direction:column;align-items:center;gap:2px}
+.brand-logo-row{display:flex;align-items:center;gap:6px}
 .brand-logo{display:block;width:auto;height:64px;max-width:100%;object-fit:contain}
 .site-header .brand-logo-link .wordmark-tagline{margin:0;max-width:120px;text-align:center;line-height:1.2}
 .footer-brand-logo{display:inline-flex;padding:6px 12px;border-radius:4px;background:#f6f3ec}

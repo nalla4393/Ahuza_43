@@ -14,7 +14,8 @@ import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
 import { createInstamojoRequest, instamojoAmountInPaise, instamojoConfigured, instamojoWebhookConfigured, verifyInstamojoWebhook } from './services/instamojo.js';
 import { customerDataConfigured, decryptCustomerValue, encryptCustomerValue, isValidUpiId } from './services/customerData.js';
-import { confirmInstamojoWebhookPayment, confirmUpiPaymentByOwner, syncInstamojoPayment } from './services/paymentSync.js';
+import { confirmInstamojoWebhookPayment, confirmUpiPaymentByOwner, outOfStockItems, syncInstamojoPayment } from './services/paymentSync.js';
+import { manualUpiConfiguration, manualUpiLink, paymentProvider } from './services/manualUpi.js';
 import { buildInvoicePdf } from './services/invoice.js';
 import { storefrontCopyFields } from '../shared/storefrontCopy.js';
 import { isValidCountryRegion } from '../shared/address.js';
@@ -329,7 +330,11 @@ api.delete('/wishlist/:productId', requireCustomer, async (request, response) =>
 async function createPaymentOrder(request: Request, response: Response): Promise<void> {
   const paymentMethod = request.body?.paymentMethod;
   if (paymentMethod !== 'upi' && paymentMethod !== 'cod') { response.status(400).json({ error: 'Choose UPI or cash on delivery' }); return; }
-  if (paymentMethod === 'upi' && !instamojoConfigured()) { response.status(503).json({ error: 'Online payment is unavailable: Instamojo is not configured' }); return; }
+  const provider = paymentProvider();
+  const manualUpi = provider === 'manual_upi' ? manualUpiConfiguration() : null;
+  if (paymentMethod === 'upi' && (provider === 'invalid' || (provider === 'instamojo' && !instamojoConfigured()) || (provider === 'manual_upi' && !manualUpi))) {
+    response.status(503).json({ error: 'Online payment is unavailable: payment configuration is incomplete' }); return;
+  }
   const rawPayerUpi = request.body?.payerUpiId;
   const payerUpiId = typeof rawPayerUpi === 'string' ? rawPayerUpi.trim() : '';
   if (paymentMethod === 'upi' && payerUpiId && !isValidUpiId(payerUpiId)) { response.status(400).json({ error: 'Enter a valid UPI ID such as name@bank, or leave it blank' }); return; }
@@ -391,7 +396,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   const paymentReference = `AHUZA-${randomUUID().replaceAll('-', '').slice(0, 20).toUpperCase()}`;
   const expiresAt = paymentMethod === 'upi' ? new Date(Date.now() + 60 * 60 * 1000) : null;
   const persisted = await mutateDatabase((database) => {
-    const available = orderItems.every((item) => {
+    const available = !outOfStockItems(database, { items: orderItems }).length && orderItems.every((item) => {
       const product = database.products.find((entry) => entry.id === item.productId && entry.active);
       return product && product.stock >= item.quantity && product.price === item.unitPrice;
     });
@@ -423,6 +428,13 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     response.status(201).json({ orderId: localOrderId, paymentMethod, status: 'confirmed', amount, currency: 'INR' });
     return;
   }
+  if (provider === 'manual_upi' && manualUpi) {
+    const payUrl = manualUpiLink(manualUpi, amount, paymentReference);
+    if (customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
+    void enqueueOrderEmail(localOrderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
+    response.status(201).json({ orderId: localOrderId, paymentMethod, paymentReference, payUrl, provider, amount, currency: 'INR', expiresAt: expiresAt!.toISOString(), status: 'pending' });
+    return;
+  }
   let payUrl: string;
   try {
     const created = await createInstamojoRequest(placed!, customerEmail || '');
@@ -449,11 +461,12 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     return;
   }
   // The storefront uses payUrl; longurl is also returned explicitly for API clients.
-  response.status(201).json({ orderId: localOrderId, paymentMethod, paymentReference, payUrl, longurl: payUrl, amount, currency: 'INR', expiresAt: expiresAt!.toISOString(), status: 'pending' });
+  response.status(201).json({ orderId: localOrderId, paymentMethod, paymentReference, payUrl, longurl: payUrl, provider: 'instamojo', amount, currency: 'INR', expiresAt: expiresAt!.toISOString(), status: 'pending' });
 }
 
 api.get('/payments/config', (_request, response) => {
-  response.json({ configured: instamojoConfigured(), automaticVerification: true });
+  const provider = paymentProvider();
+  response.json({ configured: provider === 'manual_upi' ? !!manualUpiConfiguration() : provider === 'instamojo' && instamojoConfigured(), automaticVerification: provider === 'instamojo', provider });
 });
 
 api.post('/payments/instamojo/webhook', express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {
@@ -493,6 +506,7 @@ api.post('/payments/orders', requireCustomer, paymentLimit, async (request, resp
 });
 
 api.get('/payments/orders/:id/status', requireCustomer, paymentLimit, async (request, response) => {
+  await expirePendingOrders();
   await syncInstamojoPayment(String(request.params.id), request.session.userId!).catch((error) => console.error('Instamojo status sync failed:', error));
   const order = (await getDatabase()).orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
@@ -898,7 +912,11 @@ api.patch('/owner/orders/:id/status', requireOwner, ownerLimit, async (request, 
 });
 
 api.patch('/owner/orders/:id/confirm-upi-payment', requireOwner, ownerLimit, async (request, response) => {
-  const result = await confirmUpiPaymentByOwner(String(request.params.id));
+  const reference = request.body?.transactionReference;
+  if (typeof reference !== 'string' || !/^[a-zA-Z0-9-]{6,100}$/.test(reference.trim())) {
+    response.status(400).json({ error: 'Enter the bank transaction reference (6–100 letters, digits or hyphens)' }); return;
+  }
+  const result = await confirmUpiPaymentByOwner(String(request.params.id), reference.trim());
   if (!result.ok) { response.status(409).json({ error: result.error }); return; }
   response.json({ order: (await getDatabase()).orders.find((entry) => entry.id === request.params.id) });
 });

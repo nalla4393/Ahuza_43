@@ -93,21 +93,23 @@ export async function reconcileInstamojoOrders(): Promise<void> {
   }
 }
 
-export async function confirmUpiPaymentByOwner(orderId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function confirmUpiPaymentByOwner(orderId: string, transactionReference: string): Promise<{ ok: true } | { ok: false; error: string }> {
   const result = await mutateDatabase((database) => {
     const current = database.orders.find((entry) => entry.id === orderId);
     if (!current || current.paymentMethod !== 'upi') return 'Only UPI orders can be confirmed here' as const;
     if (current.instamojoRequestId) return 'Instamojo payments must be verified with Instamojo' as const;
     if (current.paymentStatus === 'paid') return 'This order is already paid' as const;
     if (!OPEN_STATUSES.includes(current.status)) return 'This order cannot be confirmed in its current status' as const;
+    if (!/^[a-zA-Z0-9-]{6,100}$/.test(transactionReference)) return 'Enter a valid bank transaction reference' as const;
+    if (database.orders.some((entry) => entry.id !== orderId && entry.manualPaymentReference?.toLowerCase() === transactionReference.toLowerCase())) return 'This bank transaction reference is already used by another order' as const;
     if (current.status === 'cancelled') {
-      const available = current.items.every((item) => (database.products.find((entry) => entry.id === item.productId)?.stock ?? 0) >= item.quantity);
-      if (!available) return 'Not enough stock to restore this cancelled order' as const;
+      if (outOfStockItems(database, current).length) return 'Not enough stock to restore this cancelled order' as const;
       for (const item of current.items) database.products.find((entry) => entry.id === item.productId)!.stock -= item.quantity;
     }
     current.status = 'paid';
     current.paymentStatus = 'paid';
     current.paymentVerificationMethod = 'manual_bank_reconciliation';
+    current.manualPaymentReference = transactionReference;
     current.paymentVerifiedAt = new Date().toISOString();
     delete current.reservationExpiresAt;
     return true as const;
