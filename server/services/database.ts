@@ -78,7 +78,7 @@ export type ShippingAddress = {
   city: string;
   state: string;
   postalCode: string;
-  country: 'India';
+  country: string;
   phone: string;
 };
 
@@ -101,10 +101,11 @@ export type Order = {
   discountAmount?: number;
   taxAmount?: number;
   paymentReference?: string;
+  instamojoRequestId?: string;
   payerUpiIdEnc?: string;
   paymentVerifiedAt?: string;
   manualPaymentReference?: string;
-  paymentVerificationMethod?: 'manual_bank_reconciliation' | 'ahuza_pay';
+  paymentVerificationMethod?: 'manual_bank_reconciliation' | 'ahuza_pay' | 'instamojo';
   reservationExpiresAt?: string;
   createdAt: string;
   deliveredAt?: string;
@@ -124,15 +125,6 @@ export type OrderEmailNotification = {
   nextAttemptAt: string;
   sentAt?: string;
   lastError?: string;
-};
-
-export type PaymentAgentEntry = {
-  id: string;
-  orderId: string;
-  at: string;
-  trigger: 'ahuza_pay_notify' | 'poll' | 'customer_check' | 'owner_manual';
-  decision: 'confirmed' | 'held_out_of_stock';
-  detail: string;
 };
 
 export type StoreEvent = { id: string; name: string; page?: string; campaign?: string; createdAt: string };
@@ -246,7 +238,6 @@ export type Database = {
   socialPosts?: SocialPost[];
   stockAlerts?: StockAlert[];
   orderEmailNotifications?: OrderEmailNotification[];
-  paymentAgentLog?: PaymentAgentEntry[];
 };
 
 const databasePath = path.resolve(process.env.DATA_FILE || 'data/ahuza-db.json');
@@ -320,7 +311,6 @@ async function loadDatabase(): Promise<Database> {
       socialPosts: Array.isArray(parsed.socialPosts) ? parsed.socialPosts : [],
       stockAlerts: Array.isArray(parsed.stockAlerts) ? parsed.stockAlerts : [],
       orderEmailNotifications: Array.isArray(parsed.orderEmailNotifications) ? parsed.orderEmailNotifications : [],
-      paymentAgentLog: Array.isArray(parsed.paymentAgentLog) ? parsed.paymentAgentLog : [],
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;

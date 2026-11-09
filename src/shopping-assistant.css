@@ -1,0 +1,24 @@
+.shopping-assistant-trip{position:fixed;inset:0;pointer-events:none;z-index:1100;overflow:hidden}
+.shopping-assistant-mover{position:absolute;left:0;top:0;width:54px;height:105px;animation:assistant-pack 2.4s ease-in-out both}
+.shopping-character{position:relative;width:54px;height:105px;filter:drop-shadow(0 3px 4px #0003)}
+.shopping-character-3d{display:block;width:70px;height:116px;margin-left:-8px;margin-top:-8px;filter:drop-shadow(0 3px 4px #0003)}
+.shopping-assistant-face{position:absolute;z-index:3;left:7px;top:0;width:40px;height:40px;border:2px solid #fff;border-radius:50%;object-fit:cover;background:#f6f3ec}
+.shopping-character-body{position:absolute;z-index:2;left:12px;top:37px;width:30px;height:38px;border-radius:10px 10px 6px 6px;background:#a92f49}
+.shopping-character-arm{position:absolute;z-index:1;top:40px;width:9px;height:32px;border-radius:6px;background:#a92f49;transform-origin:top;animation:assistant-arm .38s ease-in-out infinite alternate}
+.shopping-character-arm.left{left:8px;transform:rotate(22deg)}
+.shopping-character-arm.right{right:8px;animation-direction:alternate-reverse}
+.shopping-character-leg{position:absolute;top:71px;width:10px;height:30px;border-radius:0 0 5px 5px;background:#222822;transform-origin:top;animation:assistant-leg .38s ease-in-out infinite alternate}
+.shopping-character-leg.left{left:15px}.shopping-character-leg.right{right:15px;animation-direction:alternate-reverse}
+.shopping-assistant-item{position:absolute;right:-11px;top:55px;width:25px;height:30px;object-fit:cover;border:2px solid white;border-radius:4px;opacity:0;animation:assistant-item 2.4s both}
+.shopping-assistant-receiver{position:absolute;left:var(--bag-x);top:var(--bag-y);transform:translate(-50%,-50%);opacity:0;animation:assistant-receive 2.4s both}
+.shopping-assistant-trip.preview .shopping-assistant-mover{animation:assistant-preview 1.4s ease-in-out both}
+.shopping-assistant-prompt{position:fixed;z-index:1101;right:16px;bottom:80px;display:flex;align-items:center;gap:10px;max-width:calc(100vw - 32px);padding:12px;background:#fff;color:#222822;box-shadow:0 4px 20px #0003;font-size:13px}
+.shopping-assistant-prompt button{border:0;background:#a92f49;color:#fff;padding:8px;cursor:pointer}
+.shopping-assistant-prompt button:last-child{background:transparent;color:#222822;font-size:18px}
+@keyframes assistant-pack{0%{transform:translate(calc(100vw - 85px),calc(100vh - 105px));opacity:0}10%{opacity:1}40%,48%{transform:translate(calc(var(--product-x) - 24px),calc(var(--product-y) - 24px))}84%,94%{transform:translate(calc(var(--bag-x) - 24px),calc(var(--bag-y) - 24px));opacity:1}100%{transform:translate(calc(var(--bag-x) - 24px),calc(var(--bag-y) - 24px));opacity:0}}
+@keyframes assistant-preview{0%{transform:translate(calc(100vw - 85px),calc(100vh - 105px));opacity:0}15%{opacity:1}75%{transform:translate(calc(var(--product-x) - 24px),calc(var(--product-y) - 24px));opacity:1}100%{transform:translate(calc(var(--product-x) - 24px),calc(var(--product-y) - 24px));opacity:0}}
+@keyframes assistant-item{0%,40%{opacity:0}48%,82%{opacity:1}95%,100%{opacity:0}}
+@keyframes assistant-receive{0%,72%{opacity:0;transform:translate(-50%,-50%) scale(.6)}84%,94%{opacity:1;transform:translate(-50%,-50%) scale(1.1)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}
+@keyframes assistant-arm{from{transform:rotate(-25deg)}to{transform:rotate(25deg)}}
+@keyframes assistant-leg{from{transform:rotate(-18deg)}to{transform:rotate(18deg)}}
+@media(prefers-reduced-motion:reduce){.shopping-assistant-trip{display:none}}

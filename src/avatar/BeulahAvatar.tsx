@@ -9,8 +9,7 @@ export type BeulahAvatarHandle = {
 
 export const AVATAR_IMAGE = '/beulah-avatar.jpg';
 
-// Tight crop on the face for the small round header avatar.
-const FACE_FRAME: Frame = { centerY: 0.6, zoom: 2.3 };
+const FACE_FRAME: Frame = { centerY: 0.5, zoom: 0.68 };
 
 // Round animated portrait; falls back to the still photo if WebGL is unavailable.
 // Calls made before the image has loaded are remembered and applied once it is ready.

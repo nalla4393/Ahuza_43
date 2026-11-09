@@ -9,25 +9,22 @@
   "scripts": {
     "dev": "concurrently -k \"vite\" \"tsx watch server.ts\"",
     "build": "tsc --noEmit && vite build && esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=server-dist/server.js",
-    "start": "NODE_ENV=production node start.mjs",
+    "start": "NODE_ENV=production node server-dist/server.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test server/services/*.test.ts && node --test ahuza-pay/server.test.mjs ahuza-pay/bankMail.test.mjs",
-    "pay": "node ahuza-pay/server.mjs"
+    "test": "tsx --test server/services/*.test.ts"
   },
   "dependencies": {
     "@google/genai": "^1.11.0",
     "cors": "^2.8.5",
+    "country-state-city": "^3.2.1",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
     "express-rate-limit": "^8.0.1",
     "express-session": "^1.18.2",
     "helmet": "^8.1.0",
-    "imapflow": "^2.10.0",
     "lucide-react": "^0.468.0",
-    "mailparser": "^3.14.1",
     "nodemailer": "^10.1.0",
     "pdfkit": "^0.20.2",
-    "qrcode": "^1.5.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "session-file-store": "^1.5.0",

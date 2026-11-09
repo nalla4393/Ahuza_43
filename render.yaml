@@ -39,7 +39,13 @@ services:
         value: Ahuza Apparel <orders@ahuzawear.com>
       - key: SUPPORT_EMAIL
         value: info@ahuzawear.com
-      - key: AHUZA_PAY_URL
-        value: https://ahuza-pay-production.up.railway.app
-      - key: AHUZA_PAY_API_KEY
+      - key: INSTAMOJO_API_KEY
         sync: false
+      - key: INSTAMOJO_AUTH_TOKEN
+        sync: false
+      - key: INSTAMOJO_SALT
+        sync: false
+      - key: INSTAMOJO_REDIRECT_URL
+        value: https://www.ahuzawear.com/
+      - key: INSTAMOJO_WEBHOOK_URL
+        value: https://www.ahuzawear.com/api/payments/instamojo/webhook

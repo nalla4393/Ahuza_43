@@ -1,6 +1,5 @@
 import AdStudio from './AdStudio';
 import SocialScheduler from './SocialScheduler';
-import PaymentAgentPanel from './PaymentAgentPanel';
 import MarketingAutomations from './MarketingAutomations';
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import { ArrowLeft, BarChart3, Box, Check, CreditCard, Headphones, Image, LoaderCircle, Mail, MessageCircle, Megaphone, PackageCheck, Plus, Send, Settings2, Sparkles, X } from 'lucide-react';
@@ -23,7 +22,7 @@ type AgentAction =
   | { type: 'update_stock'; productId: string; productName: string; sku: string; previousStock: number; stock: number }
   | { type: 'update_order_status'; orderId: string; previousStatus: string; status: 'shipped' | 'delivered' }
   | { type: 'draft_email'; orderId: string; kind: EmailKind };
-type Tab = 'overview' | 'products' | 'imageSettings' | 'content' | 'orders' | 'support' | 'marketing' | 'ads' | 'email' | 'assistant' | 'social' | 'payments' | 'paymentAgent';
+type Tab = 'overview' | 'products' | 'imageSettings' | 'content' | 'orders' | 'support' | 'marketing' | 'ads' | 'email' | 'assistant' | 'social' | 'payments';
 const circleLabels = ['Women', 'Men', 'Kurtis', 'Frocks', 'Kurta Sets', 'Lehengas', 'Night Suits', 'Track Suits', 'New Arrivals', 'Bestsellers', 'Sale'];
 const bannerSlots = [{ key: 'new', label: 'New Arrivals banner' }, { key: 'sale', label: 'Season sale banner' }, { key: 'festive', label: 'Festive edit banner' }];
 type Props = { onClose: () => void; onProductsChange: (products: Product[]) => void; onContentChange: (content: Content) => void; onSiteStatusChange: (published: boolean) => void; onImageSettingsChange: (settings: ImageSettings) => void };
@@ -31,10 +30,10 @@ type Props = { onClose: () => void; onProductsChange: (products: Product[]) => v
 const emptyContent: Content = { announcement: '', heroEyebrow: '', heroTitle: '', heroDescription: '', heroImageUrl: '', storyHeading: '', storyBody: '', storyImageUrl: '', circleImages: {}, circleLabels: {}, bannerImages: {}, copy: defaultStorefrontCopy };
 const tabs: { id: Tab; label: string; icon: typeof BarChart3 }[] = [
   { id: 'overview', label: 'Overview', icon: BarChart3 }, { id: 'products', label: 'Products & stock', icon: Box },
-  { id: 'imageSettings', label: 'Image Settings', icon: Image }, { id: 'content', label: 'Storefront', icon: Image }, { id: 'orders', label: 'Orders & receipts', icon: PackageCheck }, { id: 'payments', label: 'UPI payee', icon: CreditCard },
+  { id: 'imageSettings', label: 'Image Settings', icon: Image }, { id: 'content', label: 'Storefront', icon: Image }, { id: 'orders', label: 'Orders & receipts', icon: PackageCheck }, { id: 'payments', label: 'Payments', icon: CreditCard },
   { id: 'support', label: 'Support tickets', icon: Headphones }, { id: 'marketing', label: 'Marketing', icon: Megaphone }, { id: 'ads', label: 'Ad agent', icon: Sparkles },
   { id: 'email', label: 'Email agent', icon: Mail }, { id: 'assistant', label: 'AI agent', icon: MessageCircle },
-  { id: 'social', label: 'Social posting', icon: Sparkles }, { id: 'paymentAgent', label: 'Payment agent', icon: CreditCard },
+  { id: 'social', label: 'Social posting', icon: Sparkles },
 ];
 const storefrontCopyGroups = [...new Set(storefrontCopyFields.map(({ group }) => group))];
 
@@ -150,12 +149,6 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
   const [socialProductId, setSocialProductId] = useState('');
   const [busyAction, setBusyAction] = useState(false);
   const [sitePublished, setSitePublished] = useState(true);
-  const [payee, setPayee] = useState<{ vpa: string; payeeName: string; source: string } | null>(null);
-  const [payeeError, setPayeeError] = useState('');
-  const [payText, setPayText] = useState('');
-  const [payTextSaved, setPayTextSaved] = useState('');
-  const [payeeVpaInput, setPayeeVpaInput] = useState('');
-  const [payeeNameInput, setPayeeNameInput] = useState('');
   const [imageSettings, setImageSettings] = useState<ImageSettings | null>(null);
   const [maxUploadMb, setMaxUploadMb] = useState(10);
   const [imagesPending, setImagesPending] = useState(false);
@@ -191,8 +184,6 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
       onSiteStatusChange(siteStatusResult.published);
       setIntegrations(integrationResult.integrations);
       setReady(true);
-      void loadPayee(ownerKey);
-      void loadPayText(ownerKey);
       setSocialProductId(inventoryResult.products.find((product) => product.active)?.id || '');
     } catch (reason) { fail(reason); }
     finally { setLoading(false); }
@@ -207,60 +198,6 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
     const timer = window.setInterval(() => void refreshOrders(key), 10000);
     return () => window.clearInterval(timer);
   }, [ready, key]);
-
-  async function loadPayee(ownerKey: string) {
-    try {
-      const result = await ownerRequest<{ payee: { vpa: string; payeeName: string; source: string } }>(ownerKey, '/api/owner/payee');
-      setPayee(result.payee);
-      setPayeeVpaInput(result.payee.vpa);
-      setPayeeNameInput(result.payee.payeeName);
-      setPayeeError('');
-    } catch (reason) { setPayee(null); setPayeeError(reason instanceof Error ? reason.message : 'Could not load the UPI payee'); }
-  }
-
-  async function loadPayText(ownerKey: string) {
-    try {
-      const result = await ownerRequest<{ text: string }>(ownerKey, '/api/owner/pay-text');
-      setPayText(result.text); setPayTextSaved(result.text);
-    } catch { /* payee panel already reports Ahuza Pay connection errors */ }
-  }
-
-  async function savePayText() {
-    setBusyAction(true);
-    try {
-      const result = await ownerRequest<{ text: string }>(key, '/api/owner/pay-text', { method: 'PUT', body: JSON.stringify({ text: payText }) });
-      setPayText(result.text); setPayTextSaved(result.text);
-      notify('Payment page text saved');
-    } catch (reason) { fail(reason); }
-    finally { setBusyAction(false); }
-  }
-
-  async function savePayee() {
-    setBusyAction(true);
-    try {
-      const result = await ownerRequest<{ payee: { vpa: string; payeeName: string; source: string } }>(key, '/api/owner/payee', { method: 'PUT', body: JSON.stringify({ vpa: payeeVpaInput.trim(), payeeName: payeeNameInput.trim() }) });
-      setPayee(result.payee);
-      setPayeeVpaInput(result.payee.vpa);
-      setPayeeNameInput(result.payee.payeeName);
-      setPayeeError('');
-      notify('Receiving UPI ID saved New payments use it immediately');
-    } catch (reason) { fail(reason); }
-    finally { setBusyAction(false); }
-  }
-
-  async function removePayee() {
-    if (!window.confirm('Remove the saved UPI ID? Checkout will fall back to the server default, and will stop working if none is configured.')) return;
-    setBusyAction(true);
-    try {
-      const result = await ownerRequest<{ payee: { vpa: string; payeeName: string; source: string } }>(key, '/api/owner/payee', { method: 'DELETE' });
-      setPayee(result.payee);
-      setPayeeVpaInput(result.payee.vpa);
-      setPayeeNameInput(result.payee.payeeName);
-      setPayeeError('');
-      notify('Saved UPI ID removed');
-    } catch (reason) { fail(reason); }
-    finally { setBusyAction(false); }
-  }
 
   async function toggleSitePublication() {
     setBusyAction(true);
@@ -529,28 +466,7 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
           <button className="studio-primary studio-publish" disabled={busyAction}>{busyAction ? 'Publishing…' : 'Publish storefront text'} <Check size={16} /></button>
         </form>}
         {tab === 'payments' && <section className="studio-section">
-          <section className="studio-panel studio-payee">
-            <div className="studio-panel-heading"><div><h2>Payment page text</h2><span>Shown to customers on the payment page after Continue to pay Leave empty to show nothing</span></div></div>
-            <label>Text<textarea value={payText} onChange={(event) => setPayText(event.target.value)} maxLength={600} rows={4} placeholder="For example: Scan the QR with any UPI app and pay the exact amount" /></label>
-            <div className="studio-payee-actions">
-              <button className="studio-primary" type="button" disabled={busyAction || payText.trim() === payTextSaved} onClick={() => void savePayText()}>Save text</button>
-            </div>
-          </section>
-          <section className="studio-panel studio-payee">
-            <div className="studio-panel-heading"><div><h2>Receiving UPI ID</h2><span>Customers pay this UPI ID through Ahuza Pay Changes apply to new payments immediately</span></div></div>
-            {payeeError && <p className="studio-payment-caution" role="alert">{payeeError}</p>}
-            {payee && <p className="studio-payment-caution">{payee.vpa ? `Currently receiving at ${payee.vpa} (${payee.source === 'database' ? 'saved in Owner Studio' : 'server default'})` : 'No UPI ID is configured, so online payment cannot start'}</p>}
-            <div className="studio-form-grid">
-              <label>UPI ID<input value={payeeVpaInput} onChange={(event) => setPayeeVpaInput(event.target.value)} placeholder="name@bank" autoComplete="off" maxLength={256} /></label>
-              <label>Payee name shown in the UPI app<input value={payeeNameInput} onChange={(event) => setPayeeNameInput(event.target.value)} placeholder="AHUZA Apparel" maxLength={60} /></label>
-            </div>
-            <div className="studio-payee-actions">
-              <button className="studio-primary" type="button" disabled={busyAction || !payeeVpaInput.trim() || !payeeNameInput.trim() || (payee?.vpa === payeeVpaInput.trim() && payee?.payeeName === payeeNameInput.trim())} onClick={() => void savePayee()}>Save UPI ID</button>
-              <button className="studio-secondary" type="button" disabled={busyAction || !payee || payee.source !== 'database'} onClick={() => void removePayee()}>Remove saved UPI ID</button>
-              <button className="studio-secondary" type="button" disabled={busyAction} onClick={() => void loadPayee(key)}>Reload</button>
-            </div>
-            <p className="studio-payment-caution">Use only a UPI ID you own and have verified with a small test payment Unpaid orders already created will also pay to the new ID</p>
-          </section>
+          <section className="studio-panel"><h2>Instamojo payments</h2><p>Manage your payment settings in Instamojo. The store verifies payments with Instamojo before confirming an order.</p></section>
         </section>}
         {tab === 'orders' && <section className="studio-section studio-orders">
           <button className="studio-button" type="button" onClick={() => void refreshOrders(key)}>Refresh orders</button>
@@ -565,7 +481,6 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
         {tab === 'support' && <section className="studio-section studio-orders">{supportTickets.length === 0 ? <section className="studio-panel"><p className="studio-muted">No customer support tickets yet</p></section> : supportTickets.map((ticket) => <article className="studio-panel" key={ticket.id}><div className="studio-panel-heading"><div><span className="studio-eyebrow">{ticket.id}</span><h2>{ticket.category === 'delivery' ? 'Delivery issue' : ticket.category === 'complaint' ? 'Customer complaint' : 'Customer request'}</h2><span>{ticket.email} · {new Date(ticket.createdAt).toLocaleString()}</span></div><span className={`order-status status-${ticket.status}`}>{ticket.status}</span></div><p className="studio-ticket-message">{ticket.message}</p>{ticket.status === 'open' && <button className="studio-secondary" onClick={() => void resolveSupportTicket(ticket)} disabled={busyAction}>Mark resolved <Check size={15} /></button>}</article>)}</section>}
         {tab === 'marketing' && <><MarketingDashboard integrations={integrations} eventCounts={analytics?.eventCounts || {}} /><MarketingAutomations ownerKey={key} /></>}
         {tab === 'social' && <SocialScheduler ownerKey={key} />}
-        {tab === 'paymentAgent' && <PaymentAgentPanel ownerKey={key} />}
         {tab === 'ads' && <AdStudio ownerKey={key} products={products} aiReady={Boolean(integrations?.ai)} />}
         {tab === 'assistant' && <section className="studio-panel studio-assistant"><div className="studio-panel-heading"><div><h2>AHUZA AI agent</h2><span>Live store context with approval before changes</span></div><Sparkles size={18} /></div>{!integrations?.ai && <p className="studio-agent-setup">Set OPENAI_API_KEY to enable natural-language planning Exact stock commands still produce approval proposals</p>}<div className="assistant-thread">{chat.length === 0 && <div className="assistant-welcome"><Sparkles size={19} /><p>What should I look into or prepare?</p><small>Inventory, order updates, and customer email drafts</small></div>}{chat.map((entry, index) => <div className={`assistant-message ${entry.role}`} key={`${entry.role}-${index}`}><span>{entry.role === 'owner' ? 'You' : 'AHUZA agent'}</span><p>{entry.text}</p></div>)}{pendingAgentAction && <div className="assistant-action"><div><strong>{pendingAgentAction.type === 'update_stock' ? 'Inventory change' : pendingAgentAction.type === 'update_order_status' ? 'Order status change' : 'Customer email draft'}</strong><p>{pendingAgentAction.type === 'update_stock' ? `${pendingAgentAction.productName} (${pendingAgentAction.sku}): ${pendingAgentAction.previousStock} → ${pendingAgentAction.stock} units` : pendingAgentAction.type === 'update_order_status' ? `${pendingAgentAction.orderId}: ${pendingAgentAction.previousStatus} → ${pendingAgentAction.status}` : `${pendingAgentAction.kind.replaceAll('_', ' ')} for order ${pendingAgentAction.orderId}`}</p>{pendingAgentAction.type === 'draft_email' && <small>The agent will prepare a draft It will not send without your separate review</small>}</div><div><button type="button" className="studio-secondary" onClick={() => setPendingAgentAction(null)} disabled={busyAction}>Dismiss</button><button type="button" className="studio-primary" onClick={() => void approveAgentAction()} disabled={busyAction}>{pendingAgentAction.type === 'draft_email' ? 'Prepare draft' : 'Approve action'} <Check size={15} /></button></div></div>}{busyAction && <div className="assistant-typing"><LoaderCircle className="spin" size={15} /> Working…</div>}</div><form className="assistant-compose" onSubmit={(event) => void askAssistant(event)}><input name="message" maxLength={4000} placeholder="Ask the agent about your store…" aria-label="Message the AHUZA AI agent" required disabled={busyAction || Boolean(pendingAgentAction)} /><button aria-label="Send message" disabled={busyAction || Boolean(pendingAgentAction)}><Send size={17} /></button></form></section>}
         {tab === 'social' && <section className="studio-section studio-social"><section className="studio-panel"><div className="studio-panel-heading"><div><h2>Social post generator</h2><span>AI writes a product-aware caption using live catalog details</span></div><Sparkles size={18} /></div>{!integrations?.ai && <p className="studio-agent-setup" role="status">AI caption generation is unavailable until OPENAI_API_KEY is set in the server environment Configure the key and refresh Owner Studio to enable this tool</p>}<label>Choose a live product<select value={socialProductId} onChange={(event) => setSocialProductId(event.target.value)}>{products.filter((product) => product.active).map((product) => <option key={product.id} value={product.id}>{product.name} · {product.stock} in stock</option>)}</select></label><button className="studio-primary" onClick={() => void generateCaption()} disabled={busyAction || !socialProductId || !integrations?.ai}>{busyAction ? 'Writing…' : 'Generate caption'} <Sparkles size={15} /></button>{caption && <label className="caption-output">Generated copy<textarea value={caption} onChange={(event) => setCaption(event.target.value)} rows={7} /><small>Review product claims and pricing before publishing</small></label>}</section></section>}

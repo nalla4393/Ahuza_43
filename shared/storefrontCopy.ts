@@ -121,7 +121,7 @@ export const storefrontCopyFields = [
   { id: 'checkoutCod', label: 'Checkout: cash on delivery option', group: 'Checkout', defaultValue: 'Cash on delivery' },
   { id: 'checkoutUpiUnavailable', label: 'Checkout: UPI unavailable notice', group: 'Checkout', defaultValue: 'Online payment is unavailable right now Cash on delivery is still available' },
   { id: 'checkoutUpiChecking', label: 'Checkout: checking UPI notice', group: 'Checkout', defaultValue: 'Checking payment availability… Cash on delivery is available' },
-  { id: 'checkoutUpiNote', label: 'Checkout: UPI note', group: 'Checkout', defaultValue: 'On the secure Ahuza Pay page, choose to pay using a UPI ID or UPI number Your order is confirmed automatically as soon as the bank credit is matched' },
+  { id: 'checkoutUpiNote', label: 'Checkout: UPI note', group: 'Checkout', defaultValue: 'Payment remains pending until Instamojo confirms it' },
   { id: 'checkoutConsent', label: 'Checkout: marketing consent', group: 'Checkout', defaultValue: 'Share purchase conversion with AHUZA\'s ad partners' },
   { id: 'checkoutPlacing', label: 'Checkout: placing order button', group: 'Checkout', defaultValue: 'Placing your order…' },
   { id: 'checkoutPlaceCod', label: 'Checkout: place COD order button', group: 'Checkout', defaultValue: 'Place COD order' },

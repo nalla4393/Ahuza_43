@@ -1,11 +1,14 @@
-import { useEffect, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react';
 import { User, ArrowRight, ArrowUpRight, Heart, MessageCircle, Mail, MapPin, Menu, Minus, Phone, Plus, Search, ShoppingBag, SlidersHorizontal, X, CheckCircle2 } from 'lucide-react';
-import OwnerStudio from './OwnerStudio';
+import { countries, regionsForCountry } from './addressData';
 import CustomerSupportChat from './CustomerSupportChat';
+import ShoppingAssistant, { type AssistantTrip } from './ShoppingAssistant';
 import ProductRail from './ProductRail';
 import HeroCarousel, { type BannerSlide } from './HeroCarousel';
 import { defaultImageSettings, imageSettingsVars, mainImage, srcSet, type ImageSettings, type ProductImage } from './imageTypes';
 import { defaultStorefrontCopy, type StorefrontCopyId } from '../shared/storefrontCopy';
+
+const OwnerStudio = lazy(() => import('./OwnerStudio'));
 
 type Product = {
   id: string;
@@ -45,20 +48,36 @@ const orderStatusLabel = (order: { status: string; paymentStatus?: string; payme
   if (order.status === 'pending_payment') return 'Awaiting payment confirmation';
   return `${order.status.replaceAll('_', ' ')}${order.paymentStatus === 'paid' ? ' · payment received' : ''}`;
 };
-type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; paymentReference?: string; payUrl?: string; amount: number; currency: string; expiresAt?: string; status?: string };
+type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; paymentReference?: string; payUrl?: string; amount: number; currency: string; expiresAt?: string; status?: string; orderStatus?: string };
 type PaymentConfiguration = { configured: boolean; automaticVerification: boolean };
 
-type AddressValues = { name: string; addressLine1: string; addressLine2: string; city: string; state: string; postalCode: string; phone: string };
-const emptyAddress: AddressValues = { name: '', addressLine1: '', addressLine2: '', city: '', state: '', postalCode: '', phone: '' };
+type AddressValues = { name: string; addressLine1: string; addressLine2: string; city: string; state: string; country: string; postalCode: string; phone: string };
+const emptyAddress: AddressValues = { name: '', addressLine1: '', addressLine2: '', city: '', state: '', country: 'India', postalCode: '', phone: '' };
 
 function AddressFields({ section, value, onChange, readOnly = false }: { section: 'billing' | 'shipping'; value: AddressValues; onChange: (value: AddressValues) => void; readOnly?: boolean }) {
+  const [regions, setRegions] = useState<Awaited<ReturnType<typeof regionsForCountry>> | null>(null);
+  const [regionError, setRegionError] = useState('');
   const bind = (field: keyof AddressValues) => ({ name: `${section}-${field}`, value: value[field], readOnly, onChange: (event: ChangeEvent<HTMLInputElement>) => onChange({ ...value, [field]: event.target.value }) });
+  useEffect(() => {
+    let active = true;
+    setRegions(null);
+    setRegionError('');
+    void regionsForCountry(value.country).then((result) => {
+      if (active) setRegions(result);
+    }).catch((error: unknown) => {
+      if (!active) return;
+      setRegionError(error instanceof Error ? error.message : 'Could not load address regions');
+    });
+    return () => { active = false; };
+  }, [value.country]);
   return <>
     <label>Full name<input {...bind('name')} autoComplete={`${section} name`} maxLength={100} required /></label>
     <label>Address line 1<input {...bind('addressLine1')} autoComplete={`${section} address-line1`} maxLength={180} required /></label>
     <label>Address line 2 <span>Optional</span><input {...bind('addressLine2')} autoComplete={`${section} address-line2`} maxLength={180} /></label>
-    <div className="address-row"><label>City<input {...bind('city')} autoComplete={`${section} address-level2`} maxLength={80} required /></label><label>State<input {...bind('state')} autoComplete={`${section} address-level1`} maxLength={80} required /></label></div>
-    <div className="address-row"><label>PIN code<input {...bind('postalCode')} inputMode="numeric" autoComplete={`${section} postal-code`} pattern="[1-9][0-9]{5}" maxLength={6} required /></label><label>Phone<input {...bind('phone')} type="tel" inputMode="tel" autoComplete={`${section} tel`} pattern="\+?[0-9][0-9\s-]{8,16}" maxLength={18} required /></label></div>
+    <label>Country<select name={`${section}-country`} value={value.country} disabled={readOnly} onChange={(event) => onChange({ ...value, country: event.target.value, state: '', postalCode: '' })} required>{countries.map((country) => <option key={country.isoCode} value={country.name}>{country.name}</option>)}</select></label>
+    <div className="address-row"><label>City<input {...bind('city')} autoComplete={`${section} address-level2`} maxLength={80} required /></label><label>State / region<select name={`${section}-state`} value={value.state} disabled={readOnly || regions === null || !regions.length} onChange={(event) => onChange({ ...value, state: event.target.value })} required={Boolean(regions?.length)}><option value="">{regions === null ? 'Loading regions…' : regions.length ? 'Select a state or region' : 'Not applicable'}</option>{regions?.map((region) => <option key={region.isoCode} value={region.name}>{region.name}</option>)}</select></label></div>
+    {regionError && <p className="payment-config-warning" role="alert">{regionError}</p>}
+    <div className="address-row"><label>{value.country === 'India' ? 'PIN code' : 'Postal code'}<input {...bind('postalCode')} inputMode={value.country === 'India' ? 'numeric' : 'text'} autoComplete={`${section} postal-code`} pattern={value.country === 'India' ? '[1-9][0-9]{5}' : undefined} maxLength={value.country === 'India' ? 6 : 20} required /></label><label>Phone<input {...bind('phone')} type="tel" inputMode="tel" autoComplete={`${section} tel`} pattern="\+?[0-9][0-9\s-]{8,16}" maxLength={18} required /></label></div>
   </>;
 }
 
@@ -73,6 +92,28 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return result;
 }
 export default function App() {
+  const [assistantTrip, setAssistantTrip] = useState<AssistantTrip | null>(null);
+  const tripNumber = useRef(0);
+  const bagButton = useRef<HTMLButtonElement>(null);
+  const [exchangeRate, setExchangeRate] = useState<{ usdPerInr: number; date: string } | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    const refresh = () => {
+      fetch('/api/exchange-rate', { signal: controller.signal }).then(async (response) => {
+        if (!response.ok) throw new Error('USD estimate unavailable');
+        const rate: { usdPerInr: number; date: string } = await response.json();
+        setExchangeRate(rate);
+      }).catch((error: unknown) => {
+        if (!controller.signal.aborted) { setExchangeRate(null); console.error('USD estimate unavailable:', error); }
+      });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 3600000);
+    return () => { controller.abort(); window.clearInterval(timer); };
+  }, []);
+  const usdEstimate = (price: number) => exchangeRate
+    ? `Approx. ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(price * exchangeRate.usdPerInr)} USD · rate ${exchangeRate.date} · charged in INR`
+    : 'USD estimate unavailable · charged in INR';
   const [storeContent, setStoreContent] = useState<StorefrontContent>({
     announcement: 'A softer kind of everyday Complimentary shipping over ₹2,500',
     heroEyebrow: 'The in-between collection · 01/26', heroTitle: 'Room to be yourself',
@@ -103,6 +144,7 @@ export default function App() {
     } catch { return null; }
   });
   const [paymentStatus, setPaymentStatus] = useState('pending');
+  const [paymentOrderStatus, setPaymentOrderStatus] = useState('');
   const [ordersRefresh, setOrdersRefresh] = useState(0);
   const [paymentMessage, setPaymentMessage] = useState('');
   const [paymentConfiguration, setPaymentConfiguration] = useState<PaymentConfiguration | null>(null);
@@ -256,7 +298,7 @@ export default function App() {
     }));
   }, [products]);
 
-  // The browser leaves for Ahuza Pay, so remember the pending order to resume checking when the customer returns.
+  // Remember the pending order while the customer is on the hosted payment page.
   useEffect(() => {
     try {
       if (paymentOrder?.paymentMethod === 'upi' && paymentStatus !== 'paid') localStorage.setItem('ahuza.pendingPayment', JSON.stringify(paymentOrder));
@@ -279,10 +321,13 @@ export default function App() {
         if (!response.ok || !result.status) throw new Error(result.error || 'Could not check order status');
         if (stopped) return;
         setPaymentStatus(result.status);
+        if (result.orderStatus) setPaymentOrderStatus(result.orderStatus);
         if (result.status === 'paid') {
           setCart([]);
           setOrdersRefresh((value) => value + 1);
-          setPaymentMessage('Your payment has been received and your order is confirmed. A confirmation email with your invoice is on its way');
+          setPaymentMessage(result.orderStatus === 'cancelled'
+            ? 'Your payment was received, but the order could not be confirmed because stock is unavailable. AHUZA will contact you about the next steps.'
+            : 'Your payment has been received and your order is confirmed. A confirmation email with your invoice is on its way');
         } else if (result.status === 'expired' || result.status === 'cancelled') {
           setPaymentMessage(result.orderStatus === 'pending_payment'
             ? 'The UPI attempt was cancelled Inventory remains reserved briefly in case a bank credit is delayed Do not reuse the link; contact AHUZA if you sent money'
@@ -410,7 +455,23 @@ export default function App() {
     setZoomed(false);
   }
 
-  function addToBag(product: Product, size?: string) {
+  function animateAssistant(product: Product, source: HTMLElement, mode: AssistantTrip['mode']) {
+    const productRect = source.getBoundingClientRect();
+    const bagRect = bagButton.current?.getBoundingClientRect();
+    const clamp = (value: number, max: number) => Math.max(28, Math.min(max - 28, value));
+    setAssistantTrip({
+      id: ++tripNumber.current,
+      mode,
+      productName: product.name,
+      imageUrl: mainImage(product)?.variants[0]?.url || product.imageUrl,
+      productX: clamp(productRect.left + productRect.width / 2, window.innerWidth),
+      productY: clamp(productRect.top + productRect.height / 2, window.innerHeight),
+      bagX: clamp(bagRect ? bagRect.left + bagRect.width / 2 : window.innerWidth - 40, window.innerWidth),
+      bagY: clamp(bagRect ? bagRect.top + bagRect.height / 2 : 40, window.innerHeight),
+    });
+  }
+
+  function addToBag(product: Product, size?: string, source?: HTMLElement) {
     if (product.sizes?.length && !size) {
       openProduct(product);
       setNotice('Choose an available size before adding this item to your bag');
@@ -430,6 +491,7 @@ export default function App() {
         ? current.map((line) => line.productId === product.id && line.size === size ? { ...line, quantity: Math.min(line.quantity + 1, maxQuantity) } : line)
         : [...current, { productId: product.id, quantity: 1, ...(size ? { size } : {}) }];
     });
+    if (source) animateAssistant(product, source, 'pack');
     setNotice(`${product.name}${size ? ` · Size ${size}` : ''} added to your cart`);
     window.setTimeout(() => setNotice(''), 2400);
   }
@@ -499,11 +561,15 @@ export default function App() {
       }
       setPaymentOrder(order);
       setPaymentStatus(paymentMethod === 'cod' ? 'confirmed' : 'pending');
+      setPaymentOrderStatus(paymentMethod === 'cod' ? 'confirmed' : 'pending_payment');
       setPaymentMessage(paymentMethod === 'cod'
         ? 'Your order is confirmed Please pay the delivery partner in cash when your order arrives'
-        : 'Complete your payment on the Ahuza Pay page Your order is confirmed automatically as soon as the bank credit is matched');
+        : 'Complete your payment on Instamojo. Your order is confirmed after the payment is verified.');
       if (paymentMethod === 'cod') setCart([]);
-      else window.location.assign(order.payUrl!);
+      else {
+        localStorage.setItem('ahuza.pendingPayment', JSON.stringify(order));
+        window.location.assign(order.payUrl!);
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not start checkout');
     } finally {
@@ -516,11 +582,14 @@ export default function App() {
     setBusy(true);
     try {
       const response = await fetch(`/api/payments/orders/${encodeURIComponent(paymentOrder.orderId)}/status`);
-      const result = await parseResponse<{ status?: string; error?: string }>(response);
+      const result = await parseResponse<{ status?: string; orderStatus?: string; error?: string }>(response);
       if (!response.ok || !result.status) throw new Error(result.error || 'Could not refresh order status');
       setPaymentStatus(result.status);
-      setPaymentMessage(result.status === 'paid'
-        ? 'Your payment has been received and your order is confirmed. A confirmation email with your invoice is on its way'
+      if (result.orderStatus) setPaymentOrderStatus(result.orderStatus);
+      setPaymentMessage(result.status === 'paid' && result.orderStatus === 'cancelled'
+        ? 'Your payment was received, but the order could not be confirmed because stock is unavailable. AHUZA will contact you about the next steps.'
+        : result.status === 'paid'
+          ? 'Your payment has been received and your order is confirmed. A confirmation email with your invoice is on its way'
         : result.status === 'cancelled' || result.status === 'expired'
           ? 'This order is closed Do not use its old UPI link'
           : 'Payment is still pending An authorized AHUZA owner must verify the settled credit in the bank account');
@@ -676,20 +745,20 @@ export default function App() {
     const quantityLimit = Math.min(product.stock, 10);
     return <article className="product" key={product.id}>
       <div className={`product-image image-tone-${index % 4} ${product.images?.length ? 'has-upload' : ''}`} style={product.images?.length ? undefined : { background: displayBackground }}>
-        <button type="button" className="product-open" onClick={() => openProduct(product)} aria-label={`View ${product.name}`}>
+        <button type="button" className="product-open" onClick={(event) => { animateAssistant(product, event.currentTarget, 'preview'); openProduct(product); }} aria-label={`View ${product.name}`}>
           <img src={displayImage.url} srcSet={displayImage.srcSet} sizes="(max-width: 760px) 50vw, 25vw" alt={product.name} loading="lazy" className={product.images?.length ? 'upload-product-image' : 'ghost-product-image'} />
           {hoverImage && <img src={hoverImage.url} srcSet={hoverImage.srcSet} sizes="(max-width: 760px) 50vw, 25vw" alt="" loading="lazy" className="upload-product-image hover-image" />}
         </button>
         <span className="product-number">{String(index + 1).padStart(2, '0')}</span>
         <button className={`wishlist-toggle ${wishlist.includes(product.id) ? 'saved' : ''}`} type="button" onClick={() => void toggleWishlist(product)} aria-pressed={wishlist.includes(product.id)} aria-label={wishlist.includes(product.id) ? `Remove ${product.name} from wishlist` : `Save ${product.name} to wishlist`}><Heart size={17} fill={wishlist.includes(product.id) ? 'currentColor' : 'none'} /></button>
-        <button className={`quick-add ${product.stock < 1 ? 'notify-stock-button' : ''}`} type="button" onClick={() => product.stock < 1 ? void requestRestockAlert(product) : product.sizes?.length ? openProduct(product) : addToBag(product)} disabled={product.stock > 0 && quantityInBag >= quantityLimit} aria-label={product.stock < 1 ? `Notify me when ${product.name} is back in stock` : quantityInBag >= quantityLimit ? `${product.name} quantity limit reached` : product.sizes?.length ? `Choose a size for ${product.name}` : `Add ${product.name} to cart`}>
+        <button className={`quick-add ${product.stock < 1 ? 'notify-stock-button' : ''}`} type="button" onClick={(event) => product.stock < 1 ? void requestRestockAlert(product) : product.sizes?.length ? openProduct(product) : addToBag(product, undefined, event.currentTarget.closest<HTMLElement>('.product-image') || event.currentTarget)} disabled={product.stock > 0 && quantityInBag >= quantityLimit} aria-label={product.stock < 1 ? `Notify me when ${product.name} is back in stock` : quantityInBag >= quantityLimit ? `${product.name} quantity limit reached` : product.sizes?.length ? `Choose a size for ${product.name}` : `Add ${product.name} to cart`}>
           {product.stock > 0 ? <ShoppingBag size={18} /> : storefrontText('cardNotify')}
         </button>
       </div>
       {gallery.length > 1 && <div className="card-swatches" role="group" aria-label={`${product.name} views`}>{gallery.slice(0, 6).map((image, position) => <button key={image.id} type="button" className={position === (cardView[product.id] ?? 0) ? 'active' : ''} aria-label={`Show view ${position + 1} of ${product.name}`} aria-pressed={position === (cardView[product.id] ?? 0)} onClick={() => setCardView((views) => ({ ...views, [product.id]: position }))}><img src={image.thumb} alt="" loading="lazy" /></button>)}{gallery.length > 6 && <small>+{gallery.length - 6}</small>}</div>}
       <button className="product-meta" type="button" onClick={() => openProduct(product)} aria-label={`View details for ${product.name}`}>
         <span><strong>{product.name}</strong><small>{product.description}</small></span>
-        <b>{formatPrice(product.price)}</b>
+        <b>{formatPrice(product.price)} <small>{usdEstimate(product.price)}</small></b>
         {product.sizes?.length ? <em className="card-sizes">Sizes: {product.sizes.join(' · ')}</em> : null}
         {product.stock < 1 ? <em className="card-stock out">{storefrontText('cardOutOfStock')}</em> : product.stock <= 3 ? <em className="card-stock low">Only {product.stock} left</em> : null}
       </button>
@@ -714,14 +783,14 @@ export default function App() {
             </div>
             : <button key={label} type="button" onClick={() => openNavItem(label)}>{label}</button>)}
         </nav>
-        <a className="wordmark" href="#home" aria-label="AHUZA home"><span className="wordmark-star" aria-hidden="true">☆</span><span className="wordmark-stack"><span className="wordmark-text">AHUZA</span><span className="wordmark-tagline">{storefrontText('headerBrandTagline')}</span></span><span className="wordmark-sparkles" aria-hidden="true"><i>✦</i><i>★</i><i>✦</i><i>✧</i><i>✦</i></span></a>
+        <a className="wordmark brand-logo-link" href="#home" aria-label="AHUZA home"><img className="brand-logo" src="/ahuza-brand-logo.png" alt="" width="839" height="720" /><span className="wordmark-tagline">{storefrontText('headerBrandTagline')}</span></a>
         <form className="header-search" role="search" onSubmit={(event) => { event.preventDefault(); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>
           <label className="sr-only" htmlFor="header-search-input">Search AHUZA</label>
           <input id="header-search-input" type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); if (event.target.value) setCatalogOpen(true); }} placeholder={storefrontText('searchPlaceholder')} autoComplete="off" />
           {searchTerm && <button type="button" className="header-search-clear" aria-label="Clear search" onClick={() => setSearchTerm('')}><X size={16} /></button>}
           <button type="submit" className="header-search-submit" aria-label="Search"><Search size={18} /></button>
         </form>
-        <div className="header-actions"><button className="header-icon chat-link" type="button" aria-label="Ask Ahuza" onClick={() => window.dispatchEvent(new Event('ahuza:toggle-support'))}><MessageCircle size={18} /><span className="chat-label">{storefrontText('askAhuzaLabel')}</span></button><button className={`header-icon wishlist-link${savedOnly ? ' active' : ''}`} type="button" aria-label={`Wishlist, ${wishlist.length} saved`} aria-pressed={savedOnly} onClick={() => { if (!customer) { setAuthMode('login'); setAccountOpen(true); return; } setSavedOnly(true); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}><Heart size={18} fill={wishlist.length ? 'currentColor' : 'none'} />{wishlist.length > 0 && <span className="count-badge">{wishlist.length}</span>}</button><button className="account-link" aria-label={customer ? 'My account' : 'Account'} onClick={() => setAccountOpen(true)}><User size={18} aria-hidden="true" /><span>{customer ? 'My account' : 'Account'}</span></button><button className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
+        <div className="header-actions"><button className="header-icon chat-link" type="button" aria-label="Ask Ahuza" onClick={() => window.dispatchEvent(new Event('ahuza:toggle-support'))}><MessageCircle size={18} /><span className="chat-label">{storefrontText('askAhuzaLabel')}</span></button><button className={`header-icon wishlist-link${savedOnly ? ' active' : ''}`} type="button" aria-label={`Wishlist, ${wishlist.length} saved`} aria-pressed={savedOnly} onClick={() => { if (!customer) { setAuthMode('login'); setAccountOpen(true); return; } setSavedOnly(true); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}><Heart size={18} fill={wishlist.length ? 'currentColor' : 'none'} />{wishlist.length > 0 && <span className="count-badge">{wishlist.length}</span>}</button><button className="account-link" aria-label={customer ? 'My account' : 'Account'} onClick={() => setAccountOpen(true)}><User size={18} aria-hidden="true" /><span>{customer ? 'My account' : 'Account'}</span></button><button ref={bagButton} className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
       </header>
       {mobileMenuOpen && <div className="menu-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setMobileMenuOpen(false); }}>
         <aside className="menu-drawer" id="collection-drawer" role="dialog" aria-modal="true" aria-labelledby="menu-title">
@@ -834,7 +903,7 @@ export default function App() {
           <div><h3>{storefrontText('footerCustomerTitle')}</h3><ul><li><a href="#contact">{storefrontText('footerContact')}</a></li><li><a href={`mailto:${storefrontText('contactEmail')}`}>{storefrontText('contactEmail')}</a></li><li><a href={`tel:${storefrontText('contactPhone').replace(/\s+/g, '')}`}>{storefrontText('contactPhone')}</a></li></ul></div>
           <div><h3>AHUZA</h3><p className="footer-tagline">{storefrontText('footerBrandTagline')}</p><p className="footer-loc">{storefrontText('footerLocation')}</p></div>
         </div>
-        <div className="footer-bottom"><a className="wordmark" href="#home">AHUZA</a><span>© AHUZA Apparel 2026</span><a className="footer-terms" href="/terms.html">Terms and Conditions</a><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
+        <div className="footer-bottom"><a className="wordmark footer-brand-logo" href="#home" aria-label="AHUZA home"><img className="brand-logo" src="/ahuza-brand-logo.png" alt="" width="839" height="720" loading="lazy" /></a><span>© AHUZA Apparel 2026</span><a className="footer-terms" href="/terms.html">Terms and Conditions</a><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
       </footer>
 
       {paymentOrder?.paymentMethod === 'upi' && paymentStatus === 'paid' && <div className="payment-success-page" role="dialog" aria-modal="true" aria-labelledby="payment-success-title">
@@ -855,14 +924,15 @@ export default function App() {
           <div className="drawer-heading"><div><p className="eyebrow dark-eyebrow">AHUZA Apparel</p><h2 id="bag-title">{storefrontText('bagTitle')} <span>({cartCount})</span></h2></div><button className="icon-button" aria-label="Close bag" onClick={() => setCartOpen(false)}><X size={21} /></button></div>
           {paymentOrder ? <section className="payment-panel" aria-live="polite">
             {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && <CheckCircle2 className="payment-success-icon" size={46} aria-hidden="true" />}
-            <p className="eyebrow dark-eyebrow">{paymentOrder.paymentMethod === 'cod' ? storefrontText('checkoutCod') : 'Ahuza Pay checkout'}</p>
-            <h3>{paymentOrder.paymentMethod === 'cod' ? storefrontText('payOrderConfirmed') : paymentStatus === 'paid' ? storefrontText('payConfirmed') : paymentStatus === 'failed' ? storefrontText('payFailed') : paymentStatus === 'expired' || paymentStatus === 'cancelled' ? storefrontText('payClosed') : paymentStatus === 'pending' ? storefrontText('payUpiPending') : storefrontText('payPending')}</h3>
+            <p className="eyebrow dark-eyebrow">{paymentOrder.paymentMethod === 'cod' ? storefrontText('checkoutCod') : 'Instamojo checkout'}</p>
+            <h3>{paymentOrder.paymentMethod === 'cod' ? storefrontText('payOrderConfirmed') : paymentStatus === 'paid' && paymentOrderStatus === 'cancelled' ? 'Payment received — order needs review' : paymentStatus === 'paid' ? storefrontText('payConfirmed') : paymentStatus === 'failed' ? storefrontText('payFailed') : paymentStatus === 'expired' || paymentStatus === 'cancelled' ? storefrontText('payClosed') : paymentStatus === 'pending' ? storefrontText('payUpiPending') : storefrontText('payPending')}</h3>
             <p>{paymentMessage || storefrontText('payWaiting')}</p>
             <p><strong>{formatPrice(paymentOrder.amount / 100)}</strong>{paymentOrder.paymentReference ? ` · Reference ${paymentOrder.paymentReference}` : ` · Order ${paymentOrder.orderId.slice(0, 8)}`}</p>
             {paymentOrder.paymentMethod === 'upi' && ['pending', 'failed', 'cancelled'].includes(paymentStatus) && <>{paymentStatus !== 'cancelled' && <a className="dark-button" href={paymentOrder.payUrl} onClick={() => setPaymentMessage(storefrontText('payAppOpened'))}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : storefrontText('checkoutPayUpi')}</a>}<p className="payment-pending"><span className="payment-spinner" /> {storefrontText('payChecking')}</p><button className="invoice-button" type="button" disabled={busy} onClick={() => void refreshPaymentStatus()}>{storefrontText('payRefresh')}</button>{paymentStatus === 'pending' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void reportPaymentFailure()}>{storefrontText('payReportFailure')}</button>}{paymentStatus !== 'cancelled' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void cancelPayment()}>{storefrontText('payCancel')}</button>}</>}
             {paymentStatus === 'failed' && <p>{storefrontText('payFailureNote')}</p>}
             {(paymentOrder.paymentMethod === 'cod' || paymentStatus === 'paid' || paymentStatus === 'cancelled' || paymentStatus === 'expired') && <button className="dark-button" type="button" onClick={() => { setPaymentOrder(null); setPaymentStatus('pending'); setCartOpen(false); }}>{paymentStatus === 'cancelled' ? storefrontText('payReturn') : 'Done'}</button>}
-            {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && <p className="payment-next-steps">Thank you for choosing AHUZA. Please check your email for payment confirmation and order approval. Your invoice and receipt are also available under Account › Order history. We’ll email you tracking details as soon as your order is on its way.</p>}
+            {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && paymentOrderStatus === 'cancelled' && <p className="payment-next-steps">Please contact AHUZA if you need an update about fulfillment or refund arrangements.</p>}
+            {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && paymentOrderStatus !== 'cancelled' && <p className="payment-next-steps">Thank you for choosing AHUZA. Please check your email for payment confirmation and order approval. Your invoice and receipt are also available under Account › Order history. We’ll email you tracking details as soon as your order is on its way.</p>}
             {paymentOrder.paymentMethod === 'upi' && paymentStatus !== 'paid' && <small>{storefrontText('payVerificationNote')}</small>}
           </section> : cartLines.length === 0 ? <div className="empty-bag"><ShoppingBag size={25} /><p>{storefrontText('bagEmpty')}</p><button className="dark-button" onClick={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>{storefrontText('bagExplore')}</button></div> : <>
             <div className="bag-lines">{cartLines.map(({ product, quantity, size }) => <div className="bag-line" key={`${product.id}-${size || 'standard'}`}><img src={mainImage(product)?.variants[0]?.url || product.imageUrl} alt="" /><div className="bag-line-copy"><h3>{product.name}</h3><p>{formatPrice(product.price)}{size ? ` · Size ${size}` : ''}</p><div className="quantity-control"><button type="button" aria-label={`Remove one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, -1)}><Minus size={13} /></button><span>{quantity}</span><button type="button" aria-label={`Add one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, 1)} disabled={cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0) >= Math.min(product.stock, 10)}><Plus size={13} /></button></div></div><span className="line-total">{formatPrice(product.price * quantity)}</span></div>)}</div>
@@ -871,9 +941,10 @@ export default function App() {
               <AddressFields section="billing" value={billingAddress} onChange={setBillingAddress} />
               <div className="address-title-row"><p className="address-title">{storefrontText('checkoutDelivery')}</p><label className="same-address-check"><input type="checkbox" checked={sameAsBilling} onChange={(event) => setSameAsBilling(event.target.checked)} /> (same as billing address)</label></div>
               <AddressFields section="shipping" value={sameAsBilling ? billingAddress : deliveryAddress} onChange={setDeliveryAddress} readOnly={sameAsBilling} />
+              {(sameAsBilling ? billingAddress : deliveryAddress).country !== 'India' && <p className="payment-config-warning" role="alert">Delivery is currently available only within India.</p>}
               <fieldset className="payment-method-options"><legend>{storefrontText('checkoutPaymentMethod')}</legend><label><input type="radio" name="paymentMethod" value="upi" checked={paymentMethod === 'upi'} onChange={() => setPaymentMethod('upi')} disabled={!paymentConfiguration?.configured} /> {storefrontText('checkoutPayUpi')}</label><label><input type="radio" name="paymentMethod" value="cod" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} /> {storefrontText('checkoutCod')}</label></fieldset>
               {paymentMethod === 'upi' && !paymentConfiguration?.configured && <p className="payment-config-warning" role="status">{paymentConfiguration ? storefrontText('checkoutUpiUnavailable') : storefrontText('checkoutUpiChecking')}</p>}
-              {paymentMethod === 'upi' && paymentConfiguration?.configured && <p className="payment-config-warning">{storefrontText('checkoutUpiNote')}</p>}
+              {paymentMethod === 'upi' && paymentConfiguration?.configured && <p className="payment-config-warning">Payment remains pending until Instamojo confirms it. Confirmation can take time.</p>}
               <label className="consent-check"><input type="checkbox" checked={marketingConsent} onChange={(event) => setMarketingConsent(event.target.checked)} />{storefrontText('checkoutConsent')}</label><button className="dark-button checkout-button" disabled={busy || (paymentMethod === 'upi' && paymentConfiguration?.configured !== true)}>{busy ? storefrontText('checkoutPlacing') : customer ? paymentMethod === 'cod' ? storefrontText('checkoutPlaceCod') : paymentConfiguration?.configured ? storefrontText('checkoutContinueUpi') : storefrontText('checkoutUpiUnavailableButton') : storefrontText('checkoutSignIn')} <ArrowRight size={16} /></button></form><small>{storefrontText('checkoutPolicy')}</small></div>
           </>}
         </aside>
@@ -910,14 +981,15 @@ export default function App() {
               </div>
               {showAll && layout.thumbnails && <div className="pd-thumbs">{gallery.map((image, position) => <button key={image.id} type="button" className={position === detailIndex ? 'active' : ''} onClick={() => { setDetailIndex(position); setZoomed(false); }} aria-label={`Show image ${position + 1}`}><img src={image.thumb} alt="" /></button>)}</div>}
             </div>
-            <div className="pd-copy"><p className="eyebrow dark-eyebrow">{detailProduct.category} · {detailProduct.sku}</p><h2>{detailProduct.name}</h2><p>{detailProduct.description}</p><strong>{formatPrice(detailProduct.price)}</strong>
+            <div className="pd-copy"><p className="eyebrow dark-eyebrow">{detailProduct.category} · {detailProduct.sku}</p><h2>{detailProduct.name}</h2><p>{detailProduct.description}</p><strong>{formatPrice(detailProduct.price)}</strong><small>{usdEstimate(detailProduct.price)}</small>
               {detailProduct.sizes?.length ? <fieldset className="customer-size-picker"><legend>{storefrontText('detailChooseSize')}</legend><div className="size-options">{detailProduct.sizes.map((size) => <button key={size} type="button" className={`size-option size-choice ${selectedSize === size ? 'selected' : ''}`} aria-pressed={selectedSize === size} onClick={() => setSelectedSize(size)}>{size}</button>)}</div></fieldset> : null}
-              {detailProduct.stock < 1 ? <button className="dark-button" type="button" onClick={() => void requestRestockAlert(detailProduct)}>{storefrontText('detailNotify')}</button> : <button className="dark-button" type="button" disabled={Boolean(detailProduct.sizes?.length && !selectedSize)} onClick={() => { addToBag(detailProduct, selectedSize || undefined); setDetailProduct(null); }}>{detailProduct.sizes?.length && !selectedSize ? storefrontText('detailChooseSizeButton') : storefrontText('addToCart')}</button>}</div>
+              {detailProduct.stock < 1 ? <button className="dark-button" type="button" onClick={() => void requestRestockAlert(detailProduct)}>{storefrontText('detailNotify')}</button> : <button className="dark-button" type="button" disabled={Boolean(detailProduct.sizes?.length && !selectedSize)} onClick={(event) => { const image = event.currentTarget.closest('.product-detail')?.querySelector<HTMLElement>('.pd-main'); addToBag(detailProduct, selectedSize || undefined, image || event.currentTarget); setDetailProduct(null); }}>{detailProduct.sizes?.length && !selectedSize ? storefrontText('detailChooseSizeButton') : storefrontText('addToCart')}</button>}</div>
           </section>
         </div>;
       })()}
-      {ownerStudioOpen && <OwnerStudio onClose={() => setOwnerStudioOpen(false)} onProductsChange={setProducts} onContentChange={setStoreContent} onSiteStatusChange={setSitePublished} onImageSettingsChange={setImageSettings} />}
+      {ownerStudioOpen && <Suspense fallback={<div className="store-maintenance" role="status">Opening Owner Studio…</div>}><OwnerStudio onClose={() => setOwnerStudioOpen(false)} onProductsChange={setProducts} onContentChange={setStoreContent} onSiteStatusChange={setSitePublished} onImageSettingsChange={setImageSettings} /></Suspense>}
       {sitePublished && <CustomerSupportChat onOpenAccount={() => setAccountOpen(true)} />}
+      {sitePublished && <ShoppingAssistant trip={assistantTrip} onOpenBag={() => { setAssistantTrip(null); setDetailProduct(null); setCartOpen(true); }} />}
     </main>
   );
 }

@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import express, { Router, type Request, type Response, type NextFunction } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { hashPassword, verifyPassword } from './services/auth.js';
@@ -12,11 +12,13 @@ import { publishSocialPost, runSchedule, socialStatus, validateSchedule } from '
 import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
 import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
-import { buildAhuzaPayOrder, createAhuzaPayOrder, getAhuzaPayConfiguration, getAhuzaPayPageText, getAhuzaPayPayee, resetAhuzaPayPayee, updateAhuzaPayPageText, updateAhuzaPayPayee } from './services/ahuzaPay.js';
+import { createInstamojoRequest, instamojoAmountInPaise, instamojoConfigured, instamojoWebhookConfigured, verifyInstamojoWebhook } from './services/instamojo.js';
 import { customerDataConfigured, decryptCustomerValue, encryptCustomerValue, isValidUpiId } from './services/customerData.js';
-import { confirmUpiPaymentByOwner, syncAhuzaPayPayment } from './services/paymentSync.js';
+import { confirmInstamojoWebhookPayment, confirmUpiPaymentByOwner, syncInstamojoPayment } from './services/paymentSync.js';
 import { buildInvoicePdf } from './services/invoice.js';
 import { storefrontCopyFields } from '../shared/storefrontCopy.js';
+import { isValidCountryRegion } from '../shared/address.js';
+import { getExchangeRate } from './services/exchangeRate.js';
 
 export const api = Router();
 api.use('/owner', (request, response, next) => ownerFailLimit(request, response, next));
@@ -41,16 +43,6 @@ function requireOwner(request: Request, response: Response, next: NextFunction):
   const digest = (value: string) => createHash('sha256').update(value).digest();
   const valid = expected.length > 0 && timingSafeEqual(digest(supplied), digest(expected));
   if (!valid) { response.status(403).json({ error: 'Owner access required' }); return; }
-  next();
-}
-
-function requireMacroDroid(request: Request, response: Response, next: NextFunction): void {
-  const expected = process.env.MACRODROID_WEBHOOK_SECRET || '';
-  if (!expected) { requireOwner(request, response, next); return; }
-  if (expected.length < 32) { response.status(503).json({ error: 'MacroDroid webhook secret must be at least 32 characters' }); return; }
-  const supplied = request.get('x-macrodroid-secret') || '';
-  const digest = (value: string) => createHash('sha256').update(value).digest();
-  if (!timingSafeEqual(digest(supplied), digest(expected))) { response.status(401).json({ error: 'MacroDroid authentication required' }); return; }
   next();
 }
 
@@ -81,6 +73,14 @@ function validGhostMannequin(value: unknown): boolean {
 
 api.get('/health', (_request, response) => response.json({ status: 'ok' }));
 
+api.get('/exchange-rate', async (_request, response) => {
+  try { response.json(await getExchangeRate()); }
+  catch (error) {
+    console.error('Exchange rate unavailable:', error);
+    response.status(503).json({ error: 'USD estimate temporarily unavailable' });
+  }
+});
+
 api.get('/site-status', async (_request, response) => {
   response.setHeader('Cache-Control', 'no-store');
   response.json({ published: (await getDatabase()).sitePublished !== false });
@@ -95,11 +95,12 @@ api.use(async (request, response, next) => {
   const paymentReadOnly = (method === 'GET' && path === '/payments/config')
     || (method === 'GET' && /^\/payments\/orders\/[^/]+\/status$/.test(path))
     || (method === 'POST' && /^\/payments\/orders\/[^/]+\/cancel$/.test(path));
+  const paymentWebhook = method === 'POST' && path === '/payments/instamojo/webhook';
   const customerAccount = (method === 'GET' && path === '/auth/me')
     || (method === 'POST' && (path === '/auth/login' || path === '/auth/logout'));
   const existingOrders = (method === 'GET' && (path === '/orders' || /^\/orders\/[^/]+(?:\/invoice)?$/.test(path)))
     || ((method === 'POST' || method === 'PATCH') && /^\/orders\/[^/]+(?:\/returns)?$/.test(path));
-  if (ownerApi || healthOrStatus || paymentReadOnly || customerAccount || existingOrders) { next(); return; }
+  if (ownerApi || healthOrStatus || paymentReadOnly || paymentWebhook || customerAccount || existingOrders) { next(); return; }
   response.status(503).json({ error: 'The AHUZA storefront is temporarily unavailable Please check back soon' });
 });
 
@@ -328,7 +329,7 @@ api.delete('/wishlist/:productId', requireCustomer, async (request, response) =>
 async function createPaymentOrder(request: Request, response: Response): Promise<void> {
   const paymentMethod = request.body?.paymentMethod;
   if (paymentMethod !== 'upi' && paymentMethod !== 'cod') { response.status(400).json({ error: 'Choose UPI or cash on delivery' }); return; }
-  if (paymentMethod === 'upi' && !getAhuzaPayConfiguration().configured) { response.status(503).json({ error: 'Online payment is unavailable Configure AHUZA_PAY_URL and AHUZA_PAY_API_KEY on the server' }); return; }
+  if (paymentMethod === 'upi' && !instamojoConfigured()) { response.status(503).json({ error: 'Online payment is unavailable: Instamojo is not configured' }); return; }
   const rawPayerUpi = request.body?.payerUpiId;
   const payerUpiId = typeof rawPayerUpi === 'string' ? rawPayerUpi.trim() : '';
   if (paymentMethod === 'upi' && payerUpiId && !isValidUpiId(payerUpiId)) { response.status(400).json({ error: 'Enter a valid UPI ID such as name@bank, or leave it blank' }); return; }
@@ -344,16 +345,20 @@ async function createPaymentOrder(request: Request, response: Response): Promise
       city: typeof address?.city === 'string' ? address.city.trim() : '',
       state: typeof address?.state === 'string' ? address.state.trim() : '',
       postalCode: typeof address?.postalCode === 'string' ? address.postalCode.trim() : '',
-      country: 'India',
+      country: typeof address?.country === 'string' ? address.country.trim() : 'India',
       phone: typeof address?.phone === 'string' ? address.phone.trim() : '',
     };
-    const valid = stringValue(parsed.name, 100) && stringValue(parsed.addressLine1, 180) && !(parsed.addressLine2 && parsed.addressLine2.length > 180) && stringValue(parsed.city, 80) && stringValue(parsed.state, 80) && /^[1-9][0-9]{5}$/.test(parsed.postalCode) && /^\+?[0-9][0-9\s-]{8,16}$/.test(parsed.phone);
+    const validPostalCode = parsed.country === 'India' ? /^[1-9][0-9]{5}$/.test(parsed.postalCode) : stringValue(parsed.postalCode, 20);
+    const valid = stringValue(parsed.name, 100) && stringValue(parsed.addressLine1, 180) && !(parsed.addressLine2 && parsed.addressLine2.length > 180) && stringValue(parsed.city, 80) && isValidCountryRegion(parsed.country, parsed.state) && validPostalCode && /^\+?[0-9][0-9\s-]{8,16}$/.test(parsed.phone);
     return valid ? parsed : null;
   };
   const shippingAddress = parseAddress(request.body?.shippingAddress);
   const billingAddress = request.body?.billingAddress === undefined ? shippingAddress : parseAddress(request.body.billingAddress);
   if (!shippingAddress || !billingAddress) {
-    response.status(400).json({ error: 'Enter a valid name, Indian billing and delivery address, six-digit PIN code, and phone number' }); return;
+    response.status(400).json({ error: 'Enter valid billing and delivery addresses, including the country, region, postal code, and phone number' }); return;
+  }
+  if (shippingAddress.country !== 'India') {
+    response.status(400).json({ error: 'Delivery is currently available only within India' }); return;
   }
   const requested = new Map<string, { productId: string; size?: string; quantity: number }>();
   for (const item of items) {
@@ -420,9 +425,15 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   }
   let payUrl: string;
   try {
-    ({ payUrl } = await createAhuzaPayOrder(buildAhuzaPayOrder(placed!, { name: shippingAddress.name, email: customerEmail || '' }, shippingAddress)));
+    const created = await createInstamojoRequest(placed!, customerEmail || '');
+    payUrl = created.payUrl;
+    await mutateDatabase((database) => {
+      const order = database.orders.find((entry) => entry.id === localOrderId);
+      if (!order) throw new Error('Order missing after Instamojo request creation');
+      order.instamojoRequestId = created.requestId;
+    });
   } catch (error) {
-    console.error('Ahuza Pay order creation failed:', error);
+    console.error('Instamojo order creation failed:', error);
     await mutateDatabase((database) => {
       const order = database.orders.find((entry) => entry.id === localOrderId && entry.status === 'pending_payment');
       if (!order) return;
@@ -437,36 +448,55 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     response.status(502).json({ error: 'Could not start the payment Please try again shortly' });
     return;
   }
-  // UPI customers get a single combined confirmation email, sent once the bank credit is matched.
-  response.status(201).json({ orderId: localOrderId, paymentMethod, paymentReference, payUrl, amount, currency: 'INR', expiresAt: expiresAt!.toISOString(), status: 'pending' });
+  // The storefront uses payUrl; longurl is also returned explicitly for API clients.
+  response.status(201).json({ orderId: localOrderId, paymentMethod, paymentReference, payUrl, longurl: payUrl, amount, currency: 'INR', expiresAt: expiresAt!.toISOString(), status: 'pending' });
 }
 
 api.get('/payments/config', (_request, response) => {
-  response.json({ configured: getAhuzaPayConfiguration().configured, automaticVerification: true });
+  response.json({ configured: instamojoConfigured(), automaticVerification: true });
+});
+
+api.post('/payments/instamojo/webhook', express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {
+  if (!instamojoWebhookConfigured()) { response.status(503).json({ error: 'Instamojo webhook verification is not configured' }); return; }
+  const payload = request.body as Record<string, unknown>;
+  if (!verifyInstamojoWebhook(payload)) { response.status(400).json({ error: 'Invalid Instamojo webhook signature' }); return; }
+
+  const requestId = payload.payment_request_id;
+  const paymentId = payload.payment_id;
+  if (typeof requestId !== 'string') { response.status(400).json({ error: 'Instamojo payment request ID is missing' }); return; }
+  const order = (await getDatabase()).orders.find((entry) => entry.instamojoRequestId === requestId);
+  if (!order) {
+    console.error('Signed Instamojo webhook has no matching order:', requestId);
+    response.status(200).json({ received: true });
+    return;
+  }
+  if (payload.status !== 'Credit') { response.status(200).json({ received: true }); return; }
+
+  const amount = instamojoAmountInPaise(payload.amount);
+  if (typeof paymentId !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(paymentId)
+      || amount !== order.amount || payload.currency !== 'INR' || payload.purpose !== `AHUZA order ${order.id}`) {
+    console.error(`Signed Instamojo webhook does not match order ${order.id}`);
+    response.status(200).json({ received: true });
+    return;
+  }
+
+  const confirmed = await confirmInstamojoWebhookPayment(requestId, amount, paymentId);
+  if (!confirmed) {
+    const current = (await getDatabase()).orders.find((entry) => entry.id === order.id);
+    if (current?.paymentStatus !== 'paid') console.error(`Signed Instamojo credit for order ${order.id} could not be applied; owner review required`);
+  }
+  response.status(200).json({ received: true });
 });
 
 api.post('/payments/orders', requireCustomer, paymentLimit, async (request, response) => {
   await createPaymentOrder(request, response);
 });
 
-// Ahuza Pay calls this the moment a bank credit is matched. It only triggers a re-check: the order is
-// marked paid solely when Ahuza Pay itself reports PAID, so a forged call cannot confirm anything.
-api.post('/payments/ahuza-pay/notify', paymentLimit, async (request, response) => {
-  const expected = Buffer.from(getAhuzaPayConfiguration().apiKey);
-  const header = request.get('authorization') || '';
-  const supplied = Buffer.from(header.startsWith('Bearer ') ? header.slice(7).trim() : '');
-  if (expected.length === 0 || supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) { response.status(401).json({ error: 'Authentication required' }); return; }
-  const orderId = request.body?.external_order_id;
-  if (typeof orderId !== 'string' || !orderId || orderId.length > 64) { response.status(400).json({ error: 'external_order_id is required' }); return; }
-  const confirmed = await syncAhuzaPayPayment(orderId, undefined, 'ahuza_pay_notify').catch((error) => { console.error('Ahuza Pay notify sync failed:', error); return false; });
-  response.json({ confirmed });
-});
-
 api.get('/payments/orders/:id/status', requireCustomer, paymentLimit, async (request, response) => {
-  await syncAhuzaPayPayment(String(request.params.id), request.session.userId!, 'customer_check').catch((error) => console.error('Ahuza Pay status sync failed:', error));
+  await syncInstamojoPayment(String(request.params.id), request.session.userId!).catch((error) => console.error('Instamojo status sync failed:', error));
   const order = (await getDatabase()).orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
-  response.json({ orderId: order.id, status: order.paymentStatus || 'pending', orderStatus: order.status, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt, verification: order.paymentVerificationMethod || 'awaiting_ahuza_pay' });
+  response.json({ orderId: order.id, status: order.paymentStatus || 'pending', orderStatus: order.status, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt, verification: order.paymentVerificationMethod || 'awaiting_payment_verification' });
 });
 
 api.post('/payments/orders/:id/failure', requireCustomer, paymentLimit, async (request, response) => {
@@ -504,7 +534,7 @@ api.get('/orders/:id', requireCustomer, async (request, response) => {
 
 api.get('/orders', requireCustomer, async (request, response) => {
   const pending = (await getDatabase()).orders.filter((order) => order.userId === request.session.userId && order.paymentMethod === 'upi' && order.paymentStatus !== 'paid' && ['pending_payment', 'cancelled'].includes(order.status));
-  await Promise.all(pending.map((order) => syncAhuzaPayPayment(order.id, request.session.userId!, 'customer_check').catch((error) => console.error('Ahuza Pay order list sync failed:', error))));
+  await Promise.all(pending.map((order) => syncInstamojoPayment(order.id, request.session.userId!).catch((error) => console.error('Instamojo order list sync failed:', error))));
   const database = await getDatabase();
   const orders = database.orders
     .filter((order) => order.userId === request.session.userId)
@@ -779,45 +809,6 @@ api.get('/owner/orders', requireOwner, ownerLimit, async (_request, response) =>
   orders: (await getDatabase()).orders.map(({ payerUpiIdEnc, ...order }) => ({ ...order, ...(payerUpiIdEnc ? { payerUpiId: decryptCustomerValue(payerUpiIdEnc) || undefined } : {}) })),
 }));
 
-function payeeError(response: Response, error: unknown): void {
-  const message = error instanceof Error ? error.message : '';
-  if (message === 'AHUZA_PAY_NOT_CONFIGURED') { response.status(503).json({ error: 'Ahuza Pay is not connected Set AHUZA_PAY_URL and AHUZA_PAY_API_KEY on the server' }); return; }
-  const upstream = /^AHUZA_PAY_(\d{3}): (.+)$/.exec(message);
-  if (upstream && Number(upstream[1]) === 401) { response.status(502).json({ error: 'Ahuza Pay rejected the API key Check AHUZA_PAY_API_KEY matches MERCHANT_API_KEY on Ahuza Pay' }); return; }
-  if (upstream && Number(upstream[1]) >= 400 && Number(upstream[1]) < 500) { response.status(400).json({ error: upstream[2] }); return; }
-  console.error('Ahuza Pay payee request failed:', error);
-  response.status(502).json({ error: 'Could not reach Ahuza Pay Please try again shortly' });
-}
-
-api.get('/owner/payee', requireOwner, ownerLimit, async (_request, response) => {
-  try { response.json({ payee: await getAhuzaPayPayee() }); } catch (error) { payeeError(response, error); }
-});
-
-api.put('/owner/payee', requireOwner, ownerLimit, async (request, response) => {
-  const vpa = request.body?.vpa;
-  const payeeName = request.body?.payeeName;
-  if (vpa !== undefined && (typeof vpa !== 'string' || !isValidUpiId(vpa.trim()))) { response.status(400).json({ error: 'Enter a valid UPI ID such as name@bank' }); return; }
-  if (payeeName !== undefined && (typeof payeeName !== 'string' || payeeName.trim().length < 1 || payeeName.trim().length > 60)) { response.status(400).json({ error: 'Payee name must be 1 to 60 characters' }); return; }
-  if (vpa === undefined && payeeName === undefined) { response.status(400).json({ error: 'Provide a UPI ID or payee name' }); return; }
-  try {
-    response.json({ payee: await updateAhuzaPayPayee({ ...(vpa === undefined ? {} : { vpa: vpa.trim() }), ...(payeeName === undefined ? {} : { payeeName: payeeName.trim() }) }) });
-  } catch (error) { payeeError(response, error); }
-});
-
-api.delete('/owner/payee', requireOwner, ownerLimit, async (_request, response) => {
-  try { response.json({ payee: await resetAhuzaPayPayee() }); } catch (error) { payeeError(response, error); }
-});
-
-api.get('/owner/pay-text', requireOwner, ownerLimit, async (_request, response) => {
-  try { response.json({ text: await getAhuzaPayPageText() }); } catch (error) { payeeError(response, error); }
-});
-
-api.put('/owner/pay-text', requireOwner, ownerLimit, async (request, response) => {
-  const text = request.body?.text;
-  if (typeof text !== 'string' || text.trim().length > 600) { response.status(400).json({ error: 'Text must be 600 characters or fewer' }); return; }
-  try { response.json({ text: await updateAhuzaPayPageText(text.trim()) }); } catch (error) { payeeError(response, error); }
-});
-
 api.get('/owner/integrations', requireOwner, ownerLimit, async (_request, response) => {
   response.json({ integrations: {
     email: isEmailConfigured(),
@@ -910,15 +901,6 @@ api.patch('/owner/orders/:id/confirm-upi-payment', requireOwner, ownerLimit, asy
   const result = await confirmUpiPaymentByOwner(String(request.params.id));
   if (!result.ok) { response.status(409).json({ error: result.error }); return; }
   response.json({ order: (await getDatabase()).orders.find((entry) => entry.id === request.params.id) });
-});
-
-api.get('/owner/payment-agent', requireOwner, ownerLimit, async (_request, response) => {
-  const database = await getDatabase();
-  const log = (database.paymentAgentLog || []).slice(0, 50);
-  const heldIds = new Set(log.filter((entry) => entry.decision === 'held_out_of_stock').map((entry) => entry.orderId));
-  const held = database.orders.filter((order) => heldIds.has(order.id) && order.paymentStatus !== 'paid')
-    .map((order) => ({ id: order.id, amount: order.amount, items: order.items.map((item) => ({ name: item.name, quantity: item.quantity })) }));
-  response.json({ log, held });
 });
 
 api.patch('/owner/orders/:id/cod-payment', requireOwner, ownerLimit, async (request, response) => {
@@ -1277,50 +1259,3 @@ api.post('/owner/marketing-automations/run', requireOwner, ownerLimit, async (_r
 export async function expireReservationsOnStartup(): Promise<void> {
   await expirePendingOrders();
 }
-
-// MacroDroid forwards bank-credit notifications; Ahuza Pay verifies and matches them before confirmation.
-api.post('/macrodroid-proxy', requireMacroDroid, paymentLimit, async (request, response) => {
-  try {
-    const { amount_paise, reference, note } = request.body ?? {};
-
-    if (!Number.isSafeInteger(amount_paise) || amount_paise <= 0
-      || typeof reference !== 'string' || reference.trim().length === 0 || reference.length > 64
-      || (note !== undefined && (typeof note !== 'string' || note.length > 256))) {
-      return response.status(400).json({ error: 'A positive amount_paise and reference are required; note must be up to 256 characters' });
-    }
-
-    const secret = process.env.BANK_WEBHOOK_SECRET;
-    const baseUrl = process.env.AHUZA_PAY_URL || process.env.AHUZA_PAY_BASE_URL;
-    if (!secret || !baseUrl) {
-      return response.status(503).json({ error: 'Ahuza Pay webhook is not configured' });
-    }
-    const targetUrl = new URL('/api/bank/credit', baseUrl);
-    if (!['http:', 'https:'].includes(targetUrl.protocol)) {
-      return response.status(503).json({ error: 'Ahuza Pay webhook URL must use HTTP or HTTPS' });
-    }
-
-    const rawBody = JSON.stringify({ amount_paise, reference: reference.trim(), ...(note === undefined ? {} : { note }) });
-    const timestamp = String(Date.now());
-
-    const signature = createHmac('sha256', secret)
-      .update(`${timestamp}.${rawBody}`)
-      .digest('hex');
-
-    const webhookResponse = await fetch(targetUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Timestamp': timestamp,
-        'X-Signature': signature,
-      },
-      body: rawBody,
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    const data: unknown = await webhookResponse.json();
-    response.status(webhookResponse.status).json(data);
-  } catch (error) {
-    console.error('MacroDroid proxy error:', error);
-    response.status(502).json({ error: 'Unable to forward bank credit notification' });
-  }
-});
