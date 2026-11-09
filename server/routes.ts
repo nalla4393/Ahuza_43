@@ -730,11 +730,12 @@ api.post('/owner/images', requireOwner, uploadLimit, express.raw({ type: ['image
 api.delete('/owner/images/:id', requireOwner, ownerLimit, async (request, response) => {
   const id = String(request.params.id);
   const removed = await mutateDatabase((database) => {
-    if (database.products.some((product) => product.images?.some((image) => image.id === id))) return false;
+    if (database.products.some((product) => product.images?.some((image) => image.id === id))
+      || database.content.chatbotImageUrl.startsWith(`/uploads/${id}/`)) return false;
     database.imageLibrary = (database.imageLibrary || []).filter((image) => image.id !== id);
     return true;
   });
-  if (!removed) { response.status(409).json({ error: 'Image is used by a product Remove it from the product first' }); return; }
+  if (!removed) { response.status(409).json({ error: 'Image is in use Remove it from the product or chatbot first' }); return; }
   await deleteProductImageFiles(id);
   response.json({ ok: true });
 });
@@ -750,7 +751,7 @@ api.put('/owner/image-settings', requireOwner, ownerLimit, async (request, respo
 
 api.patch('/owner/content', requireOwner, ownerLimit, async (request, response) => {
   const patch = request.body;
-  const allowed: (keyof StorefrontContent)[] = ['announcement', 'heroEyebrow', 'heroTitle', 'heroDescription', 'heroImageUrl', 'storyHeading', 'storyBody', 'storyImageUrl', 'circleImages', 'bannerImages'];
+  const allowed: (keyof StorefrontContent)[] = ['announcement', 'heroEyebrow', 'heroTitle', 'heroDescription', 'heroImageUrl', 'storyHeading', 'storyBody', 'storyImageUrl', 'chatbotImageUrl', 'circleImages', 'bannerImages'];
   const copyFields = new Set<string>(storefrontCopyFields.map(({ id }) => id));
   if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).length === 0) { response.status(400).json({ error: 'Provide at least one storefront field' }); return; }
   const imageMaps: Record<string, string[]> = { circleImages: circleImageKeys, bannerImages: bannerImageKeys };
@@ -782,7 +783,7 @@ api.patch('/owner/content', requireOwner, ownerLimit, async (request, response) 
       continue;
     }
     if (!allowed.includes(key as keyof StorefrontContent)) { response.status(400).json({ error: `Unknown storefront field: ${key}` }); return; }
-    if (key.endsWith('ImageUrl') ? !httpsUrl(value) : !stringValue(value, key === 'heroTitle' ? 120 : 500)) { response.status(400).json({ error: `Invalid value for ${key}` }); return; }
+    if (key.endsWith('ImageUrl') ? !(key === 'chatbotImageUrl' && value === '') && !httpsUrl(value) : !stringValue(value, key === 'heroTitle' ? 120 : 500)) { response.status(400).json({ error: `Invalid value for ${key}` }); return; }
     cleaned[key] = value;
   }
   const content = await mutateDatabase((database) => {

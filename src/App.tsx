@@ -43,7 +43,7 @@ const formatPrice = (price: number) => new Intl.NumberFormat('en-IN', {
 
 type Customer = { id: string; email: string };
 type CustomerOrder = { id: string; amount: number; currency: string; status: string; paymentMethod?: 'upi' | 'cod'; paymentStatus?: string; paymentVerifiedAt?: string; createdAt: string; trackingNumber?: string; trackingUrl?: string; review?: { rating: number; comment?: string; createdAt: string }; items: { name: string; quantity: number; size?: string }[] };
-type StorefrontContent = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string; circleImages?: Record<string, string>; circleLabels?: Record<string, string>; bannerImages?: Record<string, string>; copy?: Record<StorefrontCopyId, string> };
+type StorefrontContent = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string; chatbotImageUrl?: string; circleImages?: Record<string, string>; circleLabels?: Record<string, string>; bannerImages?: Record<string, string>; copy?: Record<StorefrontCopyId, string> };
 type CartLine = { productId: string; quantity: number; size?: string };
 const orderStatusLabel = (order: { status: string; paymentStatus?: string; paymentMethod?: string }) => {
   if (order.status === 'paid') return 'Order confirmed · payment received';
@@ -1019,7 +1019,7 @@ export default function App() {
         </div>;
       })()}
       {ownerStudioOpen && <Suspense fallback={<div className="store-maintenance" role="status">Opening Owner Studio…</div>}><OwnerStudio onClose={() => setOwnerStudioOpen(false)} onProductsChange={setProducts} onContentChange={setStoreContent} onSiteStatusChange={setSitePublished} onImageSettingsChange={setImageSettings} /></Suspense>}
-      {sitePublished && <CustomerSupportChat onOpenAccount={() => setAccountOpen(true)} />}
+      {sitePublished && <CustomerSupportChat onOpenAccount={() => setAccountOpen(true)} avatarImageUrl={storeContent.chatbotImageUrl} />}
       {sitePublished && <ShoppingAssistant trip={assistantTrip} onOpenBag={() => { setAssistantTrip(null); setDetailProduct(null); setCartOpen(true); }} />}
     </main>
   );

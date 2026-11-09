@@ -103,9 +103,9 @@ async function readJsonResponse<T>(response: Response, serviceName: string): Pro
   catch { throw new Error(`${serviceName} returned an invalid response Please try again`); }
 }
 
-type Props = { onOpenAccount: () => void };
+type Props = { onOpenAccount: () => void; avatarImageUrl?: string };
 
-export default function CustomerSupportChat({ onOpenAccount }: Props) {
+export default function CustomerSupportChat({ onOpenAccount, avatarImageUrl }: Props) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [ticketBusy, setTicketBusy] = useState(false);
@@ -387,7 +387,7 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
   return <div className="customer-support">
     {open && <section className="customer-support-panel" role="dialog" aria-label="AHUZA customer support">
       <header className="customer-support-header">
-        <Suspense fallback={<div className="beulah-avatar" />}><BeulahAvatar ref={avatar} /></Suspense>
+        <Suspense fallback={<div className="beulah-avatar" />}><BeulahAvatar key={avatarImageUrl || 'default'} ref={avatar} imageUrl={avatarImageUrl} /></Suspense>
         <div><strong>Beulah · AHUZA Support</strong><span className={supportAvailable ? 'support-status is-open' : 'support-status'}><i />{supportAvailable ? 'Available now' : 'Replies 10:00 AM–9:00 PM IST'}</span></div>
         <button type="button" onClick={toggleMute} aria-label={muted ? 'Turn Beulah’s voice on' : 'Mute Beulah’s voice'} title={muted ? 'Voice off' : 'Voice on'}>{muted ? <VolumeX size={17} /> : <Volume2 size={17} />}</button>
         <button type="button" onClick={() => setOpen(false)} aria-label="Close support chat"><X size={18} /></button>

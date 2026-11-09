@@ -26,6 +26,9 @@ Local customer sessions are encrypted and stored under `.data/sessions`, expire 
 
 Open **Owner Studio** from the storefront footer and enter the configured owner key. The key stays in browser memory and is sent only to owner APIs using `X-Owner-Key`. The dashboard includes sales and low-stock overview, product and ghost-mannequin editing, storefront content, fulfillment and return requests, integration status, an AI owner agent, reviewed customer-email drafts, and social caption generation. **Owner Studio → Storefront** edits the announcement, hero and story, campaign banners, homepage section headings, service promises, contact and newsletter copy, and footer text. Product names and descriptions are edited in **Products & stock**. These changes are saved with the storefront content in the persistent database.
 
+To change the customer-support chatbot portrait, open **Owner Studio → Storefront → Chatbot portrait**, upload a JPG, PNG or WebP, and select **Publish storefront text**. The preview shows the circular crop. Custom portraits are static; choose **Use default portrait** and publish to restore the animated default.
+Use **Search storefront settings and text** at the top of the Storefront editor to find an editing field or section and jump to it.
+
 A shopping assistant appears briefly when customers open a product image or add an item to the bag. A portrait character is shown while the 3D version loads or if it cannot start. With reduced motion enabled, the assistant appears without animation.
 
 Owner Studio has a **Publish site / Unpublish site** control in its header. Unpublishing displays a maintenance page to visitors and blocks public storefront APIs and new checkouts; the owner can still access Owner Studio, existing customer orders and online payment status. The storefront publication setting is persisted with the database and defaults to published for existing installations.
