@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import ShoppingCharacterFallback from './ShoppingCharacterFallback';
 import './shopping-assistant.css';
 
 export type AssistantTrip = {
@@ -15,12 +16,17 @@ export type AssistantTrip = {
 function Character() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [failed, setFailed] = useState(false);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     let disposed = false;
     let dispose: (() => void) | undefined;
     void import('./avatar/shoppingCharacter').then(({ createShoppingCharacter }) => {
-      if (!disposed && canvas.current) dispose = createShoppingCharacter(canvas.current);
+      if (!disposed && canvas.current) {
+        dispose = createShoppingCharacter(canvas.current);
+        setReady(true);
+      }
     }).catch((error: unknown) => {
       console.error('Unable to start the 3D shopping assistant:', error);
       if (!disposed) setFailed(true);
@@ -31,15 +37,10 @@ function Character() {
     };
   }, []);
 
-  if (!failed) return <canvas ref={canvas} className="shopping-character-3d" aria-hidden="true" />;
-  return <div className="shopping-character">
-    <span className="shopping-character-arm left" />
-    <span className="shopping-character-arm right" />
-    <span className="shopping-character-body" />
-    <span className="shopping-character-leg left" />
-    <span className="shopping-character-leg right" />
-    <img className="shopping-assistant-face" src="/beulah-avatar.jpg" alt="" />
-  </div>;
+  return <>
+    {!ready && <ShoppingCharacterFallback />}
+    {!failed && <canvas ref={canvas} className="shopping-character-3d" aria-hidden="true" style={{ display: ready ? 'block' : 'none' }} />}
+  </>;
 }
 
 export default function ShoppingAssistant({ trip, onOpenBag }: { trip: AssistantTrip | null; onOpenBag: () => void }) {
@@ -51,11 +52,11 @@ export default function ShoppingAssistant({ trip, onOpenBag }: { trip: Assistant
     setAnimatingId(null);
     if (!trip) return;
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (!reduced) setAnimatingId(trip.id);
+    setAnimatingId(trip.id);
     const timer = window.setTimeout(() => {
       setAnimatingId(null);
       if (trip.mode === 'pack') setPackedId(trip.id);
-    }, reduced ? 0 : trip.mode === 'pack' ? 2400 : 1400);
+    }, reduced ? 2400 : trip.mode === 'pack' ? 2400 : 1400);
     return () => window.clearTimeout(timer);
   }, [trip]);
 

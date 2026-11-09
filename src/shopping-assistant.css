@@ -21,4 +21,8 @@
 @keyframes assistant-receive{0%,72%{opacity:0;transform:translate(-50%,-50%) scale(.6)}84%,94%{opacity:1;transform:translate(-50%,-50%) scale(1.1)}100%{opacity:0;transform:translate(-50%,-50%) scale(1)}}
 @keyframes assistant-arm{from{transform:rotate(-25deg)}to{transform:rotate(25deg)}}
 @keyframes assistant-leg{from{transform:rotate(-18deg)}to{transform:rotate(18deg)}}
-@media(prefers-reduced-motion:reduce){.shopping-assistant-trip{display:none}}
+@media(prefers-reduced-motion:reduce){
+  .shopping-assistant-mover,.shopping-assistant-trip.preview .shopping-assistant-mover{animation:none;transform:translate(calc(var(--product-x) - 24px),calc(var(--product-y) - 24px))}
+  .shopping-character-arm,.shopping-character-leg,.shopping-assistant-item{animation:none}
+  .shopping-assistant-receiver{display:none}
+}

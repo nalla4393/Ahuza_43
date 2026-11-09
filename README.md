@@ -18,11 +18,15 @@ npm run dev
 
 Vite serves the storefront at `http://localhost:5173` and proxies `/api` to the Express server using `PORT` (defaults to `3001`). The store is usable without third-party credentials; payments, AI and email integrations activate when configured.
 
+In the bag and billing drawer, customers can review product images, sizes, quantities and totals, change quantities or remove a product, and return to the catalogue to add more before placing an order.
+
 Set `OWNER_API_KEY` in `.env` before using owner-only APIs. Set a long random `SESSION_SECRET` outside development. Never commit `.env` or `.data/`.
 
 Local customer sessions are encrypted and stored under `.data/sessions`, expire after seven days, and are periodically cleaned up. Use a shared store such as Redis for multi-instance production deployments.
 
 Open **Owner Studio** from the storefront footer and enter the configured owner key. The key stays in browser memory and is sent only to owner APIs using `X-Owner-Key`. The dashboard includes sales and low-stock overview, product and ghost-mannequin editing, storefront content, fulfillment and return requests, integration status, an AI owner agent, reviewed customer-email drafts, and social caption generation. **Owner Studio → Storefront** edits the announcement, hero and story, campaign banners, homepage section headings, service promises, contact and newsletter copy, and footer text. Product names and descriptions are edited in **Products & stock**. These changes are saved with the storefront content in the persistent database.
+
+A shopping assistant appears briefly when customers open a product image or add an item to the bag. A portrait character is shown while the 3D version loads or if it cannot start. With reduced motion enabled, the assistant appears without animation.
 
 Owner Studio has a **Publish site / Unpublish site** control in its header. Unpublishing displays a maintenance page to visitors and blocks public storefront APIs and new checkouts; the owner can still access Owner Studio, existing customer orders and online payment status. The storefront publication setting is persisted with the database and defaults to published for existing installations.
 

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent } from 'react';
-import { User, ArrowRight, ArrowUpRight, Heart, MessageCircle, Mail, MapPin, Menu, Minus, Phone, Plus, Search, ShoppingBag, SlidersHorizontal, X, CheckCircle2 } from 'lucide-react';
+import { User, ArrowRight, ArrowUpRight, Heart, MessageCircle, Mail, MapPin, Menu, Phone, Search, ShoppingBag, SlidersHorizontal, X, CheckCircle2 } from 'lucide-react';
 import { countries, regionsForCountry } from './addressData';
 import CustomerSupportChat from './CustomerSupportChat';
 import ShoppingAssistant, { type AssistantTrip } from './ShoppingAssistant';
@@ -7,6 +7,7 @@ import ProductRail from './ProductRail';
 import HeroCarousel, { type BannerSlide } from './HeroCarousel';
 import PaymentQr from './PaymentQr';
 import ManualPaymentInstructions from './ManualPaymentInstructions';
+import CheckoutItems from './CheckoutItems';
 import { defaultImageSettings, imageSettingsVars, mainImage, srcSet, type ImageSettings, type ProductImage } from './imageTypes';
 import { defaultStorefrontCopy, type StorefrontCopyId } from '../shared/storefrontCopy';
 
@@ -520,6 +521,10 @@ export default function App() {
     }));
   }
 
+  function removeFromBag(productId: string, size: string | undefined) {
+    setCart((current) => current.filter((line) => line.productId !== productId || line.size !== size));
+  }
+
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -949,7 +954,16 @@ export default function App() {
             {paymentOrder.paymentMethod === 'upi' && paymentOrder.provider === 'manual_upi' && paymentStatus !== 'paid' && <ManualPaymentInstructions email={storefrontText('contactEmail')} orderId={paymentOrder.orderId} />}
             {paymentOrder.paymentMethod === 'upi' && paymentStatus !== 'paid' && <small>{paymentOrder.provider === 'manual_upi' ? 'Manual confirmation is required. Do not pay after the 60-minute reservation expires. If you have already paid, contact AHUZA with your order and bank transaction reference.' : storefrontText('payVerificationNote')}</small>}
           </section> : cartLines.length === 0 ? <div className="empty-bag"><ShoppingBag size={25} /><p>{storefrontText('bagEmpty')}</p><button className="dark-button" onClick={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>{storefrontText('bagExplore')}</button></div> : <>
-            <div className="bag-lines">{cartLines.map(({ product, quantity, size }) => <div className="bag-line" key={`${product.id}-${size || 'standard'}`}><img src={mainImage(product)?.variants[0]?.url || product.imageUrl} alt="" /><div className="bag-line-copy"><h3>{product.name}</h3><p>{formatPrice(product.price)}{size ? ` · Size ${size}` : ''}</p><div className="quantity-control"><button type="button" aria-label={`Remove one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, -1)}><Minus size={13} /></button><span>{quantity}</span><button type="button" aria-label={`Add one ${product.name}${size ? ` size ${size}` : ''}`} onClick={() => changeQuantity(product.id, size, 1)} disabled={cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0) >= Math.min(product.stock, 10)}><Plus size={13} /></button></div></div><span className="line-total">{formatPrice(product.price * quantity)}</span></div>)}</div>
+            <CheckoutItems items={cartLines.map(({ product, quantity, size }) => ({
+              id: product.id,
+              name: product.name,
+              imageUrl: mainImage(product)?.variants[0]?.url || product.imageUrl,
+              size,
+              quantity,
+              unitPrice: formatPrice(product.price),
+              lineTotal: formatPrice(product.price * quantity),
+              canIncrease: cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0) < Math.min(product.stock, 10),
+            }))} busy={busy} onChangeQuantity={changeQuantity} onRemove={removeFromBag} onContinueShopping={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }} />
             <div className="bag-footer"><div className="subtotal"><span>{storefrontText('bagSubtotal')}</span><strong>{formatPrice(cartTotal)}</strong></div><div className="subtotal"><span>{storefrontText('bagShipping')}</span><strong>{estimatedShipping ? formatPrice(estimatedShipping) : storefrontText('bagComplimentary')}</strong></div><div className="subtotal"><span>{storefrontText('bagTotal')}</span><strong>{formatPrice(cartTotal + estimatedShipping)}</strong></div><p>{storefrontText('bagShippingNote')}</p><form className="checkout-details" onSubmit={(event) => { event.preventDefault(); void checkout(); }}>
               <p className="address-title">{storefrontText('checkoutBilling')}</p>
               <AddressFields section="billing" value={billingAddress} onChange={setBillingAddress} />
