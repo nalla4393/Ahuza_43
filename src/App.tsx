@@ -51,7 +51,7 @@ const orderStatusLabel = (order: { status: string; paymentStatus?: string; payme
   if (order.status === 'pending_payment') return 'Awaiting payment confirmation';
   return `${order.status.replaceAll('_', ' ')}${order.paymentStatus === 'paid' ? ' · payment received' : ''}`;
 };
-type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; provider?: 'instamojo' | 'manual_upi'; paymentReference?: string; payUrl?: string; amount: number; currency: string; expiresAt?: string; status?: string; orderStatus?: string };
+type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; provider?: 'instamojo' | 'manual_upi' | 'ahuza_pay'; paymentReference?: string; payUrl?: string; amount: number; currency: string; expiresAt?: string; status?: string; orderStatus?: string };
 type PaymentConfiguration = { configured: boolean; automaticVerification: boolean };
 
 type AddressValues = { name: string; addressLine1: string; addressLine2: string; city: string; state: string; country: string; postalCode: string; phone: string };
@@ -942,7 +942,7 @@ export default function App() {
           <div className="drawer-heading"><div><p className="eyebrow dark-eyebrow">AHUZA Apparel</p><h2 id="bag-title">{storefrontText('bagTitle')} <span>({cartCount})</span></h2></div><button className="icon-button" aria-label="Close bag" onClick={() => setCartOpen(false)}><X size={21} /></button></div>
           {paymentOrder ? <section className="payment-panel" aria-live="polite">
             {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && <CheckCircle2 className="payment-success-icon" size={46} aria-hidden="true" />}
-            <p className="eyebrow dark-eyebrow">{paymentOrder.paymentMethod === 'cod' ? storefrontText('checkoutCod') : paymentOrder.provider === 'manual_upi' ? 'Ahuza Pay · UPI' : 'Instamojo checkout'}</p>
+            <p className="eyebrow dark-eyebrow">{paymentOrder.paymentMethod === 'cod' ? storefrontText('checkoutCod') : paymentOrder.provider === 'instamojo' ? 'Instamojo checkout' : 'Ahuza Pay · UPI'}</p>
             <h3>{paymentOrder.paymentMethod === 'cod' ? storefrontText('payOrderConfirmed') : paymentStatus === 'paid' && paymentOrderStatus === 'cancelled' ? 'Payment received — order needs review' : paymentStatus === 'paid' ? storefrontText('payConfirmed') : paymentStatus === 'failed' ? storefrontText('payFailed') : paymentStatus === 'expired' || paymentStatus === 'cancelled' ? storefrontText('payClosed') : paymentStatus === 'pending' ? storefrontText('payUpiPending') : storefrontText('payPending')}</h3>
             <p>{paymentMessage || storefrontText('payWaiting')}</p>
             <p><strong>{formatPrice(paymentOrder.amount / 100)}</strong>{paymentOrder.paymentReference ? ` · Reference ${paymentOrder.paymentReference}` : ` · Order ${paymentOrder.orderId.slice(0, 8)}`}</p>
