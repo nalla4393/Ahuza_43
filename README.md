@@ -49,6 +49,20 @@ All checkout charges remain in INR.
 
 ### Ahuza Pay Node (manual UPI verification)
 
+To optionally use the separate Ahuza Pay checkout service instead, configure
+`AHUZA_PAY_BASE_URL`, `AHUZA_PAY_API_KEY`, and `AHUZA_PAY_WEBHOOK_SECRET` on
+this website's server. The payment service's `MERCHANT_API_KEY` must match the
+API key, and its `FULFILLMENT_WEBHOOK_SECRET` must match the webhook secret.
+Set its `FULFILLMENT_WEBHOOK_URL` to
+`https://www.ahuzawear.com/api/payments/ahuza-pay/webhook`. Keep all secrets
+server-side. With these settings, the server creates the remote order from its
+own cart prices and directs the customer to its hosted checkout. Signed
+notifications update existing orders idempotently after bank confirmation.
+An extracted screenshot alone cannot confirm payment. Orders paid after their
+reservation expires are restored only if stock is available; otherwise the
+owner must review them. Leave the three variables blank to retain the existing
+manual UPI checkout.
+
 The self-hosted UPI checkout is the default. Configure the storefront service
 with `PAYMENT_PROVIDER=manual_upi`, `UPI_VPA` (the receiving UPI ID), and
 `UPI_PAYEE_NAME` (the recipient name shown in the UPI app). Verify the UPI ID

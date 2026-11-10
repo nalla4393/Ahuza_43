@@ -101,6 +101,7 @@ export type Order = {
   discountAmount?: number;
   taxAmount?: number;
   paymentReference?: string;
+  ahuzaPayUrl?: string;
   instamojoRequestId?: string;
   payerUpiIdEnc?: string;
   paymentVerifiedAt?: string;

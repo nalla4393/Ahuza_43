@@ -58,6 +58,7 @@ if (process.env.FRONTEND_ORIGIN || !isProduction) app.use(cors({
   allowedHeaders: ['Content-Type', 'X-Owner-Key', 'X-File-Name'],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
+app.use('/api/payments/ahuza-pay/webhook', express.raw({ type: 'application/json', limit: '32kb' }));
 app.use(express.json({ limit: '32kb' }));
 app.use(session({
   name: 'ahuza.sid',

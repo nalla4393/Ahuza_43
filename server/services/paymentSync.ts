@@ -70,6 +70,46 @@ export async function confirmInstamojoWebhookPayment(requestId: string, amount: 
   return finalizeVerifiedPayment(order.id, requestId, amount, transactionReference);
 }
 
+export async function confirmAhuzaPayPayment(
+  orderId: string, amount: number, reference: string,
+): Promise<'confirmed' | 'held' | 'duplicate' | 'invalid'> {
+  const result = await mutateDatabase((database) => {
+    const order = database.orders.find((entry) => entry.id === orderId);
+    if (!order || !order.ahuzaPayUrl || order.paymentMethod !== 'upi' || order.amount !== amount) return 'invalid' as const;
+    if (order.paymentStatus === 'paid') {
+      return order.paymentVerificationMethod === 'ahuza_pay' && order.manualPaymentReference === reference
+        ? 'duplicate' as const : 'invalid' as const;
+    }
+    if (!OPEN_STATUSES.includes(order.status)
+      || database.orders.some((entry) => entry.id !== orderId && entry.manualPaymentReference?.toLowerCase() === reference.toLowerCase())) return 'invalid' as const;
+    if (order.status === 'cancelled') {
+      if (outOfStockItems(database, order).length) {
+        order.paymentStatus = 'paid';
+        order.paymentVerificationMethod = 'ahuza_pay';
+        order.manualPaymentReference = reference;
+        order.paymentVerifiedAt = new Date().toISOString();
+        console.error(`Ahuza Pay order ${order.id} is paid but stock is unavailable; owner review required`);
+        return 'held' as const;
+      }
+      for (const item of order.items) database.products.find((entry) => entry.id === item.productId)!.stock -= item.quantity;
+    }
+    order.status = 'paid';
+    order.paymentStatus = 'paid';
+    order.paymentVerificationMethod = 'ahuza_pay';
+    order.manualPaymentReference = reference;
+    order.paymentVerifiedAt = new Date().toISOString();
+    delete order.reservationExpiresAt;
+    return 'confirmed' as const;
+  });
+  if (result === 'confirmed') {
+    await enqueueOrderEmail(orderId, 'payment_confirmed').catch((error) => console.error('Payment email queue failed:', error));
+    await enqueueOrderEmail(orderId, 'owner_new_order').catch((error) => console.error('Owner email queue failed:', error));
+  } else if (result === 'held') {
+    await enqueueOrderEmail(orderId, 'owner_new_order').catch((error) => console.error('Owner email queue failed:', error));
+  }
+  return result;
+}
+
 export async function syncInstamojoPayment(orderId: string, userId?: string): Promise<boolean> {
   if (!instamojoConfigured()) return false;
   const order = (await getDatabase()).orders.find((entry) => entry.id === orderId && (userId === undefined || entry.userId === userId));

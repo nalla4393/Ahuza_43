@@ -14,7 +14,8 @@ import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
 import { instamojoAmountInPaise, instamojoWebhookConfigured, verifyInstamojoWebhook } from './services/instamojo.js';
 import { customerDataConfigured, decryptCustomerValue, encryptCustomerValue, isValidUpiId } from './services/customerData.js';
-import { confirmInstamojoWebhookPayment, confirmUpiPaymentByOwner, outOfStockItems, syncInstamojoPayment } from './services/paymentSync.js';
+import { confirmAhuzaPayPayment, confirmInstamojoWebhookPayment, confirmUpiPaymentByOwner, outOfStockItems, syncInstamojoPayment } from './services/paymentSync.js';
+import { ahuzaPayConfiguration, createAhuzaPayOrder, verifyAhuzaPayWebhook } from './services/ahuzaPay.js';
 import { manualUpiConfiguration, manualUpiLink, paymentProvider } from './services/manualUpi.js';
 import { gmailPaymentAlertsConfigured } from './services/gmailPaymentAlerts.js';
 import { buildInvoicePdf } from './services/invoice.js';
@@ -97,7 +98,7 @@ api.use(async (request, response, next) => {
   const paymentReadOnly = (method === 'GET' && path === '/payments/config')
     || (method === 'GET' && /^\/payments\/orders\/[^/]+\/status$/.test(path))
     || (method === 'POST' && /^\/payments\/orders\/[^/]+\/cancel$/.test(path));
-  const paymentWebhook = method === 'POST' && path === '/payments/instamojo/webhook';
+  const paymentWebhook = method === 'POST' && ['/payments/instamojo/webhook', '/payments/ahuza-pay/webhook'].includes(path);
   const customerAccount = (method === 'GET' && path === '/auth/me')
     || (method === 'POST' && (path === '/auth/login' || path === '/auth/logout'));
   const existingOrders = (method === 'GET' && (path === '/orders' || /^\/orders\/[^/]+(?:\/invoice)?$/.test(path)))
@@ -333,7 +334,10 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   if (paymentMethod !== 'upi' && paymentMethod !== 'cod') { response.status(400).json({ error: 'Choose UPI or cash on delivery' }); return; }
   const provider = paymentProvider();
   const manualUpi = provider === 'manual_upi' ? manualUpiConfiguration() : null;
-  if (paymentMethod === 'upi' && (provider === 'invalid' || !manualUpi)) {
+  let remotePay: ReturnType<typeof ahuzaPayConfiguration>;
+  try { remotePay = ahuzaPayConfiguration(); }
+  catch { response.status(503).json({ error: 'Ahuza Pay configuration is invalid' }); return; }
+  if (paymentMethod === 'upi' && !remotePay && (provider === 'invalid' || !manualUpi)) {
     response.status(503).json({ error: 'Online payment is unavailable: payment configuration is incomplete' }); return;
   }
   const rawPayerUpi = request.body?.payerUpiId;
@@ -429,6 +433,33 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     response.status(201).json({ orderId: localOrderId, paymentMethod, status: 'confirmed', amount, currency: 'INR' });
     return;
   }
+  if (remotePay) {
+    try {
+      if (!placed || !customerEmail) throw new Error('Order or customer email is unavailable');
+      const payUrl = await createAhuzaPayOrder(placed, customerEmail);
+      await mutateDatabase((database) => {
+        const order = database.orders.find((entry) => entry.id === localOrderId);
+        if (order) order.ahuzaPayUrl = payUrl;
+      });
+      void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order email queue failed:', error));
+      response.status(201).json({ orderId: localOrderId, paymentMethod, paymentReference, payUrl, provider: 'ahuza_pay', amount, currency: 'INR', expiresAt: expiresAt!.toISOString(), status: 'pending' });
+    } catch (error) {
+      console.error('Ahuza Pay checkout creation failed:', error);
+      await mutateDatabase((database) => {
+        const order = database.orders.find((entry) => entry.id === localOrderId && entry.status === 'pending_payment');
+        if (!order) return;
+        for (const item of order.items) {
+          const product = database.products.find((entry) => entry.id === item.productId);
+          if (product) product.stock += item.quantity;
+        }
+        order.status = 'cancelled';
+        order.paymentStatus = 'failed';
+        delete order.reservationExpiresAt;
+      });
+      response.status(503).json({ error: 'Payment checkout is temporarily unavailable; please try again' });
+    }
+    return;
+  }
   if (provider === 'manual_upi' && manualUpi) {
     const payUrl = manualUpiLink(manualUpi, amount, paymentReference);
     if (customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
@@ -441,7 +472,34 @@ async function createPaymentOrder(request: Request, response: Response): Promise
 
 api.get('/payments/config', (_request, response) => {
   const provider = paymentProvider();
-  response.json({ configured: provider === 'manual_upi' && !!manualUpiConfiguration(), automaticVerification: false, provider });
+  let remote = false;
+  try { remote = !!ahuzaPayConfiguration(); }
+  catch { response.json({ configured: false, automaticVerification: false, provider: 'invalid' }); return; }
+  response.json({ configured: remote || (provider === 'manual_upi' && !!manualUpiConfiguration()), automaticVerification: remote, provider: remote ? 'ahuza_pay' : provider });
+});
+
+api.post('/payments/ahuza-pay/webhook', paymentLimit, async (request, response) => {
+  if (!Buffer.isBuffer(request.body) || !verifyAhuzaPayWebhook(request.body, request.get('X-Ahuza-Timestamp') || '', request.get('X-Ahuza-Signature') || '')) {
+    response.status(401).json({ error: 'Invalid webhook signature' }); return;
+  }
+  let payload: unknown;
+  try { payload = JSON.parse(request.body.toString('utf8')); }
+  catch { response.status(400).json({ error: 'Invalid webhook body' }); return; }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    response.status(400).json({ error: 'Invalid webhook body' }); return;
+  }
+  const data = payload as Record<string, unknown>;
+  if (data.event !== 'payment.confirmed' || typeof data.external_order_id !== 'string'
+      || typeof data.amount_paise !== 'number' || !Number.isSafeInteger(data.amount_paise)
+      || typeof data.amount_paid_paise !== 'number' || !Number.isSafeInteger(data.amount_paid_paise)
+      || data.amount_paid_paise < data.amount_paise || data.amount_paid_paise > data.amount_paise + 99 || data.currency !== 'INR'
+      || typeof data.transaction_reference !== 'string' || !/^[A-Za-z0-9_-]{6,120}$/.test(data.transaction_reference)
+      || !['BANK_ALERT', 'MANUAL_ADMIN', 'PROVIDER'].includes(String(data.verification_method))) {
+    response.status(400).json({ error: 'Invalid payment details' }); return;
+  }
+  const result = await confirmAhuzaPayPayment(data.external_order_id, data.amount_paise, data.transaction_reference);
+  if (result === 'invalid') { response.status(409).json({ error: 'Payment does not match an order' }); return; }
+  response.json({ result });
 });
 
 api.post('/payments/instamojo/webhook', express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {
