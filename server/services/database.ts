@@ -263,6 +263,7 @@ export type Database = {
   supportTickets: SupportTicket[];
   newsletterSubscribers?: NewsletterSubscriber[];
   sitePublished?: boolean;
+  shippingChargeAmount?: number;
   seededProductIds?: string[];
   content: StorefrontContent;
   imageSettings?: ImageSettings;

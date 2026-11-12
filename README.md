@@ -82,6 +82,11 @@ caches the latest rate for up to one hour and rejects rates older than seven day
 refreshes the estimate hourly and shows it as unavailable if the rate cannot be fetched.
 All checkout charges remain in INR.
 
+In **Owner Studio → Storefront → Shipping charge**, set the delivery charge for
+new orders below ₹2,500 (₹100 by default). Orders of ₹2,500 or more retain free
+shipping. Existing orders are unchanged. If the charge changes while a customer
+is checking out, they are asked to review the updated total before ordering.
+
 ### Legacy manual UPI orders
 
 New UPI orders use PayU hosted checkout; direct manual UPI and the paise

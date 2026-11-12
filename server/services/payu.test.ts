@@ -168,6 +168,7 @@ test('PayU webhook confirms the matching order only after server-side verificati
     ]);
     await mutateDatabase((database) => {
       database.customers.push({ id: 'payu-customer', email: 'customer@example.test', passwordHash: 'unused', createdAt: new Date().toISOString() });
+      database.shippingChargeAmount = 12345;
     });
     const app = express();
     app.use(express.json());
@@ -188,6 +189,7 @@ test('PayU webhook confirms the matching order only after server-side verificati
       headers: { Cookie: cookie, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         paymentMethod: 'upi',
+        expectedShippingAmount: 12345,
         items: [{ productId: 'soft-form-shirt', quantity: 1 }],
         shippingAddress: { name: 'Test Customer', addressLine1: 'Test Street', city: 'Chennai', state: 'Tamil Nadu', postalCode: '600001', country: 'India', phone: '9876543210' },
       }),
@@ -195,7 +197,8 @@ test('PayU webhook confirms the matching order only after server-side verificati
     assert.equal(create.status, 201);
     const payment = await create.json() as { orderId: string; paymentForm: { action: string; fields: Record<string, string> }; amount: number };
     assert.equal(payment.paymentForm.action, 'https://test.payu.in/_payment');
-    assert.equal(payment.amount, 259000);
+    assert.equal(payment.amount, 261345);
+    assert.equal(payment.paymentForm.fields.amount, '2613.45');
     assert.equal('PAYU_MERCHANT_SALT' in payment.paymentForm.fields, false);
 
     const fields = payment.paymentForm.fields;

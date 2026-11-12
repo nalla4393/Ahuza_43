@@ -158,6 +158,7 @@ test('new manual checkout is disabled while legacy UPI orders remain reviewable'
     assert.equal((await fetch(`${base}/api/owner/orders/${second.orderId}/confirm-upi-payment`, { method: 'PATCH', headers: ownerHeaders, body: JSON.stringify({ transactionReference: 'BANK987654' }) })).status, 409);
     await mutateDatabase((database) => {
       database.products.find((entry) => entry.id === 'soft-form-shirt')!.stock = 1;
+      database.products.find((entry) => entry.id === 'everyday-trouser')!.price = 2500;
     });
     assert.equal((await fetch(`${base}/api/owner/orders/${second.orderId}/confirm-upi-payment`, { method: 'PATCH', headers: ownerHeaders, body: JSON.stringify({ transactionReference: 'BANK987654' }) })).status, 200);
     assert.equal((await getDatabase()).products.find((entry) => entry.id === 'soft-form-shirt')?.stock, 0);
@@ -197,10 +198,35 @@ test('new manual checkout is disabled while legacy UPI orders remain reviewable'
       database.products.find((entry) => entry.id === 'soft-form-shirt')!.stock = 1;
     });
     assert.equal((await getDatabase()).products.find((entry) => entry.id === 'soft-form-shirt')?.stock, 1);
-    const cod = await fetch(`${base}/api/payments/orders`, { method: 'POST', headers, body: JSON.stringify({ paymentMethod: 'cod', items: [{ productId: 'soft-form-shirt', quantity: 1 }], shippingAddress }) });
+    const shippingUrl = `${base}/api/owner/shipping-charge`;
+    const setCharge = (value: unknown, requestHeaders: Record<string, string> = ownerHeaders) => fetch(shippingUrl, { method: 'PUT', headers: requestHeaders, body: JSON.stringify({ shippingChargeAmount: value }) });
+    assert.equal((await (await fetch(`${base}/api/storefront`)).json() as { shippingChargeAmount: number }).shippingChargeAmount, 10000);
+    assert.equal((await setCharge(12345, headers)).status, 403);
+    for (const invalid of [-1, 0.1, 10000001, '100']) assert.equal((await setCharge(invalid)).status, 400);
+    assert.equal((await setCharge(12345)).status, 200);
+    assert.equal((await (await fetch(`${base}/api/storefront`)).json() as { shippingChargeAmount: number }).shippingChargeAmount, 12345);
+    const createCod = (productId: string, expectedShippingAmount: number) => fetch(`${base}/api/payments/orders`, { method: 'POST', headers, body: JSON.stringify({ paymentMethod: 'cod', expectedShippingAmount, items: [{ productId, quantity: 1 }], shippingAddress }) });
+    const ordersBeforeStale = (await getDatabase()).orders.length;
+    const stale = await createCod('soft-form-shirt', 10000);
+    assert.equal(stale.status, 409);
+    assert.equal((await stale.json() as { shippingChargeAmount: number }).shippingChargeAmount, 12345);
+    assert.equal((await getDatabase()).products.find((entry) => entry.id === 'soft-form-shirt')?.stock, 1);
+    assert.equal((await getDatabase()).orders.length, ordersBeforeStale);
+    const cod = await createCod('soft-form-shirt', 12345);
     assert.equal(cod.status, 201);
-    assert.equal((await cod.json() as { amount: number }).amount, 259000);
-    await getDatabase();
+    const codOrder = await cod.json() as { orderId: string; amount: number };
+    assert.equal(codOrder.amount, 261345);
+    const freeShipping = await createCod('everyday-trouser', 0);
+    assert.equal(freeShipping.status, 201);
+    assert.equal((await freeShipping.json() as { amount: number }).amount, 250000);
+    assert.equal((await setCharge(0)).status, 200);
+    await mutateDatabase((database) => { database.products.find((entry) => entry.id === 'soft-form-shirt')!.stock = 1; });
+    const zeroShipping = await createCod('soft-form-shirt', 0);
+    assert.equal(zeroShipping.status, 201);
+    assert.equal((await zeroShipping.json() as { amount: number }).amount, 249000);
+    const storedOrder = (await getDatabase()).orders.find((entry) => entry.id === codOrder.orderId);
+    assert.equal(storedOrder?.amount, 261345);
+    assert.equal(storedOrder?.shippingAmount, 12345);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await rm(directory, { recursive: true, force: true });

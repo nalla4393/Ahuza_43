@@ -113,7 +113,7 @@ export const storefrontCopyFields = [
   { id: 'bagShipping', label: 'Bag: shipping', group: 'Bag', defaultValue: 'Shipping' },
   { id: 'bagComplimentary', label: 'Bag: free shipping label', group: 'Bag', defaultValue: 'Complimentary' },
   { id: 'bagTotal', label: 'Bag: total', group: 'Bag', defaultValue: 'Total' },
-  { id: 'bagShippingNote', label: 'Bag: shipping and tax note', group: 'Bag', defaultValue: '₹100 shipping below ₹2,500 Complimentary shipping at or above ₹2,500 No discounts or additional taxes are currently applied' },
+  { id: 'bagShippingNote', label: 'Bag: shipping and tax note', group: 'Bag', defaultValue: 'No discounts or additional taxes are currently applied' },
   { id: 'checkoutBilling', label: 'Checkout: billing heading', group: 'Checkout', defaultValue: 'Billing address · India' },
   { id: 'checkoutDelivery', label: 'Checkout: delivery heading', group: 'Checkout', defaultValue: 'Delivery address · India' },
   { id: 'checkoutPaymentMethod', label: 'Checkout: payment method legend', group: 'Checkout', defaultValue: 'Payment method' },
@@ -184,6 +184,7 @@ export const defaultStorefrontCopy = Object.fromEntries(
 ) as StorefrontCopy;
 
 const obsoleteStorefrontCopy: Partial<Record<StorefrontCopyId, string[]>> = {
+  bagShippingNote: ['₹100 shipping below ₹2,500 Complimentary shipping at or above ₹2,500 No discounts or additional taxes are currently applied'],
   checkoutUpiNote: [
     'Payment remains pending until Instamojo confirms it',
     'UPI opens directly in your app Payment remains pending until AHUZA manually verifies the bank settlement',

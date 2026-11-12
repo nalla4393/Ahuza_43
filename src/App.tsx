@@ -10,6 +10,7 @@ import ManualPaymentInstructions from './ManualPaymentInstructions';
 import CheckoutItems from './CheckoutItems';
 import { defaultImageSettings, imageSettingsVars, mainImage, srcSet, type ImageSettings, type ProductImage } from './imageTypes';
 import { defaultStorefrontCopy, type StorefrontCopyId } from '../shared/storefrontCopy';
+import { freeShippingThreshold, maxShippingCharge, shippingForSubtotal } from '../shared/shipping';
 
 const OwnerStudio = lazy(() => import('./OwnerStudio'));
 
@@ -184,6 +185,7 @@ export default function App() {
   const [checkoutError, setCheckoutError] = useState('');
   const [paymentConfiguration, setPaymentConfiguration] = useState<PaymentConfiguration | null>(null);
   const [sitePublished, setSitePublished] = useState<boolean | null>(null);
+  const [shippingChargeAmount, setShippingChargeAmount] = useState<number | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [busy, setBusy] = useState(false);
@@ -223,7 +225,7 @@ export default function App() {
   const cartLines = cart.map((line) => ({ ...line, product: products.find((product) => product.id === line.productId) })).filter((line): line is CartLine & { product: Product } => Boolean(line.product));
   const cartTotal = cartLines.reduce((total, line) => total + line.product.price * line.quantity, 0);
   const storefrontText = (id: StorefrontCopyId) => storeContent.copy?.[id] ?? defaultStorefrontCopy[id];
-  const estimatedShipping = cartTotal < 2500 ? 100 : 0;
+  const estimatedShipping = shippingChargeAmount === null ? null : shippingForSubtotal(Math.round(cartTotal * 100), shippingChargeAmount);
   const looseText = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/s$/, '');
   const categories = ['All', ...Array.from(new Set(products.map((product) => product.category)))];
   const sizes = ['All', ...Array.from(new Set(products.flatMap((product) => product.sizes || [])))];
@@ -301,14 +303,16 @@ export default function App() {
       })
       .catch(() => setNotice('The collection is taking a moment Refresh to try again'));
 
-    fetch('/api/storefront')
+    fetch('/api/storefront', { cache: 'no-store' })
       .then(async (response) => {
         if (!response.ok) throw new Error('Could not load storefront content');
-        const data = await response.json() as { content: StorefrontContent; imageSettings?: ImageSettings };
+        const data = await response.json() as { content: StorefrontContent; imageSettings?: ImageSettings; shippingChargeAmount?: number };
+        if (typeof data.shippingChargeAmount !== 'number' || !Number.isSafeInteger(data.shippingChargeAmount) || data.shippingChargeAmount < 0 || data.shippingChargeAmount > maxShippingCharge) throw new Error('Shipping charge unavailable');
         setStoreContent(data.content);
+        setShippingChargeAmount(data.shippingChargeAmount);
         if (data.imageSettings) setImageSettings(data.imageSettings);
       })
-      .catch(() => undefined);
+      .catch(() => setNotice('Shipping information is unavailable. Refresh to try again.'));
 
     fetch('/api/auth/me').then(async (response) => {
       if (response.ok) {
@@ -650,6 +654,10 @@ export default function App() {
 
   async function checkout() {
     setCheckoutError('');
+    if (estimatedShipping === null) {
+      setCheckoutError('Shipping information is unavailable. Refresh to try again.');
+      return;
+    }
     if (!customer) {
       setAccountOpen(true);
       setCheckoutError('Sign in to continue to checkout.');
@@ -662,13 +670,17 @@ export default function App() {
         body: JSON.stringify({
           items: cart.map(({ productId, quantity, size }) => ({ productId, quantity, ...(size ? { size } : {}) })),
           paymentMethod,
+          expectedShippingAmount: estimatedShipping,
           ...(paymentMethod === 'upi' && payerUpiInput.trim() ? { payerUpiId: payerUpiInput.trim() } : {}),
           marketingConsent,
           shippingAddress: sameAsBilling ? billingAddress : deliveryAddress,
           billingAddress,
         }),
       });
-      const order = await parseResponse<PaymentOrder & { error?: string }>(response);
+      const order = await parseResponse<PaymentOrder & { error?: string; shippingChargeAmount?: number }>(response);
+      if (response.status === 409 && typeof order.shippingChargeAmount === 'number' && Number.isSafeInteger(order.shippingChargeAmount) && order.shippingChargeAmount >= 0 && order.shippingChargeAmount <= maxShippingCharge) {
+        setShippingChargeAmount(order.shippingChargeAmount);
+      }
       if (response.status === 401) {
         setCustomer(null);
         setAuthMode('login');
@@ -1126,7 +1138,7 @@ export default function App() {
               lineTotal: formatPrice(product.price * quantity),
               canIncrease: cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0) < Math.min(product.stock, 10),
             }))} busy={busy} onChangeQuantity={changeQuantity} onRemove={removeFromBag} onContinueShopping={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }} />
-            <div className="bag-footer"><div className="subtotal"><span>{storefrontText('bagSubtotal')}</span><strong>{formatPrice(cartTotal)}</strong></div><div className="subtotal"><span>{storefrontText('bagShipping')}</span><strong>{estimatedShipping ? formatPrice(estimatedShipping) : storefrontText('bagComplimentary')}</strong></div><div className="subtotal"><span>{storefrontText('bagTotal')}</span><strong>{formatPrice(cartTotal + estimatedShipping)}</strong></div><p>{storefrontText('bagShippingNote')}</p><form className="checkout-details" onSubmit={(event) => { event.preventDefault(); void checkout(); }}>
+            <div className="bag-footer"><div className="subtotal"><span>{storefrontText('bagSubtotal')}</span><strong>{formatPrice(cartTotal)}</strong></div><div className="subtotal"><span>{storefrontText('bagShipping')}</span><strong>{estimatedShipping === null ? 'Unavailable' : estimatedShipping ? formatPaymentAmount(estimatedShipping) : storefrontText('bagComplimentary')}</strong></div><div className="subtotal"><span>{storefrontText('bagTotal')}</span><strong>{estimatedShipping === null ? 'Unavailable' : formatPaymentAmount(Math.round(cartTotal * 100) + estimatedShipping)}</strong></div>{shippingChargeAmount !== null && <p>{formatPaymentAmount(shippingChargeAmount)} shipping below {formatPaymentAmount(freeShippingThreshold)}; complimentary shipping at or above {formatPaymentAmount(freeShippingThreshold)}.</p>}<p>{storefrontText('bagShippingNote')}</p><form className="checkout-details" onSubmit={(event) => { event.preventDefault(); void checkout(); }}>
               <p className="address-title">{storefrontText('checkoutBilling')}</p>
               <AddressFields section="billing" value={billingAddress} onChange={setBillingAddress} />
               <div className="address-title-row"><p className="address-title">{storefrontText('checkoutDelivery')}</p><label className="same-address-check"><input type="checkbox" checked={sameAsBilling} onChange={(event) => setSameAsBilling(event.target.checked)} /> (same as billing address)</label></div>
@@ -1136,7 +1148,7 @@ export default function App() {
               {paymentMethod === 'upi' && !paymentConfiguration?.configured && <p className="payment-config-warning" role="status">{paymentConfiguration ? storefrontText('checkoutUpiUnavailable') : storefrontText('checkoutUpiChecking')}</p>}
               {paymentMethod === 'upi' && paymentConfiguration?.configured && <p className="payment-config-warning">Payment remains pending until PayU confirms it. Confirmation can take time.</p>}
               {checkoutError && <p className="payment-config-warning" role="alert">{checkoutError}</p>}
-              <label className="consent-check"><input type="checkbox" checked={marketingConsent} onChange={(event) => setMarketingConsent(event.target.checked)} />{storefrontText('checkoutConsent')}</label><button className="dark-button checkout-button" disabled={busy || (paymentMethod === 'upi' && paymentConfiguration?.configured !== true)}>{busy ? storefrontText('checkoutPlacing') : customer ? paymentMethod === 'cod' ? storefrontText('checkoutPlaceCod') : paymentConfiguration?.configured ? storefrontText('checkoutContinueUpi') : storefrontText('checkoutUpiUnavailableButton') : storefrontText('checkoutSignIn')} <ArrowRight size={16} /></button></form><small>{storefrontText('checkoutPolicy')}</small></div>
+              <label className="consent-check"><input type="checkbox" checked={marketingConsent} onChange={(event) => setMarketingConsent(event.target.checked)} />{storefrontText('checkoutConsent')}</label><button className="dark-button checkout-button" disabled={busy || estimatedShipping === null || (paymentMethod === 'upi' && paymentConfiguration?.configured !== true)}>{busy ? storefrontText('checkoutPlacing') : customer ? paymentMethod === 'cod' ? storefrontText('checkoutPlaceCod') : paymentConfiguration?.configured ? storefrontText('checkoutContinueUpi') : storefrontText('checkoutUpiUnavailableButton') : storefrontText('checkoutSignIn')} <ArrowRight size={16} /></button></form><small>{storefrontText('checkoutPolicy')}</small></div>
           </>}
         </aside>
       </div>}
@@ -1178,7 +1190,7 @@ export default function App() {
           </section>
         </div>;
       })()}
-      {ownerStudioOpen && <Suspense fallback={<div className="store-maintenance" role="status">Opening Owner Studio…</div>}><OwnerStudio onClose={() => setOwnerStudioOpen(false)} onProductsChange={setProducts} onContentChange={setStoreContent} onSiteStatusChange={setSitePublished} onImageSettingsChange={setImageSettings} /></Suspense>}
+      {ownerStudioOpen && <Suspense fallback={<div className="store-maintenance" role="status">Opening Owner Studio…</div>}><OwnerStudio onClose={() => setOwnerStudioOpen(false)} onProductsChange={setProducts} onContentChange={setStoreContent} onSiteStatusChange={setSitePublished} onImageSettingsChange={setImageSettings} onShippingChargeChange={setShippingChargeAmount} /></Suspense>}
       {sitePublished && <CustomerSupportChat onOpenAccount={() => setAccountOpen(true)} avatarImageUrl={storeContent.chatbotImageUrl} />}
       {sitePublished && <ShoppingAssistant trip={assistantTrip} onOpenBag={() => { setAssistantTrip(null); setDetailProduct(null); setCartOpen(true); }} />}
     </main>

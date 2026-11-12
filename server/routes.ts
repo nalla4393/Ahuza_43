@@ -24,6 +24,7 @@ import { isValidCountryRegion } from '../shared/address.js';
 import { getExchangeRate } from './services/exchangeRate.js';
 import { deletePaymentProof, readPaymentProof, savePaymentProof } from './services/paymentProof.js';
 import { rankPaymentCandidates } from './services/paymentTriage.js';
+import { defaultShippingCharge, maxShippingCharge, shippingForSubtotal } from '../shared/shipping.js';
 
 export const api = Router();
 const authLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false });
@@ -113,7 +114,8 @@ api.use(async (request, response, next) => {
 
 api.get('/storefront', async (_request, response) => {
   const database = await getDatabase();
-  response.json({ content: database.content, imageSettings: mergeImageSettings(database.imageSettings) });
+  response.set('Cache-Control', 'no-store');
+  response.json({ content: database.content, imageSettings: mergeImageSettings(database.imageSettings), shippingChargeAmount: database.shippingChargeAmount ?? defaultShippingCharge });
 });
 
 api.get('/products', async (_request, response) => {
@@ -393,9 +395,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     orderItems.push({ productId, name: product.name, sku: product.sku, quantity, unitPrice: product.price, ...(size ? { size: product.sizes!.find((available) => available.toLowerCase() === size.toLowerCase()) } : {}) });
   }
   const subtotalAmount = orderItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0) * 100;
-  const shippingAmount = subtotalAmount < 250000 ? 10000 : 0;
-  const baseAmount = subtotalAmount + shippingAmount;
-  if (!Number.isSafeInteger(baseAmount) || baseAmount < 100) { response.status(400).json({ error: 'Order total is invalid' }); return; }
+  if (!Number.isSafeInteger(subtotalAmount) || subtotalAmount < 100) { response.status(400).json({ error: 'Order total is invalid' }); return; }
   const customerEmail = (await getDatabase()).customers.find((entry) => entry.id === request.session.userId)?.email;
   if (paymentMethod === 'upi' && !customerEmail) {
     response.status(409).json({ error: 'A customer email is required for PayU checkout' }); return;
@@ -408,8 +408,12 @@ async function createPaymentOrder(request: Request, response: Response): Promise
       return product && product.stock >= item.quantity && product.price === item.unitPrice;
     });
     if (!available) return 'stock_changed' as const;
+    const shippingChargeAmount = database.shippingChargeAmount ?? defaultShippingCharge;
+    const shippingAmount = shippingForSubtotal(subtotalAmount, shippingChargeAmount);
+    if (request.body?.expectedShippingAmount !== shippingAmount) return { shippingChargeAmount } as const;
     const now = Date.now();
-    const amount = baseAmount;
+    const amount = subtotalAmount + shippingAmount;
+    if (!Number.isSafeInteger(amount)) return 'invalid_total' as const;
     const expiresAt = paymentMethod === 'upi' ? new Date(now + 60 * 60 * 1000).toISOString() : undefined;
     for (const item of orderItems) database.products.find((entry) => entry.id === item.productId)!.stock -= item.quantity;
     const order: Order = {
@@ -426,6 +430,10 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     return order;
   });
   if (persisted === 'stock_changed') { response.status(409).json({ error: 'Inventory changed while placing your order Please refresh your bag' }); return; }
+  if (persisted === 'invalid_total') { response.status(400).json({ error: 'Order total is invalid' }); return; }
+  if ('shippingChargeAmount' in persisted) {
+    response.status(409).json({ error: 'Shipping charges changed. Please review the updated total and try again. If this message persists, refresh the page.', shippingChargeAmount: persisted.shippingChargeAmount }); return;
+  }
   if (saveUpiId) {
     await mutateDatabase((database) => {
       const customer = database.customers.find((entry) => entry.id === request.session.userId);
@@ -720,7 +728,19 @@ api.get('/owner/site-status', requireOwner, ownerLimit, async (_request, respons
   response.json({ published: (await getDatabase()).sitePublished !== false });
 });
 
-api.get('/owner/content', requireOwner, ownerLimit, async (_request, response) => response.json({ content: (await getDatabase()).content }));
+api.get('/owner/content', requireOwner, ownerLimit, async (_request, response) => {
+  const database = await getDatabase();
+  response.json({ content: database.content, shippingChargeAmount: database.shippingChargeAmount ?? defaultShippingCharge });
+});
+
+api.put('/owner/shipping-charge', requireOwner, ownerLimit, async (request, response) => {
+  const amount = request.body?.shippingChargeAmount;
+  if (!request.body || Object.keys(request.body).length !== 1 || !Number.isSafeInteger(amount) || amount < 0 || amount > maxShippingCharge) {
+    response.status(400).json({ error: 'Enter a shipping charge between ₹0 and ₹100,000, in whole paise.' }); return;
+  }
+  await mutateDatabase((database) => { database.shippingChargeAmount = amount; });
+  response.json({ shippingChargeAmount: amount });
+});
 
 api.patch('/owner/site-status', requireOwner, ownerLimit, async (request, response) => {
   if (!request.body || typeof request.body.published !== 'boolean' || Object.keys(request.body).length !== 1) {
