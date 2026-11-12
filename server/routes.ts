@@ -26,10 +26,9 @@ import { deletePaymentProof, readPaymentProof, savePaymentProof } from './servic
 import { rankPaymentCandidates } from './services/paymentTriage.js';
 
 export const api = Router();
-api.use('/owner', (request, response, next) => ownerFailLimit(request, response, next));
 const authLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false });
 const ownerLimit = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: 'draft-8', legacyHeaders: false });
-const ownerFailLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, skipSuccessfulRequests: true, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Too many failed attempts' } });
+const ownerFailLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Too many failed attempts' } });
 const adLimit = rateLimit({ windowMs: 60 * 1000, limit: 8, standardHeaders: 'draft-8', legacyHeaders: false });
 const uploadLimit = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false });
 const analyticsLimit = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-8', legacyHeaders: false });
@@ -47,7 +46,10 @@ function requireOwner(request: Request, response: Response, next: NextFunction):
   const supplied = request.get('x-owner-key') || '';
   const digest = (value: string) => createHash('sha256').update(value).digest();
   const valid = expected.length > 0 && timingSafeEqual(digest(supplied), digest(expected));
-  if (!valid) { response.status(403).json({ error: 'Owner access required' }); return; }
+  if (!valid) {
+    ownerFailLimit(request, response, () => response.status(403).json({ error: 'Owner access required' }));
+    return;
+  }
   next();
 }
 

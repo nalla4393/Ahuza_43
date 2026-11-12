@@ -135,3 +135,25 @@ test('Owner Studio can create, edit, and delete encrypted PayU settings', async 
     await once(server, 'close');
   }
 });
+
+test('Owner Studio concurrent requests do not consume the failed-access limit', async () => {
+  const app = express();
+  app.use('/api', api);
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const base = `http://127.0.0.1:${address.port}/api/owner`;
+  try {
+    const paths = ['analytics', 'inventory', 'orders', 'payment-alerts', 'payment-review-queue', 'support-tickets', 'content', 'integrations', 'site-status', 'image-settings', 'payment-provider/payu'];
+    const responses = await Promise.all(paths.map((path) => fetch(`${base}/${path}`, { headers: { 'X-Owner-Key': 'test-owner-key' } })));
+    assert.deepEqual(responses.map((response) => response.status), Array(paths.length).fill(200));
+    for (let attempt = 0; attempt < 10; attempt++) {
+      assert.equal((await fetch(`${base}/analytics`, { headers: { 'X-Owner-Key': 'wrong-key' } })).status, 403);
+    }
+    assert.equal((await fetch(`${base}/analytics`, { headers: { 'X-Owner-Key': 'wrong-key' } })).status, 429);
+    assert.equal((await fetch(`${base}/analytics`, { headers: { 'X-Owner-Key': 'test-owner-key' } })).status, 200);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
