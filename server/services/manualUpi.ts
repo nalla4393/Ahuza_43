@@ -1,8 +1,20 @@
 import { isValidUpiId } from './customerData.js';
+import type { Order } from './database.js';
 
-export function paymentProvider(): 'manual_upi' | 'invalid' {
+export function manualUpiAdjustment(baseAmount: number, orders: Order[], now: number): number | null {
+  const recentAmounts = new Set(orders.filter((order) => order.paymentMethod === 'upi'
+    && (Date.parse(order.createdAt) + 60 * 60 * 1000 > now
+      || (order.reservationExpiresAt && Date.parse(order.reservationExpiresAt) > now)))
+    .map((order) => order.amount));
+  for (let adjustment = 1; adjustment <= 99; adjustment++) {
+    if (!recentAmounts.has(baseAmount + adjustment)) return adjustment;
+  }
+  return null;
+}
+
+export function paymentProvider(): 'manual_upi' | 'payu' | 'invalid' {
   const provider = process.env.PAYMENT_PROVIDER?.trim() || 'manual_upi';
-  return provider === 'manual_upi' ? 'manual_upi' : 'invalid';
+  return provider === 'manual_upi' || provider === 'payu' ? provider : 'invalid';
 }
 
 export function manualUpiConfiguration(): { vpa: string; payee: string } | null {

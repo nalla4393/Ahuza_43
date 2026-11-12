@@ -5,22 +5,25 @@ import express, { Router, type Request, type Response, type NextFunction } from 
 import { rateLimit } from 'express-rate-limit';
 import { hashPassword, verifyPassword } from './services/auth.js';
 import { generateAdCopy, generateAdImage, generateCustomerEmailBody, generateCustomerSupportReply, generateOwnerAgentPlan, generateSocialPost, isTextAiConfigured, type CustomerEmailKind, type OwnerAgentIntent } from './services/ai.js';
-import { bannerImageKeys, circleImageKeys, getDatabase, mergeImageSettings, mutateDatabase, type Database, type Order, type Product, type ShippingAddress, type StorefrontContent, type SupportTicket } from './services/database.js';
+import { bannerImageKeys, circleImageKeys, getDatabase, isUnreviewedBankPaymentAlert, mergeImageSettings, mutateDatabase, type Database, type Order, type Product, type ShippingAddress, type StorefrontContent, type SupportTicket } from './services/database.js';
 import { sendRestockAlerts } from './services/stock-alerts.js';
 import { deleteProductImageFiles, detectImageType, maxUploadBytes, sanitizeImageSettings, saveProductImage, uploadRoot } from './services/images.js';
 import { publishSocialPost, runSchedule, socialStatus, validateSchedule } from './services/social.js';
 import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
 import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
-import { instamojoAmountInPaise, instamojoWebhookConfigured, verifyInstamojoWebhook } from './services/instamojo.js';
+import { instamojoAmountInPaise, instamojoWebhookConfigured, verifyInstamojoWebhook, instamojoWebhookFailureReason } from './services/instamojo.js';
+import { createPayUCheckout, payuAmountInPaise, payuConfigured, verifyPayUResponseHash } from './services/payu.js';
 import { customerDataConfigured, decryptCustomerValue, encryptCustomerValue, isValidUpiId } from './services/customerData.js';
-import { confirmInstamojoWebhookPayment, confirmUpiPaymentByOwner, outOfStockItems, syncInstamojoPayment } from './services/paymentSync.js';
-import { manualUpiConfiguration, manualUpiLink, paymentProvider } from './services/manualUpi.js';
+import { confirmInstamojoWebhookPayment, confirmPayUWebhookPayment, confirmUpiPaymentByOwner, outOfStockItems, syncInstamojoPayment, syncPayUPayment } from './services/paymentSync.js';
+import { activePaymentProvider, deletePayUSettings, getPayUSettingsStatus, savePayUSettings } from './services/paymentSettings.js';
 import { gmailPaymentAlertsConfigured } from './services/gmailPaymentAlerts.js';
 import { buildInvoicePdf } from './services/invoice.js';
 import { storefrontCopyFields } from '../shared/storefrontCopy.js';
 import { isValidCountryRegion } from '../shared/address.js';
 import { getExchangeRate } from './services/exchangeRate.js';
+import { deletePaymentProof, readPaymentProof, savePaymentProof } from './services/paymentProof.js';
+import { rankPaymentCandidates } from './services/paymentTriage.js';
 
 export const api = Router();
 api.use('/owner', (request, response, next) => ownerFailLimit(request, response, next));
@@ -97,7 +100,7 @@ api.use(async (request, response, next) => {
   const paymentReadOnly = (method === 'GET' && path === '/payments/config')
     || (method === 'GET' && /^\/payments\/orders\/[^/]+\/status$/.test(path))
     || (method === 'POST' && /^\/payments\/orders\/[^/]+\/cancel$/.test(path));
-  const paymentWebhook = method === 'POST' && path === '/payments/instamojo/webhook';
+  const paymentWebhook = method === 'POST' && ['/payments/instamojo/webhook', '/payments/payu/webhook', '/payments/payu/callback'].includes(path);
   const customerAccount = (method === 'GET' && path === '/auth/me')
     || (method === 'POST' && (path === '/auth/login' || path === '/auth/logout'));
   const existingOrders = (method === 'GET' && (path === '/orders' || /^\/orders\/[^/]+(?:\/invoice)?$/.test(path)))
@@ -331,10 +334,8 @@ api.delete('/wishlist/:productId', requireCustomer, async (request, response) =>
 async function createPaymentOrder(request: Request, response: Response): Promise<void> {
   const paymentMethod = request.body?.paymentMethod;
   if (paymentMethod !== 'upi' && paymentMethod !== 'cod') { response.status(400).json({ error: 'Choose UPI or cash on delivery' }); return; }
-  const provider = paymentProvider();
-  const manualUpi = provider === 'manual_upi' ? manualUpiConfiguration() : null;
-  if (paymentMethod === 'upi' && (provider === 'invalid' || !manualUpi)) {
-    response.status(503).json({ error: 'Online payment is unavailable: payment configuration is incomplete' }); return;
+  if (paymentMethod === 'upi' && !await payuConfigured()) {
+    response.status(503).json({ error: 'UPI payment is unavailable: PayU configuration is incomplete' }); return;
   }
   const rawPayerUpi = request.body?.payerUpiId;
   const payerUpiId = typeof rawPayerUpi === 'string' ? rawPayerUpi.trim() : '';
@@ -391,63 +392,80 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   }
   const subtotalAmount = orderItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0) * 100;
   const shippingAmount = subtotalAmount < 250000 ? 10000 : 0;
-  const amount = subtotalAmount + shippingAmount;
-  if (!Number.isSafeInteger(amount) || amount < 100) { response.status(400).json({ error: 'Order total is invalid' }); return; }
+  const baseAmount = subtotalAmount + shippingAmount;
+  if (!Number.isSafeInteger(baseAmount) || baseAmount < 100) { response.status(400).json({ error: 'Order total is invalid' }); return; }
+  const customerEmail = (await getDatabase()).customers.find((entry) => entry.id === request.session.userId)?.email;
+  if (paymentMethod === 'upi' && !customerEmail) {
+    response.status(409).json({ error: 'A customer email is required for PayU checkout' }); return;
+  }
   const localOrderId = randomUUID();
   const paymentReference = `AHUZA-${randomUUID().replaceAll('-', '').slice(0, 20).toUpperCase()}`;
-  const expiresAt = paymentMethod === 'upi' ? new Date(Date.now() + 60 * 60 * 1000) : null;
   const persisted = await mutateDatabase((database) => {
     const available = !outOfStockItems(database, { items: orderItems }).length && orderItems.every((item) => {
       const product = database.products.find((entry) => entry.id === item.productId && entry.active);
       return product && product.stock >= item.quantity && product.price === item.unitPrice;
     });
-    if (!available) return false;
+    if (!available) return 'stock_changed' as const;
+    const now = Date.now();
+    const amount = baseAmount;
+    const expiresAt = paymentMethod === 'upi' ? new Date(now + 60 * 60 * 1000).toISOString() : undefined;
     for (const item of orderItems) database.products.find((entry) => entry.id === item.productId)!.stock -= item.quantity;
-    database.orders.push({
+    const order: Order = {
       id: localOrderId, userId: request.session.userId!, shippingAddress, billingAddress, items: orderItems,
       amount, subtotalAmount, shippingAmount, discountAmount: 0, taxAmount: 0,
       currency: 'INR', status: paymentMethod === 'cod' ? 'confirmed' : 'pending_payment', paymentStatus: 'pending', paymentMethod,
-      ...(paymentMethod === 'upi' ? { paymentReference, reservationExpiresAt: expiresAt!.toISOString() } : {}),
+      ...(paymentMethod === 'upi' ? { paymentReference, reservationExpiresAt: expiresAt } : {}),
+      ...(paymentMethod === 'upi' ? { payuTxnId: `AH${randomUUID().replaceAll('-', '').slice(0, 20)}` } : {}),
       ...(paymentMethod === 'upi' && payerUpiId && customerDataConfigured() ? { payerUpiIdEnc: encryptCustomerValue(payerUpiId) } : {}),
       marketingConsent: request.body?.marketingConsent === true,
-      createdAt: new Date().toISOString(),
-    });
-    return true;
+      createdAt: new Date(now).toISOString(),
+    };
+    database.orders.push(order);
+    return order;
   });
-  if (!persisted) { response.status(409).json({ error: 'Inventory changed while placing your order Please refresh your bag' }); return; }
+  if (persisted === 'stock_changed') { response.status(409).json({ error: 'Inventory changed while placing your order Please refresh your bag' }); return; }
   if (saveUpiId) {
     await mutateDatabase((database) => {
       const customer = database.customers.find((entry) => entry.id === request.session.userId);
       if (customer) customer.savedUpiIdEnc = encryptCustomerValue(payerUpiId);
     }).catch((error) => console.error('Saving the UPI ID failed:', error));
   }
-  const placed = (await getDatabase()).orders.find((entry) => entry.id === localOrderId);
-  const customerEmail = (await getDatabase()).customers.find((entry) => entry.id === request.session.userId)?.email;
+  const placed = persisted;
+  const { amount } = placed;
   if (paymentMethod === 'cod') {
     if (placed && customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
     void enqueueOrderEmail(localOrderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
     response.status(201).json({ orderId: localOrderId, paymentMethod, status: 'confirmed', amount, currency: 'INR' });
     return;
   }
-  if (provider === 'manual_upi' && manualUpi) {
-    const payUrl = manualUpiLink(manualUpi, amount, paymentReference);
-    if (customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
-    void enqueueOrderEmail(localOrderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
-    response.status(201).json({ orderId: localOrderId, paymentMethod, paymentReference, payUrl, provider, amount, currency: 'INR', expiresAt: expiresAt!.toISOString(), status: 'pending' });
+  if (customerEmail) {
+    try {
+      const checkout = await createPayUCheckout(placed, customerEmail);
+      if (customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
+      void enqueueOrderEmail(localOrderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
+      response.status(201).json({
+        orderId: localOrderId, paymentMethod, paymentReference, provider: 'payu',
+        paymentForm: checkout, amount, currency: 'INR', expiresAt: placed.reservationExpiresAt,
+        status: 'pending', items: placed.items.map(({ name, quantity, size }) => ({ name, quantity, size })),
+      });
+    } catch (error) {
+      console.error(`PayU checkout creation failed for order ${localOrderId}:`, error);
+      response.status(503).json({ error: 'Could not start PayU checkout' });
+    }
     return;
   }
-  response.status(503).json({ error: 'Ahuza Pay is not configured for UPI checkout' });
+  response.status(503).json({ error: 'PayU is not configured for UPI checkout' });
 }
 
-api.get('/payments/config', (_request, response) => {
-  const provider = paymentProvider();
-  response.json({ configured: provider === 'manual_upi' && !!manualUpiConfiguration(), automaticVerification: false, provider });
+api.get('/payments/config', async (_request, response) => {
+  const configured = await payuConfigured();
+  response.json({ configured, automaticVerification: configured, provider: 'payu' });
 });
 
 api.post('/payments/instamojo/webhook', express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {
-  if (!instamojoWebhookConfigured()) { response.status(503).json({ error: 'Instamojo webhook verification is not configured' }); return; }
+  if (!instamojoWebhookConfigured()) { console.error('Instamojo webhook rejected: INSTAMOJO_SALT is not set'); response.status(503).json({ error: 'Instamojo webhook verification is not configured' }); return; }
   const payload = request.body as Record<string, unknown>;
-  if (!verifyInstamojoWebhook(payload)) { response.status(400).json({ error: 'Invalid Instamojo webhook signature' }); return; }
+  if (!verifyInstamojoWebhook(payload)) { console.error(`Instamojo webhook rejected: ${instamojoWebhookFailureReason(payload)}`); response.status(400).json({ error: 'Invalid Instamojo webhook signature' }); return; }
 
   const requestId = payload.payment_request_id;
   const paymentId = payload.payment_id;
@@ -476,16 +494,108 @@ api.post('/payments/instamojo/webhook', express.urlencoded({ extended: false, li
   response.status(200).json({ received: true });
 });
 
+api.post('/payments/payu/callback', express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {
+  const payload = request.body as Record<string, unknown>;
+  if (!await verifyPayUResponseHash(payload)) {
+    console.error('PayU callback rejected: invalid response hash');
+    response.status(400).send('Invalid payment response');
+    return;
+  }
+  const txnid = payload.txnid;
+  if (typeof txnid !== 'string') {
+    response.status(400).send('Payment transaction ID is missing');
+    return;
+  }
+  const order = (await getDatabase()).orders.find((entry) => entry.payuTxnId === txnid);
+  if (!order || order.amount !== payuAmountInPaise(payload.amount) || payload.udf1 !== order.id
+    || payload.productinfo !== `AHUZA order ${order.id}`) {
+    console.error('Signed PayU callback does not match an order:', txnid);
+    response.status(400).send('Payment response does not match an order');
+    return;
+  }
+  if (typeof payload.status === 'string' && payload.status.toLowerCase() === 'success') {
+    await confirmPayUWebhookPayment(txnid).catch((error) => console.error(`PayU callback verification failed for order ${order.id}:`, error));
+  }
+  response.redirect(303, '/order-success');
+});
+
+api.post('/payments/payu/webhook', express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {
+  const payload = request.body as Record<string, unknown>;
+  if (!await verifyPayUResponseHash(payload)) {
+    console.error('PayU webhook rejected: invalid response hash');
+    response.status(400).json({ error: 'Invalid PayU webhook signature' });
+    return;
+  }
+  const txnid = payload.txnid;
+  if (typeof txnid !== 'string') {
+    response.status(400).json({ error: 'Payment transaction ID is missing' });
+    return;
+  }
+  const order = (await getDatabase()).orders.find((entry) => entry.payuTxnId === txnid);
+  if (!order || order.amount !== payuAmountInPaise(payload.amount) || payload.udf1 !== order.id
+    || payload.productinfo !== `AHUZA order ${order.id}`) {
+    console.error('Signed PayU webhook does not match an order:', txnid);
+    response.status(400).json({ error: 'PayU transaction does not match an order' });
+    return;
+  }
+  if (typeof payload.status === 'string' && payload.status.toLowerCase() === 'success') {
+    await confirmPayUWebhookPayment(txnid);
+  }
+  response.status(200).json({ received: true });
+});
+
 api.post('/payments/orders', requireCustomer, paymentLimit, async (request, response) => {
   await createPaymentOrder(request, response);
+});
+
+api.post('/payments/orders/:id/proof', requireCustomer, paymentLimit, express.raw({ type: ['image/jpeg', 'image/png'], limit: maxUploadBytes, inflate: false }), async (request, response) => {
+  if (!Buffer.isBuffer(request.body)) { response.status(415).json({ error: 'Upload a JPEG or PNG payment screenshot' }); return; }
+  const existing = (await getDatabase()).orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
+  if (!existing) { response.status(404).json({ error: 'Order not found' }); return; }
+  if (existing.paymentMethod !== 'upi' || existing.instamojoRequestId || existing.payuTxnId || existing.paymentStatus === 'paid'
+    || !['pending_payment', 'cancelled'].includes(existing.status)) {
+    response.status(409).json({ error: 'This order cannot accept a payment screenshot' }); return;
+  }
+  const mimeType = request.get('content-type')?.split(';')[0]?.trim().toLowerCase() || '';
+  let proof: Awaited<ReturnType<typeof savePaymentProof>>;
+  try {
+    proof = await savePaymentProof(request.body, mimeType);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'INVALID_PAYMENT_PROOF') {
+      response.status(415).json({ error: 'Upload a valid JPEG or PNG screenshot within the file size limit' }); return;
+    }
+    throw error;
+  }
+
+  let previousProof: typeof existing.manualPaymentProof;
+  try {
+    const updated = await mutateDatabase((database) => {
+      const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
+      if (!order || order.paymentMethod !== 'upi' || order.instamojoRequestId || order.payuTxnId
+        || order.paymentStatus === 'paid' || !['pending_payment', 'cancelled'].includes(order.status)) return false;
+      previousProof = order.manualPaymentProof;
+      order.manualPaymentProof = proof;
+      return true;
+    });
+    if (!updated) {
+      await deletePaymentProof(proof);
+      response.status(409).json({ error: 'This order cannot accept a payment screenshot' }); return;
+    }
+  } catch (error) {
+    await deletePaymentProof(proof);
+    throw error;
+  }
+  if (previousProof) await deletePaymentProof(previousProof).catch((error) => console.error('Replaced payment screenshot cleanup failed:', error));
+  response.status(201).json({ submitted: true, uploadedAt: proof.uploadedAt, paymentStatus: 'pending', note: 'Screenshot submitted for owner review; this does not confirm payment.' });
 });
 
 api.get('/payments/orders/:id/status', requireCustomer, paymentLimit, async (request, response) => {
   await expirePendingOrders();
   await syncInstamojoPayment(String(request.params.id), request.session.userId!).catch((error) => console.error('Instamojo status sync failed:', error));
+  await syncPayUPayment(String(request.params.id), request.session.userId!).catch((error) => console.error('PayU status sync failed:', error));
   const order = (await getDatabase()).orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
-  response.json({ orderId: order.id, status: order.paymentStatus || 'pending', orderStatus: order.status, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt, verification: order.paymentVerificationMethod || 'awaiting_payment_verification' });
+  response.json({ orderId: order.id, status: order.paymentStatus || 'pending', orderStatus: order.status, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt, paymentProofSubmitted: Boolean(order.manualPaymentProof), verification: order.paymentVerificationMethod || 'awaiting_payment_verification' });
 });
 
 api.post('/payments/orders/:id/failure', requireCustomer, paymentLimit, async (request, response) => {
@@ -523,7 +633,10 @@ api.get('/orders/:id', requireCustomer, async (request, response) => {
 
 api.get('/orders', requireCustomer, async (request, response) => {
   const pending = (await getDatabase()).orders.filter((order) => order.userId === request.session.userId && order.paymentMethod === 'upi' && order.paymentStatus !== 'paid' && ['pending_payment', 'cancelled'].includes(order.status));
-  await Promise.all(pending.map((order) => syncInstamojoPayment(order.id, request.session.userId!).catch((error) => console.error('Instamojo order list sync failed:', error))));
+  await Promise.all(pending.flatMap((order) => [
+    syncInstamojoPayment(order.id, request.session.userId!).catch((error) => console.error('Instamojo order list sync failed:', error)),
+    syncPayUPayment(order.id, request.session.userId!).catch((error) => console.error('PayU order list sync failed:', error)),
+  ]));
   const database = await getDatabase();
   const orders = database.orders
     .filter((order) => order.userId === request.session.userId)
@@ -802,24 +915,53 @@ api.get('/owner/orders', requireOwner, ownerLimit, async (_request, response) =>
 api.get('/owner/payment-alerts', requireOwner, ownerLimit, async (_request, response) => {
   const database = await getDatabase();
   const alerts = (database.bankPaymentAlerts || [])
-    .filter((alert) => alert.status === 'pending')
+    .filter(isUnreviewedBankPaymentAlert)
     .sort((left, right) => right.receivedAt.localeCompare(left.receivedAt))
     .map((alert) => ({
       ...alert,
-      candidates: database.orders
+      candidates: rankPaymentCandidates(alert, database.orders
         .filter((order) => order.paymentMethod === 'upi'
+          && !order.payuTxnId && !order.instamojoRequestId
           && order.amount === alert.amount
           && order.paymentStatus !== 'paid'
           && ['pending_payment', 'cancelled'].includes(order.status)
-          && Date.parse(order.createdAt) <= Date.parse(alert.receivedAt))
-        .map((order) => ({ id: order.id, createdAt: order.createdAt, status: order.status, customerName: order.shippingAddress.name })),
+          && Date.parse(order.createdAt) <= Date.parse(alert.transactionAt || alert.receivedAt)))
+        .map(({ order, assessment }) => ({
+          id: order.id, createdAt: order.createdAt, status: order.status,
+          customerName: order.shippingAddress.name, matchLevel: assessment.matchLevel, reasons: assessment.reasons,
+        })),
     }));
-  response.json({ configured: gmailPaymentAlertsConfigured(), alerts });
+  const history = (database.bankPaymentAlerts || [])
+    .slice()
+    .sort((left, right) => right.receivedAt.localeCompare(left.receivedAt));
+  response.json({ configured: gmailPaymentAlertsConfigured(), alerts, history });
+});
+
+api.get('/owner/payment-review-queue', requireOwner, ownerLimit, async (_request, response) => {
+  const database = await getDatabase();
+  const proofOrders = database.orders
+    .filter((order) => order.paymentMethod === 'upi' && order.manualPaymentProof
+      && order.paymentStatus !== 'paid' && ['pending_payment', 'cancelled'].includes(order.status))
+    .sort((left, right) => (left.manualPaymentProof?.uploadedAt || '').localeCompare(right.manualPaymentProof?.uploadedAt || ''))
+    .map((order) => ({
+      id: order.id,
+      amount: order.amount,
+      createdAt: order.createdAt,
+      uploadedAt: order.manualPaymentProof!.uploadedAt,
+      status: order.status,
+      customerName: order.shippingAddress.name,
+      note: 'Screenshot is customer-submitted evidence only; it does not verify bank settlement.',
+    }));
+  response.json({
+    proofOrders,
+    pendingAlertCount: (database.bankPaymentAlerts || []).filter(isUnreviewedBankPaymentAlert).length,
+    verificationRequired: true,
+  });
 });
 
 api.patch('/owner/payment-alerts/:id/orders/:orderId/confirm', requireOwner, ownerLimit, async (request, response) => {
   const orderId = String(request.params.orderId);
-  const alert = (await getDatabase()).bankPaymentAlerts?.find((entry) => entry.id === request.params.id && entry.status === 'pending');
+  const alert = (await getDatabase()).bankPaymentAlerts?.find((entry) => entry.id === request.params.id && isUnreviewedBankPaymentAlert(entry));
   if (!alert) { response.status(404).json({ error: 'Payment alert not found or already reviewed' }); return; }
   const result = await confirmUpiPaymentByOwner(orderId, alert.transactionReference, alert.id);
   if (!result.ok) { response.status(409).json({ error: result.error }); return; }
@@ -828,14 +970,66 @@ api.patch('/owner/payment-alerts/:id/orders/:orderId/confirm', requireOwner, own
 
 api.patch('/owner/payment-alerts/:id/dismiss', requireOwner, ownerLimit, async (request, response) => {
   const alert = await mutateDatabase((database) => {
-    const current = database.bankPaymentAlerts?.find((entry) => entry.id === request.params.id && entry.status === 'pending');
+    const current = database.bankPaymentAlerts?.find((entry) => entry.id === request.params.id && isUnreviewedBankPaymentAlert(entry));
     if (!current) return null;
     current.status = 'dismissed';
     current.reviewedAt = new Date().toISOString();
+    (current.history ||= []).push({ at: current.reviewedAt, action: 'owner_dismissed' });
     return current;
   });
   if (!alert) { response.status(404).json({ error: 'Payment alert not found or already reviewed' }); return; }
   response.json({ alert });
+});
+
+function validPayUEndpoint(value: unknown, endpoint: 'callback' | 'webhook'): value is string {
+  if (!stringValue(value, 2000)) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash
+      && url.pathname === `/api/payments/payu/${endpoint}`;
+  } catch {
+    return false;
+  }
+}
+
+api.get('/owner/payment-provider/payu', requireOwner, ownerLimit, async (_request, response) => {
+  const [settings, provider] = await Promise.all([getPayUSettingsStatus(), activePaymentProvider()]);
+  response.json({ settings, activeProvider: provider });
+});
+
+api.put('/owner/payment-provider/payu', requireOwner, ownerLimit, async (request, response) => {
+  const body = request.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+    || Object.keys(body).some((key) => !['merchantKey', 'merchantSalt', 'mode', 'callbackUrl', 'webhookUrl'].includes(key))
+    || (body.merchantKey !== undefined && (typeof body.merchantKey !== 'string' || body.merchantKey.length > 256))
+    || (body.merchantSalt !== undefined && (typeof body.merchantSalt !== 'string' || body.merchantSalt.length > 256))
+    || !['test', 'production'].includes(body.mode)
+    || !validPayUEndpoint(body.callbackUrl, 'callback')
+    || !validPayUEndpoint(body.webhookUrl, 'webhook')) {
+    response.status(400).json({ error: 'Provide valid PayU credentials, test or production mode, and HTTPS callback and webhook URLs' });
+    return;
+  }
+  try {
+    const settings = await savePayUSettings({
+      merchantKey: body.merchantKey || '',
+      merchantSalt: body.merchantSalt || '',
+      mode: body.mode,
+      callbackUrl: body.callbackUrl,
+      webhookUrl: body.webhookUrl,
+    });
+    response.json({ settings, activeProvider: await activePaymentProvider() });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Enter both PayU merchant credentials to enable PayU') {
+      response.status(400).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
+});
+
+api.delete('/owner/payment-provider/payu', requireOwner, ownerLimit, async (_request, response) => {
+  await deletePayUSettings();
+  response.json({ deleted: true, activeProvider: await activePaymentProvider() });
 });
 
 api.get('/owner/integrations', requireOwner, ownerLimit, async (_request, response) => {
@@ -873,7 +1067,7 @@ function validTrackingUrl(value: unknown): value is string {
 api.delete('/owner/orders/:id', requireOwner, ownerLimit, async (request, response) => {
   const removed = await mutateDatabase((database) => {
     const index = database.orders.findIndex((entry) => entry.id === request.params.id);
-    if (index < 0) return false;
+    if (index < 0) return null;
     const order = database.orders[index]!;
     // Stock is still held for orders that were never shipped or cancelled; give it back.
     if (['pending_payment', 'paid', 'confirmed'].includes(order.status)) {
@@ -884,9 +1078,10 @@ api.delete('/owner/orders/:id', requireOwner, ownerLimit, async (request, respon
     }
     database.orders.splice(index, 1);
     database.orderEmailNotifications = (database.orderEmailNotifications || []).filter((entry) => entry.orderId !== order.id);
-    return true;
+    return { paymentProof: order.manualPaymentProof };
   });
   if (!removed) { response.status(404).json({ error: 'Order not found' }); return; }
+  if (removed.paymentProof) await deletePaymentProof(removed.paymentProof).catch((error) => console.error('Deleted order payment screenshot cleanup failed:', error));
   response.status(204).end();
 });
 
@@ -934,6 +1129,23 @@ api.patch('/owner/orders/:id/confirm-upi-payment', requireOwner, ownerLimit, asy
   const result = await confirmUpiPaymentByOwner(String(request.params.id), reference.trim());
   if (!result.ok) { response.status(409).json({ error: result.error }); return; }
   response.json({ order: (await getDatabase()).orders.find((entry) => entry.id === request.params.id) });
+});
+
+api.get('/owner/orders/:id/payment-proof', requireOwner, ownerLimit, async (request, response) => {
+  const order = (await getDatabase()).orders.find((entry) => entry.id === request.params.id);
+  if (!order?.manualPaymentProof) { response.status(404).json({ error: 'Payment screenshot not found' }); return; }
+  let image: Buffer;
+  try {
+    image = await readPaymentProof(order.manualPaymentProof);
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      console.error(`Payment screenshot file is missing for order ${order.id}`);
+      response.status(404).json({ error: 'Payment screenshot file is missing' }); return;
+    }
+    throw error;
+  }
+  response.set({ 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
+  response.type(order.manualPaymentProof.mimeType).send(image);
 });
 
 api.patch('/owner/orders/:id/cod-payment', requireOwner, ownerLimit, async (request, response) => {

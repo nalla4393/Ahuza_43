@@ -1,7 +1,7 @@
 import AdStudio from './AdStudio';
 import SocialScheduler from './SocialScheduler';
 import MarketingAutomations from './MarketingAutomations';
-import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { ArrowLeft, BarChart3, Box, Check, CreditCard, Headphones, Image, LoaderCircle, Mail, MessageCircle, Megaphone, PackageCheck, Plus, Send, Settings2, Sparkles, X } from 'lucide-react';
 import { removeSentenceFullStops } from './siteCopy';
 import ProductImageManager from './ProductImageManager';
@@ -13,11 +13,16 @@ import { defaultStorefrontCopy, storefrontCopyFields, type StorefrontCopyId } fr
 
 type Product = { id: string; name: string; description: string; price: number; sku: string; stock: number; category: string; imageUrl: string; active: boolean; ghostMannequin: { imageUrl?: string; tags: string[]; background?: string }; images?: ProductImage[]; mainImageId?: string; sizes?: string[] };
 type Content = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string; chatbotImageUrl: string; circleImages?: Record<string, string>; circleLabels?: Record<string, string>; bannerImages?: Record<string, string>; copy: Record<StorefrontCopyId, string> };
-type Order = { id: string; status: string; amount: number; currency: string; createdAt: string; paymentMethod?: 'upi' | 'cod'; paymentReference?: string; instamojoRequestId?: string; payerUpiId?: string; trackingNumber?: string; trackingUrl?: string; paymentVerifiedAt?: string; paymentStatus?: string; manualPaymentReference?: string; paymentVerificationMethod?: string; shippingAddress: { name: string; addressLine1: string; addressLine2?: string; city: string; state: string; postalCode: string; phone: string }; items: { name: string; sku: string; quantity: number; size?: string }[]; review?: { rating: number; comment?: string; createdAt: string }; returnRequest?: { action: string; reason: string; status: string } };
+type Order = { id: string; status: string; amount: number; currency: string; createdAt: string; paymentMethod?: 'upi' | 'cod'; paymentReference?: string; instamojoRequestId?: string; payuTxnId?: string; payerUpiId?: string; trackingNumber?: string; trackingUrl?: string; paymentVerifiedAt?: string; paymentStatus?: string; manualPaymentReference?: string; manualPaymentProof?: { id: string; mimeType: string; uploadedAt: string }; paymentProofPreviewUrl?: string; paymentVerificationMethod?: string; shippingAddress: { name: string; addressLine1: string; addressLine2?: string; city: string; state: string; postalCode: string; phone: string }; items: { name: string; sku: string; quantity: number; size?: string }[]; review?: { rating: number; comment?: string; createdAt: string }; returnRequest?: { action: string; reason: string; status: string } };
 type Analytics = { eventCounts: Record<string, number>; orderCount: number; paidRevenue: number; currency: string; lowStock: { id: string; name: string; sku: string; stock: number }[] };
 type IntegrationStatus = { email: boolean; followUps: boolean; ai: boolean };
+type PayUSettingsStatus = { configured: boolean; hasMerchantKey: boolean; hasMerchantSalt: boolean; mode: 'test' | 'production'; callbackUrl: string; webhookUrl: string; managedInOwnerStudio: boolean };
+type PayUSettingsForm = { merchantKey: string; merchantSalt: string; mode: 'test' | 'production'; callbackUrl: string; webhookUrl: string };
 type SupportTicket = { id: string; email: string; message: string; category: 'delivery' | 'complaint' | 'general'; status: 'open' | 'resolved'; createdAt: string };
-type PaymentAlert = { id: string; amount: number; transactionReference: string; receivedAt: string; candidates: { id: string; createdAt: string; status: string; customerName: string }[] };
+type PaymentAlert = { id: string; amount: number; transactionReference: string; receivedAt: string; status: string; matchedOrderId?: string; reviewedAt?: string; transactionAt?: string; transactionTimezone?: string; transactionType?: string; accountSuffix?: string; additionalReference?: string; sender?: string; duplicateConflict?: boolean; history?: { at: string; action: string; messageId?: string; orderId?: string }[]; candidates: { id: string; createdAt: string; status: string; customerName: string; matchLevel: 'amount_and_time' | 'amount_only' | 'timing_mismatch'; reasons: string[] }[] };
+type PaymentAlertHistory = Omit<PaymentAlert, 'candidates'>;
+type PaymentAlertsResponse = { configured: boolean; alerts: PaymentAlert[]; history: PaymentAlertHistory[] };
+type PaymentProofReview = { id: string; amount: number; createdAt: string; uploadedAt: string; status: string; customerName: string; note: string };
 type EmailKind = 'alert' | 'thank_you' | 'follow_up';
 type EmailDraft = { orderId: string; kind: EmailKind; to: string; subject: string; body: string };
 type AgentAction =
@@ -46,7 +51,7 @@ async function ownerRequest<T>(key: string, url: string, init: RequestInit = {})
   return payload;
 }
 
-const money = (amount: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount);
+const money = (amount: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(amount);
 const initialProduct = (): Product => ({ id: '', name: '', description: '', price: 0, sku: '', stock: 0, category: '', imageUrl: '', active: true, ghostMannequin: { tags: [] } });
 const standardSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'Free size'];
 
@@ -135,11 +140,18 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
   const [products, setProducts] = useState<Product[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [paymentAlerts, setPaymentAlerts] = useState<PaymentAlert[]>([]);
+  const [proofReviewOrders, setProofReviewOrders] = useState<PaymentProofReview[]>([]);
+  const [paymentAlertHistory, setPaymentAlertHistory] = useState<PaymentAlertHistory[]>([]);
+  const [paymentHistorySearch, setPaymentHistorySearch] = useState('');
   const [gmailAlertsConfigured, setGmailAlertsConfigured] = useState(false);
   const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [content, setContent] = useState<Content>(emptyContent);
   const [integrations, setIntegrations] = useState<IntegrationStatus | null>(null);
+  const [payuSettings, setPayuSettings] = useState<PayUSettingsStatus | null>(null);
+  const [activePaymentProvider, setActivePaymentProvider] = useState('payu');
+  const [payuForm, setPayuForm] = useState<PayUSettingsForm>({ merchantKey: '', merchantSalt: '', mode: 'test', callbackUrl: 'https://www.ahuzawear.com/api/payments/payu/callback', webhookUrl: 'https://www.ahuzawear.com/api/payments/payu/webhook' });
+  const [editingPayU, setEditingPayU] = useState(false);
   const [emailOrderId, setEmailOrderId] = useState('');
   const [emailKind, setEmailKind] = useState<EmailKind>('thank_you');
   const [emailDraft, setEmailDraft] = useState<EmailDraft | null>(null);
@@ -156,6 +168,22 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
   const [imageSettings, setImageSettings] = useState<ImageSettings | null>(null);
   const [maxUploadMb, setMaxUploadMb] = useState(10);
   const [imagesPending, setImagesPending] = useState(false);
+  const paymentProofPreviewUrls = useRef(new Set<string>());
+
+  useEffect(() => {
+    const activeUrls = new Set(orders.flatMap((order) => order.paymentProofPreviewUrl ? [order.paymentProofPreviewUrl] : []));
+    for (const url of paymentProofPreviewUrls.current) {
+      if (!activeUrls.has(url)) {
+        URL.revokeObjectURL(url);
+        paymentProofPreviewUrls.current.delete(url);
+      }
+    }
+  }, [orders]);
+
+  useEffect(() => () => {
+    for (const url of paymentProofPreviewUrls.current) URL.revokeObjectURL(url);
+    paymentProofPreviewUrls.current.clear();
+  }, []);
 
   function notify(text: string) { setMessage(text); setError(''); window.setTimeout(() => setMessage(''), 3500); }
   function fail(reason: unknown) { setError(reason instanceof Error ? reason.message : 'Something went wrong'); setMessage(''); }
@@ -164,16 +192,18 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
     setLoading(true);
     setError('');
     try {
-      const [analyticsResult, inventoryResult, ordersResult, paymentAlertsResult, supportResult, contentResult, integrationResult, siteStatusResult, imageSettingsResult] = await Promise.all([
+      const [analyticsResult, inventoryResult, ordersResult, paymentAlertsResult, proofQueueResult, supportResult, contentResult, integrationResult, siteStatusResult, imageSettingsResult, payuResult] = await Promise.all([
         ownerRequest<{ analytics?: Analytics } & Analytics>(ownerKey, '/api/owner/analytics'),
         ownerRequest<{ products: Product[] }>(ownerKey, '/api/owner/inventory'),
         ownerRequest<{ orders: Order[] }>(ownerKey, '/api/owner/orders'),
-        ownerRequest<{ configured: boolean; alerts: PaymentAlert[] }>(ownerKey, '/api/owner/payment-alerts'),
+        ownerRequest<PaymentAlertsResponse>(ownerKey, '/api/owner/payment-alerts'),
+        ownerRequest<{ proofOrders: PaymentProofReview[] }>(ownerKey, '/api/owner/payment-review-queue'),
         ownerRequest<{ tickets: SupportTicket[] }>(ownerKey, '/api/owner/support-tickets'),
         ownerRequest<{ content: Content }>(ownerKey, '/api/owner/content'),
         ownerRequest<{ integrations: IntegrationStatus }>(ownerKey, '/api/owner/integrations'),
         ownerRequest<{ published: boolean }>(ownerKey, '/api/owner/site-status'),
         ownerRequest<{ imageSettings: ImageSettings; maxUploadMb: number }>(ownerKey, '/api/owner/image-settings'),
+        ownerRequest<{ settings: PayUSettingsStatus; activeProvider: string }>(ownerKey, '/api/owner/payment-provider/payu'),
       ]);
       setImageSettings(imageSettingsResult.imageSettings);
       setMaxUploadMb(imageSettingsResult.maxUploadMb);
@@ -182,6 +212,8 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
       onProductsChange(inventoryResult.products);
       setOrders(ordersResult.orders);
       setPaymentAlerts(paymentAlertsResult.alerts);
+      setProofReviewOrders(proofQueueResult.proofOrders);
+      setPaymentAlertHistory(paymentAlertsResult.history);
       setGmailAlertsConfigured(paymentAlertsResult.configured);
       setEmailOrderId((current) => current || ordersResult.orders.find((order) => ['paid', 'shipped', 'delivered'].includes(order.status))?.id || '');
       setSupportTickets(supportResult.tickets);
@@ -190,6 +222,16 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
       setSitePublished(siteStatusResult.published);
       onSiteStatusChange(siteStatusResult.published);
       setIntegrations(integrationResult.integrations);
+      setPayuSettings(payuResult.settings);
+      setActivePaymentProvider(payuResult.activeProvider);
+      setPayuForm({
+        merchantKey: '',
+        merchantSalt: '',
+        mode: payuResult.settings.mode,
+        callbackUrl: payuResult.settings.callbackUrl,
+        webhookUrl: payuResult.settings.webhookUrl,
+      });
+      setEditingPayU(!payuResult.settings.configured);
       setReady(true);
       setSocialProductId(inventoryResult.products.find((product) => product.active)?.id || '');
     } catch (reason) { fail(reason); }
@@ -198,14 +240,17 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
 
   async function refreshOrders(ownerKey: string) {
     try {
-      const [ordersResult, alertsResult] = await Promise.all([
+      const [ordersResult, alertsResult, proofQueueResult] = await Promise.all([
         ownerRequest<{ orders: Order[] }>(ownerKey, '/api/owner/orders'),
-        ownerRequest<{ configured: boolean; alerts: PaymentAlert[] }>(ownerKey, '/api/owner/payment-alerts'),
+        ownerRequest<PaymentAlertsResponse>(ownerKey, '/api/owner/payment-alerts'),
+        ownerRequest<{ proofOrders: PaymentProofReview[] }>(ownerKey, '/api/owner/payment-review-queue'),
       ]);
       setOrders(ordersResult.orders);
       setPaymentAlerts(alertsResult.alerts);
+      setProofReviewOrders(proofQueueResult.proofOrders);
+      setPaymentAlertHistory(alertsResult.history);
       setGmailAlertsConfigured(alertsResult.configured);
-    } catch { /* keep the current lists */ }
+    } catch (reason) { fail(reason); }
   }
 
   useEffect(() => {
@@ -343,6 +388,57 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
     finally { setBusyAction(false); }
   }
 
+  async function savePayUConfiguration(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusyAction(true);
+    try {
+      const result = await ownerRequest<{ settings: PayUSettingsStatus; activeProvider: string }>(key, '/api/owner/payment-provider/payu', {
+        method: 'PUT',
+        body: JSON.stringify(payuForm),
+      });
+      setPayuSettings(result.settings);
+      setActivePaymentProvider(result.activeProvider);
+      setPayuForm((current) => ({ ...current, merchantKey: '', merchantSalt: '' }));
+      setEditingPayU(false);
+      notify('PayU settings saved securely');
+    } catch (reason) { fail(reason); }
+    finally { setBusyAction(false); }
+  }
+
+  async function removePayUConfiguration() {
+    if (!window.confirm('Remove PayU credentials? New UPI checkout and verification of existing PayU orders will be unavailable until credentials are restored.')) return;
+    setBusyAction(true);
+    try {
+      const result = await ownerRequest<{ deleted: boolean; activeProvider: string }>(key, '/api/owner/payment-provider/payu', { method: 'DELETE' });
+      if (!result.deleted) throw new Error('PayU settings were not removed');
+      setPayuSettings((current) => current ? { ...current, configured: false, hasMerchantKey: false, hasMerchantSalt: false, managedInOwnerStudio: true } : current);
+      setActivePaymentProvider(result.activeProvider);
+      setPayuForm((current) => ({ ...current, merchantKey: '', merchantSalt: '' }));
+      setEditingPayU(true);
+      notify('PayU credentials removed; UPI checkout and PayU verification are unavailable');
+    } catch (reason) { fail(reason); }
+    finally { setBusyAction(false); }
+  }
+
+  async function togglePaymentProof(order: Order) {
+    if (order.paymentProofPreviewUrl) {
+      setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, paymentProofPreviewUrl: undefined } : entry));
+      return;
+    }
+    setBusyAction(true);
+    try {
+      const response = await fetch(`/api/owner/orders/${encodeURIComponent(order.id)}/payment-proof`, { headers: { 'X-Owner-Key': key } });
+      if (!response.ok) {
+        const result = await response.json() as { error?: string };
+        throw new Error(result.error || 'Could not load the payment screenshot');
+      }
+      const previewUrl = URL.createObjectURL(await response.blob());
+      paymentProofPreviewUrls.current.add(previewUrl);
+      setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, paymentProofPreviewUrl: previewUrl } : entry));
+    } catch (reason) { fail(reason); }
+    finally { setBusyAction(false); }
+  }
+
   async function confirmBankAlert(alert: PaymentAlert, order: PaymentAlert['candidates'][number]) {
     if (!window.confirm(`First verify this ${money(alert.amount / 100)} credit and UTR ${alert.transactionReference} in your bank statement. Only continue if the credit belongs to order ${order.id}.`)) return;
     setBusyAction(true);
@@ -361,6 +457,7 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
       await ownerRequest<unknown>(key, `/api/owner/payment-alerts/${encodeURIComponent(alert.id)}/dismiss`, { method: 'PATCH' });
       setPaymentAlerts((current) => current.filter((entry) => entry.id !== alert.id));
       notify('Payment alert dismissed');
+      await refreshOrders(key);
     } catch (reason) { fail(reason); }
     finally { setBusyAction(false); }
   }
@@ -516,15 +613,62 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
           <button className="studio-primary studio-publish" disabled={busyAction}>{busyAction ? 'Publishing…' : 'Publish storefront text'} <Check size={16} /></button>
         </form>}
         {tab === 'payments' && <section className="studio-section">
-          <section className="studio-panel"><h2>Payments</h2><p>New UPI orders use Ahuza Pay and require bank-credit verification. Gmail alerts are candidates only and never mark an order paid automatically. Historical Instamojo orders are still reconciled through Instamojo.</p>
+          <section className="studio-panel"><h2>Payments</h2><p>Active provider: <strong>{activePaymentProvider.replaceAll('_', ' ')}</strong>. PayU payments are confirmed only after server-side verification with PayU. Gmail alerts are candidates only and never mark an order paid automatically. Historical Instamojo orders are still reconciled through Instamojo.</p>
+            <section className="studio-panel">
+              <div className="studio-panel-heading"><div><h3>Payment review assistant</h3><span>{paymentAlerts.length + proofReviewOrders.length} items need evidence review</span></div><PackageCheck size={18} /></div>
+              <p className="studio-muted">The assistant ranks bank-alert candidates by exact amount and transaction time. It does not read screenshot text, estimate a probability, or mark payments paid. Verify every credit in your bank or payment provider before confirming.</p>
+              {proofReviewOrders.length === 0 ? <p className="studio-muted">No customer-submitted screenshots are waiting for review.</p> : <div className="studio-review-queue">
+                <h4>Customer-submitted screenshots · not proof of settlement</h4>
+                {proofReviewOrders.map((proof) => <article className="studio-list-row" key={proof.id}>
+                  <div><strong>{proof.customerName} · {money(proof.amount / 100)}</strong><small>Order {proof.id} · submitted {new Date(proof.uploadedAt).toLocaleString()} · {proof.status.replaceAll('_', ' ')}</small><small>{proof.note}</small></div>
+                  <button className="studio-secondary" type="button" onClick={() => setTab('orders')}>Review screenshot in Orders</button>
+                </article>)}
+              </div>}
+            </section>
+            <section className="studio-panel studio-payu-settings">
+              <div className="studio-panel-heading"><div><h3>PayU India checkout</h3><span>{payuSettings?.configured ? `Configured · ${payuSettings.mode} mode` : 'Not configured'}</span></div><CreditCard size={18} /></div>
+              {payuSettings?.configured && !editingPayU && <div className="studio-form-actions">
+                <p className="studio-muted">Merchant key and salt are encrypted at rest and never shown again. The webhook URL must also be registered in your PayU merchant dashboard.</p>
+                <p><strong>Callback URL:</strong> {payuSettings.callbackUrl}<br /><strong>Webhook URL:</strong> {payuSettings.webhookUrl}</p>
+                <button className="studio-secondary" type="button" disabled={busyAction} onClick={() => setEditingPayU(true)}>Edit PayU settings</button>
+                <button className="studio-secondary" type="button" disabled={busyAction} onClick={() => void removePayUConfiguration()}>Delete PayU settings</button>
+              </div>}
+              {editingPayU && <form className="studio-form-grid" onSubmit={(event) => void savePayUConfiguration(event)}>
+                <label>Merchant key{payuSettings?.hasMerchantKey && <small>Configured. Leave blank to keep the current key.</small>}<input type="password" autoComplete="new-password" value={payuForm.merchantKey} onChange={(event) => setPayuForm({ ...payuForm, merchantKey: event.target.value })} maxLength={256} placeholder="Enter PayU merchant key" /></label>
+                <label>Merchant salt{payuSettings?.hasMerchantSalt && <small>Configured. Leave blank to keep the current salt.</small>}<input type="password" autoComplete="new-password" value={payuForm.merchantSalt} onChange={(event) => setPayuForm({ ...payuForm, merchantSalt: event.target.value })} maxLength={256} placeholder="Enter PayU merchant salt" /></label>
+                <label>Environment<select value={payuForm.mode} onChange={(event) => setPayuForm({ ...payuForm, mode: event.target.value as PayUSettingsForm['mode'] })}><option value="test">Test</option><option value="production">Production</option></select></label>
+                <label>Payment callback URL<input type="url" required value={payuForm.callbackUrl} onChange={(event) => setPayuForm({ ...payuForm, callbackUrl: event.target.value })} maxLength={2000} /></label>
+                <label>PayU webhook URL<input type="url" required value={payuForm.webhookUrl} onChange={(event) => setPayuForm({ ...payuForm, webhookUrl: event.target.value })} maxLength={2000} /></label>
+                <small>Configure this webhook URL in PayU as well. Use test credentials for test mode and production credentials only for live payments.</small>
+                <div className="studio-form-actions"><button className="studio-primary" type="submit" disabled={busyAction}>{busyAction ? 'Saving…' : payuSettings?.configured ? 'Save PayU changes' : 'Save and enable PayU'} <Check size={15} /></button>
+                  {payuSettings?.configured && <button className="studio-secondary" type="button" disabled={busyAction} onClick={() => setEditingPayU(false)}>Cancel edit</button>}
+                  {payuSettings?.configured && <button className="studio-secondary" type="button" disabled={busyAction} onClick={() => void removePayUConfiguration()}>Delete PayU settings</button>}
+                </div>
+              </form>}
+            </section>
             <div className="studio-panel-heading"><div><h3>Axis Bank Gmail alerts</h3><span>{gmailAlertsConfigured ? 'Read-only Gmail watcher is configured' : 'Configure Gmail OAuth credentials on the server to receive alerts'}</span></div><button className="studio-secondary" type="button" onClick={() => void refreshOrders(key)}>Refresh alerts</button></div>
-            {!gmailAlertsConfigured && <p className="studio-muted">Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, and GMAIL_REFRESH_TOKEN in the server environment. Use a refresh token authorized for Gmail read-only access.</p>}
+            {!gmailAlertsConfigured && <p className="studio-muted">Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, and GMAIL_TRUSTED_BANK_SENDERS in the server environment. Use a refresh token authorized for Gmail read-only access and configure only independently verified bank sender addresses.</p>}
             {gmailAlertsConfigured && paymentAlerts.length === 0 && <p className="studio-muted">No unreviewed bank-credit alerts</p>}
             {paymentAlerts.map((alert) => <article className="studio-list-row" key={alert.id}>
-              <div><strong>{money(alert.amount / 100)} · UTR {alert.transactionReference}</strong><small>Axis Bank email · {new Date(alert.receivedAt).toLocaleString()}</small>
-                {alert.candidates.length > 0 ? alert.candidates.map((candidate) => <div key={candidate.id}><small>{candidate.customerName} · order {candidate.id} · {new Date(candidate.createdAt).toLocaleString()} · {candidate.status}</small><button className="studio-primary" type="button" disabled={busyAction} onClick={() => void confirmBankAlert(alert, candidate)}>Verify bank credit and confirm order <Check size={15} /></button></div>) : <small>No open UPI order with this amount predates the alert. Check the bank statement and order history before taking action.</small>}
+              <div><strong>{new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(alert.amount / 100)} · Bank reference {alert.transactionReference}</strong><small>Review required · {alert.sender || 'Axis Bank email'} · received {new Date(alert.receivedAt).toLocaleString()}</small>
+                {alert.transactionAt && <small>Transaction: {new Date(alert.transactionAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} {alert.transactionTimezone} · {alert.transactionType}{alert.accountSuffix ? ` · account ending ${alert.accountSuffix}` : ''}{alert.additionalReference ? ` · additional reference ${alert.additionalReference}` : ''}</small>}
+                {alert.duplicateConflict && <small>Conflicting alerts share this bank reference. Review the bank statement before taking action.</small>}
+                {alert.candidates.length > 0 ? alert.candidates.map((candidate) => <div key={candidate.id}><small>{candidate.customerName} · order {candidate.id} · {new Date(candidate.createdAt).toLocaleString()} · {candidate.status}</small><small>Review priority: {candidate.matchLevel === 'amount_and_time' ? 'amount and transaction time match' : candidate.matchLevel === 'timing_mismatch' ? 'timing mismatch — investigate before matching' : 'amount-only match'} · {candidate.reasons.join('; ')}</small><button className="studio-primary" type="button" disabled={busyAction} onClick={() => void confirmBankAlert(alert, candidate)}>Verify bank credit and confirm order <Check size={15} /></button></div>) : <small>No open UPI order with this amount predates the alert. Check the bank statement and order history before taking action.</small>}
               </div>
               <button className="studio-secondary" type="button" disabled={busyAction} onClick={() => void dismissBankAlert(alert)}>Dismiss</button>
+            </article>)}
+          </section>
+          <section className="studio-panel"><h3>Payment verification levels</h3>
+            <p>EMAIL_CONFIRMED is not enabled: the bank alert does not yet provide a validated independent order association. BANK_VERIFIED is not available without an official bank or provider integration. Manual reconciliation is neither level.</p>
+            <h3>Gmail alert history</h3>
+            <label>Search alert history<input value={paymentHistorySearch} onChange={(event) => setPaymentHistorySearch(event.target.value)} placeholder="Message ID, bank reference, order or sender" /></label>
+            {paymentAlertHistory.filter((alert) => [alert.id, alert.transactionReference, alert.matchedOrderId, alert.sender].some((value) => value?.toLowerCase().includes(paymentHistorySearch.trim().toLowerCase()))).map((alert) => <article className="studio-list-row" key={alert.id}>
+              <div><strong>{alert.transactionReference} · {alert.status === 'confirmed' ? 'Manually reconciled' : alert.status.replaceAll('_', ' ')}</strong>
+                <small>Gmail message {alert.id} · {alert.sender || 'sender not recorded'}{alert.matchedOrderId ? ` · order ${alert.matchedOrderId}` : ''}</small>
+                {alert.duplicateConflict && <small>Conflicting duplicate alert</small>}
+                {alert.history?.map((event, index) => <small key={`${event.at}-${index}`}>{new Date(event.at).toLocaleString()} · {event.action.replaceAll('_', ' ')}{event.messageId ? ` · message ${event.messageId}` : ''}{event.orderId ? ` · order ${event.orderId}` : ''}</small>)}
+                {!alert.history?.length && <small>Detailed history was not recorded for this older alert.</small>}
+              </div>
             </article>)}
           </section>
         </section>}
@@ -534,8 +678,9 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
           {orders.map((order) => <article className="studio-panel studio-order" key={order.id}>
             <div className="studio-order-heading"><div><span className="studio-eyebrow">{order.id}</span><h2>{order.shippingAddress.name}</h2><p>{new Date(order.createdAt).toLocaleString()} · {money(order.amount / 100)}</p><p>{order.paymentMethod === 'cod' ? 'Cash on delivery' : 'UPI'} · payment {order.paymentStatus || 'pending'}{order.paymentReference ? ` · reference ${order.paymentReference}` : ''}</p>{order.manualPaymentReference && <p>Bank transaction reference: {order.manualPaymentReference}</p>}{order.payerUpiId && <p>Customer UPI ID (to match the bank credit): {order.payerUpiId}</p>}</div><span className={`order-status status-${order.status}`}>{order.status.replaceAll('_', ' ')}</span></div>
             <div className="studio-order-details"><div><h3>Delivery</h3><p>{order.shippingAddress.addressLine1}{order.shippingAddress.addressLine2 ? `, ${order.shippingAddress.addressLine2}` : ''}<br />{order.shippingAddress.city}, {order.shippingAddress.state} {order.shippingAddress.postalCode}<br />{order.shippingAddress.phone}</p><label>Tracking number<input value={order.trackingNumber || ''} onChange={(event) => setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, trackingNumber: event.target.value } : entry))} placeholder="Carrier tracking reference" maxLength={100} /></label><label>Carrier tracking link<input type="url" value={order.trackingUrl || ''} onChange={(event) => setOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, trackingUrl: event.target.value } : entry))} placeholder="https://carrier.example/track/…" maxLength={2000} onBlur={(event) => { if (event.target.value && !event.target.value.startsWith('https://')) fail(new Error('Tracking link must start with https://')); }} /></label></div><div><h3>Items</h3>{order.items.map((item, index) => <p key={`${item.sku}-${index}`}>{item.quantity} × {item.name}{item.size ? ` · Size ${item.size}` : ''} <small>({item.sku})</small></p>)}{order.review && <div className="owner-order-review"><strong>Customer rating: {'★'.repeat(order.review.rating)}{'☆'.repeat(5 - order.review.rating)}</strong>{order.review.comment && <p>{order.review.comment}</p>}<small>{new Date(order.review.createdAt).toLocaleString()}</small></div>}</div></div>
+            {order.manualPaymentProof && <section className="owner-payment-proof"><div><strong>Customer payment screenshot submitted</strong><small>{new Date(order.manualPaymentProof.uploadedAt).toLocaleString()} · Review against the bank statement; the image is not proof of settlement.</small></div><button className="studio-secondary" type="button" disabled={busyAction} onClick={() => void togglePaymentProof(order)}>{order.paymentProofPreviewUrl ? 'Hide screenshot' : 'View screenshot'}</button>{order.paymentProofPreviewUrl && <img src={order.paymentProofPreviewUrl} alt={`Payment screenshot submitted for order ${order.id}`} />}</section>}
                         {order.returnRequest && <div className="studio-return"><div><strong>{order.returnRequest.action} requested · {order.returnRequest.status}</strong><p>{order.returnRequest.reason}</p></div>{order.returnRequest.status === 'requested' && <div className="studio-return-actions"><button onClick={() => void resolveReturn(order, 'approved')} disabled={busyAction}>Approve</button><button onClick={() => void resolveReturn(order, 'rejected')} disabled={busyAction}>Decline</button></div>}</div>}
-            <div className="studio-order-actions"><button className="studio-secondary" onClick={() => void deleteOrder(order)} disabled={busyAction}>Delete order</button>{(order.status === 'paid' || (order.paymentMethod === 'cod' && order.status === 'confirmed')) && <button className="studio-primary" onClick={() => void updateOrder(order, 'shipped')} disabled={busyAction}>Mark shipped <PackageCheck size={15} /></button>}{order.status === 'shipped' && <button className="studio-primary" onClick={() => void updateOrder(order, 'out_for_delivery')} disabled={busyAction}>Mark out for delivery <PackageCheck size={15} /></button>}{order.status === 'out_for_delivery' && <button className="studio-primary" onClick={() => void updateOrder(order, 'delivered')} disabled={busyAction}>Mark delivered <Check size={15} /></button>}{order.paymentMethod === 'upi' && !order.instamojoRequestId && order.paymentStatus !== 'paid' && ['pending_payment', 'cancelled'].includes(order.status) && <button className="studio-primary" onClick={() => void confirmUpiPaid(order)} disabled={busyAction}>Confirm UPI payment received <Check size={15} /></button>}{order.paymentMethod === 'cod' && order.status === 'delivered' && order.paymentStatus === 'pending' && <button className="studio-secondary" onClick={() => void markCodPaid(order)} disabled={busyAction}>Mark cash collected / paid <Check size={15} /></button>}<small>Status updates email the customer Mark out for delivery when the carrier reports it; carrier status is not automatically connected</small><small>Returns and replacements are accepted within 7 days after delivery</small></div>
+            <div className="studio-order-actions"><button className="studio-secondary" onClick={() => void deleteOrder(order)} disabled={busyAction}>Delete order</button>{(order.status === 'paid' || (order.paymentMethod === 'cod' && order.status === 'confirmed')) && <button className="studio-primary" onClick={() => void updateOrder(order, 'shipped')} disabled={busyAction}>Mark shipped <PackageCheck size={15} /></button>}{order.status === 'shipped' && <button className="studio-primary" onClick={() => void updateOrder(order, 'out_for_delivery')} disabled={busyAction}>Mark out for delivery <PackageCheck size={15} /></button>}{order.status === 'out_for_delivery' && <button className="studio-primary" onClick={() => void updateOrder(order, 'delivered')} disabled={busyAction}>Mark delivered <Check size={15} /></button>}{order.paymentMethod === 'upi' && !order.instamojoRequestId && !order.payuTxnId && order.paymentStatus !== 'paid' && ['pending_payment', 'cancelled'].includes(order.status) && <button className="studio-primary" onClick={() => void confirmUpiPaid(order)} disabled={busyAction}>Confirm legacy UPI payment received <Check size={15} /></button>}{order.paymentMethod === 'cod' && order.status === 'delivered' && order.paymentStatus === 'pending' && <button className="studio-secondary" onClick={() => void markCodPaid(order)} disabled={busyAction}>Mark cash collected / paid <Check size={15} /></button>}<small>Status updates email the customer Mark out for delivery when the carrier reports it; carrier status is not automatically connected</small><small>Returns and replacements are accepted within 7 days after delivery</small></div>
           </article>)}
         </section>}
         {tab === 'support' && <section className="studio-section studio-orders">{supportTickets.length === 0 ? <section className="studio-panel"><p className="studio-muted">No customer support tickets yet</p></section> : supportTickets.map((ticket) => <article className="studio-panel" key={ticket.id}><div className="studio-panel-heading"><div><span className="studio-eyebrow">{ticket.id}</span><h2>{ticket.category === 'delivery' ? 'Delivery issue' : ticket.category === 'complaint' ? 'Customer complaint' : 'Customer request'}</h2><span>{ticket.email} · {new Date(ticket.createdAt).toLocaleString()}</span></div><span className={`order-status status-${ticket.status}`}>{ticket.status}</span></div><p className="studio-ticket-message">{ticket.message}</p>{ticket.status === 'open' && <button className="studio-secondary" onClick={() => void resolveSupportTicket(ticket)} disabled={busyAction}>Mark resolved <Check size={15} /></button>}</article>)}</section>}

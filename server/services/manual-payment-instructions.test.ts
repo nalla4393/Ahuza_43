@@ -9,7 +9,7 @@ test('manual payment instructions explain the pending flow before and after chec
     const markup = renderToStaticMarkup(createElement(ManualPaymentInstructions, { email: 'support@example.com', orderId }));
     assert.match(markup, /only after AHUZA manually verifies the bank credit/);
     assert.match(markup, /If it does not appear after you pay/);
-    assert.match(markup, /screenshot of the payment/);
+    assert.match(markup, /Upload your payment screenshot/);
     assert.match(markup, /bank transaction reference/);
     assert.match(markup, /screenshot is for reference only, not proof of payment/);
     assert.match(markup, /order changes to Paid/);

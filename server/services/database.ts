@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import pg from 'pg';
 import { defaultStorefrontCopy, mergeStorefrontCopy, type StorefrontCopy } from '../../shared/storefrontCopy.js';
 
 export type Product = {
@@ -100,12 +101,15 @@ export type Order = {
   shippingAmount?: number;
   discountAmount?: number;
   taxAmount?: number;
+  paymentAdjustmentAmount?: number;
   paymentReference?: string;
   instamojoRequestId?: string;
+  payuTxnId?: string;
   payerUpiIdEnc?: string;
   paymentVerifiedAt?: string;
   manualPaymentReference?: string;
-  paymentVerificationMethod?: 'manual_bank_reconciliation' | 'ahuza_pay' | 'instamojo';
+  manualPaymentProof?: { id: string; mimeType: 'image/jpeg' | 'image/png'; uploadedAt: string };
+  paymentVerificationMethod?: 'manual_bank_reconciliation' | 'ahuza_pay' | 'instamojo' | 'payu';
   reservationExpiresAt?: string;
   createdAt: string;
   deliveredAt?: string;
@@ -132,10 +136,29 @@ export type BankPaymentAlert = {
   amount: number;
   transactionReference: string;
   receivedAt: string;
-  status: 'pending' | 'confirmed' | 'dismissed';
+  status: 'pending' | 'review_required' | 'confirmed' | 'dismissed';
+  transactionAt?: string;
+  transactionTimezone?: 'IST';
+  transactionType?: 'UPI/P2A';
+  accountSuffix?: string;
+  additionalReference?: string;
+  sender?: string;
+  duplicateConflict?: boolean;
   matchedOrderId?: string;
   reviewedAt?: string;
+  history?: BankPaymentAlertEvent[];
 };
+
+export type BankPaymentAlertEvent = {
+  at: string;
+  action: 'received' | 'duplicate' | 'duplicate_conflict' | 'owner_confirmed' | 'owner_dismissed';
+  messageId?: string;
+  orderId?: string;
+};
+
+export function isUnreviewedBankPaymentAlert(alert: BankPaymentAlert): boolean {
+  return alert.status === 'pending' || alert.status === 'review_required';
+}
 
 export type StoreEvent = { id: string; name: string; page?: string; campaign?: string; createdAt: string };
 
@@ -253,9 +276,24 @@ export type Database = {
   bankPaymentAlerts?: BankPaymentAlert[];
   gmailProcessedMessageIds?: string[];
   gmailLastScannedAt?: number;
+  gmailHistoryId?: string;
+  gmailAccountEmail?: string;
+  gmailSenderKey?: string;
+  paymentProviderSettings?: {
+    provider: 'manual_upi' | 'payu';
+    payuMerchantKeyEnc?: string;
+    payuMerchantSaltEnc?: string;
+    payuMode?: 'test' | 'production';
+    payuCallbackUrl?: string;
+    payuWebhookUrl?: string;
+  };
 };
 
 const databasePath = path.resolve(process.env.DATA_FILE || 'data/ahuza-db.json');
+const postgresUrl = process.env.STOREFRONT_DATABASE_URL?.trim();
+if (process.env.STOREFRONT_DATABASE_URL !== undefined && !postgresUrl) throw new Error('STOREFRONT_DATABASE_URL must not be empty');
+const postgres = postgresUrl ? new pg.Pool({ connectionString: postgresUrl, connectionTimeoutMillis: 10000 }) : undefined;
+postgres?.on('error', (error) => console.error('Storefront PostgreSQL connection error:', error.message));
 const seedProducts: Product[] = [
   { id: 'soft-form-shirt', name: 'Soft Form Shirt', description: 'Organic cotton · Cloud', price: 2490, sku: 'AH-SFS-001', stock: 24, category: 'Tops', imageUrl: 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=900&q=82', active: true, ghostMannequin: { imageUrl: 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=900&q=82', tags: ['cotton', 'relaxed fit', 'long sleeve'], background: '#eeece5' } },
   { id: 'everyday-trouser', name: 'Everyday Trouser', description: 'Tencel blend · Moss', price: 3290, sku: 'AH-ET-002', stock: 18, category: 'Bottoms', imageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=82', active: true, ghostMannequin: { imageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=900&q=82', tags: ['tencel', 'straight leg', 'mid rise'], background: '#e6e3da' } },
@@ -296,40 +334,47 @@ export function mergeImageSettings(value: unknown): ImageSettings {
   };
 }
 
+function normalizeDatabase(parsed: Partial<Database>): Database {
+  return {
+    ...parsed,
+    products: Array.isArray(parsed.products) ? [...parsed.products, ...newSeedProducts(parsed.products, parsed.seededProductIds)] : structuredClone(seedProducts),
+    seededProductIds: seedProducts.map((product) => product.id),
+    customers: Array.isArray(parsed.customers) ? parsed.customers : [],
+    orders: Array.isArray(parsed.orders) ? parsed.orders : [],
+    events: Array.isArray(parsed.events) ? parsed.events : [],
+    supportTickets: Array.isArray(parsed.supportTickets) ? parsed.supportTickets : [],
+    newsletterSubscribers: Array.isArray(parsed.newsletterSubscribers) ? parsed.newsletterSubscribers : [],
+    sitePublished: parsed.sitePublished !== false,
+    content: {
+      ...structuredClone(defaultStorefrontContent),
+      ...(parsed.content && typeof parsed.content === 'object' ? parsed.content : {}),
+      circleImages: { ...defaultStorefrontContent.circleImages, ...(parsed.content?.circleImages || {}) },
+      circleLabels: { ...defaultStorefrontContent.circleLabels, ...(parsed.content?.circleLabels || {}) },
+      bannerImages: { ...defaultStorefrontContent.bannerImages, ...(parsed.content?.bannerImages || {}) },
+      copy: mergeStorefrontCopy(parsed.content?.copy),
+    },
+    imageSettings: mergeImageSettings(parsed.imageSettings),
+    imageLibrary: Array.isArray(parsed.imageLibrary) ? parsed.imageLibrary : [],
+    automations: Array.isArray(parsed.automations) ? parsed.automations : [],
+    automationRuns: Array.isArray(parsed.automationRuns) ? parsed.automationRuns : [],
+    socialSchedules: Array.isArray(parsed.socialSchedules) ? parsed.socialSchedules : [],
+    socialPosts: Array.isArray(parsed.socialPosts) ? parsed.socialPosts : [],
+    stockAlerts: Array.isArray(parsed.stockAlerts) ? parsed.stockAlerts : [],
+    orderEmailNotifications: Array.isArray(parsed.orderEmailNotifications) ? parsed.orderEmailNotifications : [],
+    bankPaymentAlerts: Array.isArray(parsed.bankPaymentAlerts) ? parsed.bankPaymentAlerts : [],
+    gmailProcessedMessageIds: Array.isArray(parsed.gmailProcessedMessageIds) ? parsed.gmailProcessedMessageIds : [],
+    gmailLastScannedAt: typeof parsed.gmailLastScannedAt === 'number' ? parsed.gmailLastScannedAt : undefined,
+    gmailHistoryId: typeof parsed.gmailHistoryId === 'string' ? parsed.gmailHistoryId : undefined,
+    gmailAccountEmail: typeof parsed.gmailAccountEmail === 'string' ? parsed.gmailAccountEmail : undefined,
+    gmailSenderKey: typeof parsed.gmailSenderKey === 'string' ? parsed.gmailSenderKey : undefined,
+  };
+}
+
 async function loadDatabase(): Promise<Database> {
   if (loaded) return loaded;
   try {
     const raw = await readFile(databasePath, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<Database>;
-    loaded = {
-      products: Array.isArray(parsed.products) ? [...parsed.products, ...newSeedProducts(parsed.products, parsed.seededProductIds)] : structuredClone(seedProducts),
-      seededProductIds: seedProducts.map((product) => product.id),
-      customers: Array.isArray(parsed.customers) ? parsed.customers : [],
-      orders: Array.isArray(parsed.orders) ? parsed.orders : [],
-      events: Array.isArray(parsed.events) ? parsed.events : [],
-      supportTickets: Array.isArray(parsed.supportTickets) ? parsed.supportTickets : [],
-      newsletterSubscribers: Array.isArray(parsed.newsletterSubscribers) ? parsed.newsletterSubscribers : [],
-      sitePublished: parsed.sitePublished !== false,
-      content: {
-        ...structuredClone(defaultStorefrontContent),
-        ...(parsed.content && typeof parsed.content === 'object' ? parsed.content : {}),
-        circleImages: { ...defaultStorefrontContent.circleImages, ...(parsed.content?.circleImages || {}) },
-        circleLabels: { ...defaultStorefrontContent.circleLabels, ...(parsed.content?.circleLabels || {}) },
-        bannerImages: { ...defaultStorefrontContent.bannerImages, ...(parsed.content?.bannerImages || {}) },
-        copy: mergeStorefrontCopy(parsed.content?.copy),
-      },
-      imageSettings: mergeImageSettings(parsed.imageSettings),
-      imageLibrary: Array.isArray(parsed.imageLibrary) ? parsed.imageLibrary : [],
-      automations: Array.isArray(parsed.automations) ? parsed.automations : [],
-      automationRuns: Array.isArray(parsed.automationRuns) ? parsed.automationRuns : [],
-      socialSchedules: Array.isArray(parsed.socialSchedules) ? parsed.socialSchedules : [],
-      socialPosts: Array.isArray(parsed.socialPosts) ? parsed.socialPosts : [],
-      stockAlerts: Array.isArray(parsed.stockAlerts) ? parsed.stockAlerts : [],
-      orderEmailNotifications: Array.isArray(parsed.orderEmailNotifications) ? parsed.orderEmailNotifications : [],
-      bankPaymentAlerts: Array.isArray(parsed.bankPaymentAlerts) ? parsed.bankPaymentAlerts : [],
-      gmailProcessedMessageIds: Array.isArray(parsed.gmailProcessedMessageIds) ? parsed.gmailProcessedMessageIds : [],
-      gmailLastScannedAt: typeof parsed.gmailLastScannedAt === 'number' ? parsed.gmailLastScannedAt : undefined,
-    };
+    loaded = normalizeDatabase(JSON.parse(raw) as Partial<Database>);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     loaded = emptyDatabase();
@@ -345,13 +390,79 @@ async function persist(database: Database): Promise<void> {
   await rename(temporaryPath, databasePath);
 }
 
+function validateImportedDatabase(value: unknown): asserts value is Partial<Database> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Storefront import must contain a JSON object');
+  const record = value as Record<string, unknown>;
+  for (const key of ['products', 'customers', 'orders', 'events', 'supportTickets']) {
+    if (!Array.isArray(record[key])) throw new Error(`Storefront import is missing a valid ${key} array`);
+  }
+  if (!record.content || typeof record.content !== 'object' || Array.isArray(record.content)) {
+    throw new Error('Storefront import is missing valid content');
+  }
+}
+
+export async function importStorefrontDatabase(file: string): Promise<void> {
+  if (!postgres) throw new Error('Set STOREFRONT_DATABASE_URL before importing the storefront database');
+  const parsed: unknown = JSON.parse(await readFile(path.resolve(file), 'utf8'));
+  validateImportedDatabase(parsed);
+  const client = await postgres.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`CREATE TABLE IF NOT EXISTS ahuza_storefront_state (
+      id smallint PRIMARY KEY CHECK (id = 1),
+      data jsonb NOT NULL CHECK (jsonb_typeof(data) = 'object')
+    )`);
+    const result = await client.query(
+      'INSERT INTO ahuza_storefront_state (id, data) VALUES (1, $1::jsonb) ON CONFLICT (id) DO NOTHING RETURNING id',
+      [JSON.stringify(parsed)],
+    );
+    if (result.rowCount !== 1) throw new Error('Storefront PostgreSQL database already contains data; import refused');
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function closeStorefrontDatabase(): Promise<void> {
+  await postgres?.end();
+}
+
+async function readPostgresDatabase(client: pg.Pool | pg.PoolClient, lock = false): Promise<Database> {
+  const result = await client.query<{ data: unknown }>(
+    `SELECT data FROM ahuza_storefront_state WHERE id = 1${lock ? ' FOR UPDATE' : ''}`,
+  );
+  const data = result.rows[0]?.data;
+  if (!data) throw new Error('Storefront PostgreSQL database has not been imported; run npm run db:import');
+  validateImportedDatabase(data);
+  return normalizeDatabase(data);
+}
+
 export async function getDatabase(): Promise<Database> {
   await writeQueue;
-  return loadDatabase();
+  return postgres ? readPostgresDatabase(postgres) : loadDatabase();
 }
 
 export async function mutateDatabase<T>(mutator: (database: Database) => T | Promise<T>): Promise<T> {
   const operation = writeQueue.then(async () => {
+    if (postgres) {
+      const client = await postgres.connect();
+      try {
+        await client.query('BEGIN');
+        const database = await readPostgresDatabase(client, true);
+        const result = await mutator(database);
+        await client.query('UPDATE ahuza_storefront_state SET data = $1::jsonb WHERE id = 1', [JSON.stringify(database)]);
+        await client.query('COMMIT');
+        return result;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
     const database = await loadDatabase();
     const snapshot = structuredClone(database);
     try {

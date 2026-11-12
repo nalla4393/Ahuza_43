@@ -10,9 +10,11 @@ import { uploadRoot } from './server/services/images.js';
 import { api, expireReservationsOnStartup } from './server/routes.js';
 import { expirePendingOrders, startFollowUpScheduler } from './server/services/integrations.js';
 import { startSocialScheduler } from './server/services/social.js';
-import { reconcileInstamojoOrders } from './server/services/paymentSync.js';
+import { reconcileInstamojoOrders, reconcilePayUPayments } from './server/services/paymentSync.js';
 import { startGmailPaymentAlertWatcher } from './server/services/gmailPaymentAlerts.js';
 import { sendRestockAlerts } from './server/services/stock-alerts.js';
+import { paymentWebhook } from './server/services/webhookVerifier.js';
+import { getDatabase } from './server/services/database.js';
 
 const app = express();
 const FileStore = createFileStore(session);
@@ -35,7 +37,7 @@ app.use(helmet({
       imgSrc: ["'self'", 'https:', 'data:'],
       connectSrc: ["'self'", 'https://www.google-analytics.com', 'https://*.google-analytics.com', 'https://*.analytics.google.com', 'https://www.googletagmanager.com'],
       frameSrc: ["'self'"],
-      formAction: ["'self'"],
+      formAction: ["'self'", 'https://test.payu.in', 'https://secure.payu.in'],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"],
     },
@@ -58,6 +60,7 @@ if (process.env.FRONTEND_ORIGIN || !isProduction) app.use(cors({
   allowedHeaders: ['Content-Type', 'X-Owner-Key', 'X-File-Name'],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
+app.use('/api/webhooks/payment', paymentWebhook);
 app.use(express.json({ limit: '32kb' }));
 app.use(session({
   name: 'ahuza.sid',
@@ -95,9 +98,10 @@ app.use((error: unknown, _request: express.Request, response: express.Response, 
   response.status(status).json({ error: message });
 });
 
+await getDatabase();
 void expireReservationsOnStartup().catch((error) => console.error('Reservation cleanup failed:', error));
 startGmailPaymentAlertWatcher();
-const paymentSyncTimer = setInterval(() => void reconcileInstamojoOrders().catch((error) => console.error('Payment reconcile failed:', error)), 15 * 1000);
+const paymentSyncTimer = setInterval(() => void Promise.all([reconcileInstamojoOrders(), reconcilePayUPayments()]).catch((error) => console.error('Payment reconcile failed:', error)), 15 * 1000);
 paymentSyncTimer.unref();
 const reservationTimer = setInterval(() => void expirePendingOrders().catch((error) => console.error('Reservation cleanup failed:', error)), 60 * 1000);
 reservationTimer.unref();

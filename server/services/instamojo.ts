@@ -20,6 +20,14 @@ export function instamojoAmountInPaise(value: unknown): number | null {
   return Number.isSafeInteger(paise) ? paise : null;
 }
 
+export function instamojoWebhookFailureReason(data: unknown): string {
+  if (!instamojoWebhookConfigured()) return 'INSTAMOJO_SALT is not set';
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return 'body is not form-encoded fields';
+  const mac = (data as Record<string, unknown>).mac;
+  if (typeof mac !== 'string' || !mac) return 'mac signature field is missing';
+  return 'mac does not match; INSTAMOJO_SALT is likely wrong (Private Salt from the same Instamojo account/mode)';
+}
+
 export function verifyInstamojoWebhook(data: unknown): boolean {
   if (!instamojoWebhookConfigured() || !data || typeof data !== 'object' || Array.isArray(data)) return false;
   const values = data as Record<string, unknown>;
@@ -49,7 +57,12 @@ async function request(path: string, method: 'GET' | 'POST', body?: URLSearchPar
     ...(body ? { body } : {}),
     signal: AbortSignal.timeout(15000),
   });
-  if (!response.ok) throw new Error(`Instamojo returned HTTP ${response.status}`);
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(`Instamojo returned HTTP ${response.status}: INSTAMOJO_API_KEY / INSTAMOJO_AUTH_TOKEN were rejected (wrong, revoked, or test/live key mismatch)`);
+    }
+    throw new Error(`Instamojo returned HTTP ${response.status}`);
+  }
   const data: unknown = await response.json();
   if (!data || typeof data !== 'object' || !('success' in data) || data.success !== true) throw new Error('Instamojo returned an invalid response');
   return data as Record<string, unknown>;

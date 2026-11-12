@@ -37,6 +37,7 @@ export async function buildInvoicePdf(order: Order, customerEmail: string): Prom
     document.font('Helvetica').fontSize(9).text(`SKU: ${safePdfText(item.sku)}  |  Quantity: ${item.quantity}  |  Unit price: INR ${item.unitPrice.toFixed(2)}  |  Line total: INR ${lineTotal.toFixed(2)}`);
     document.moveDown(0.6);
   }
+  if (order.paymentAdjustmentAmount) document.moveDown().fontSize(10).font('Helvetica').text(`UPI identification adjustment: ${order.currency} ${(order.paymentAdjustmentAmount / 100).toFixed(2)}`, { align: 'right' });
   document.moveDown().fontSize(12).font('Helvetica-Bold').text(`Total paid: ${order.currency} ${(order.amount / 100).toFixed(2)}`, { align: 'right' });
   document.moveDown(2).fontSize(9).font('Helvetica').text('Thank you for shopping with AHUZA Apparel');
   document.end();

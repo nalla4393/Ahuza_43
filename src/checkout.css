@@ -50,6 +50,17 @@
 .manual-payment-instructions ol{margin:6px 0 0;padding-left:18px}
 .manual-payment-instructions li+li{margin-top:5px}
 .payment-panel .manual-payment-instructions p{font-size:11px;line-height:1.5;color:inherit}
+.payment-proof{display:grid;justify-items:center;gap:8px;width:min(100%,380px);padding:14px;border:1px solid var(--line);background:#fffefb}
+.payment-proof h4,.payment-proof p{margin:0}
+.payment-proof h4{font-size:13px}
+.payment-proof .payment-proof-upload{display:grid;justify-items:center;gap:6px;width:100%;font-size:11px}
+.payment-proof-upload input{max-width:100%;font-size:11px}
+.payment-panel .payment-proof-preview{max-width:100%;max-height:320px;object-fit:contain;border:1px solid var(--line)}
+.payment-panel .payment-proof-error{color:#9d3e2d}
+.payment-success-items{width:min(100%,360px);padding:8px 14px;border-block:1px solid var(--line);text-align:left}
+.payment-success-items p{margin:4px 0}
+.payment-success-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:10px}
+.payment-success-actions .invoice-button{font-size:12px}
 .payment-panel a{color:#3a493c;font-size:12px}
 .payment-qr{display:grid;justify-items:center;gap:8px;max-width:100%}
 .payment-qr svg{display:block;width:min(224px,100%);height:auto;background:#fff}
@@ -106,6 +117,10 @@
 .owner-order-review{margin-top:10px;padding:10px;border-top:1px solid var(--line)}
 .owner-order-review strong{color:#8a6820}
 .owner-order-review p{overflow-wrap:anywhere}
+.owner-payment-proof{display:grid;justify-items:start;gap:10px;margin-top:12px;padding:12px;border:1px solid var(--line);background:#fffefb}
+.owner-payment-proof>div{display:grid;gap:4px}
+.owner-payment-proof small{color:var(--muted);font-size:11px}
+.owner-payment-proof img{max-width:min(100%,520px);max-height:520px;object-fit:contain;border:1px solid var(--line)}
 
 .payer-upi{display:grid;gap:6px}
 .payer-upi>label:first-child{display:grid;gap:4px;font-size:11px}
