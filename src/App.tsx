@@ -8,6 +8,7 @@ import HeroCarousel, { type BannerSlide } from './HeroCarousel';
 import PaymentQr from './PaymentQr';
 import ManualPaymentInstructions from './ManualPaymentInstructions';
 import CheckoutItems from './CheckoutItems';
+import PaymentSuccess from './PaymentSuccess';
 import { defaultImageSettings, imageSettingsVars, mainImage, srcSet, type ImageSettings, type ProductImage } from './imageTypes';
 import { defaultStorefrontCopy, type StorefrontCopyId } from '../shared/storefrontCopy';
 import { freeShippingThreshold, maxShippingCharge, shippingForSubtotal } from '../shared/shipping';
@@ -352,13 +353,13 @@ export default function App() {
     openedSeoRoute.current = true;
   }, [products, sitePublished]);
 
-  // Remember the pending order while the customer is in the payment app.
+  // Recheck the order after returning from the payment app or reloading the confirmation.
   useEffect(() => {
     try {
-      if (paymentOrder?.paymentMethod === 'upi' && paymentStatus !== 'paid') localStorage.setItem('ahuza.pendingPayment', JSON.stringify(paymentOrder));
+      if (paymentOrder?.paymentMethod === 'upi') localStorage.setItem('ahuza.pendingPayment', JSON.stringify(paymentOrder));
       else localStorage.removeItem('ahuza.pendingPayment');
     } catch { /* storage unavailable */ }
-  }, [paymentOrder, paymentStatus]);
+  }, [paymentOrder]);
 
   useEffect(() => {
     if (paymentOrder) setCartOpen(true);
@@ -748,6 +749,10 @@ export default function App() {
       setPaymentStatus(result.status);
       if (result.orderStatus) setPaymentOrderStatus(result.orderStatus);
       setPaymentProofSubmitted(result.paymentProofSubmitted === true);
+      if (result.status === 'paid') {
+        setCart([]);
+        setOrdersRefresh((value) => value + 1);
+      }
       setPaymentMessage(result.status === 'paid' && result.orderStatus === 'cancelled'
         ? 'Your payment was received, but the order could not be confirmed because stock is unavailable. AHUZA will contact you about the next steps.'
         : result.status === 'paid'
@@ -1089,22 +1094,11 @@ export default function App() {
         <div className="footer-bottom"><a className="wordmark footer-brand-logo" href="#home" aria-label="AHUZA home"><img className="brand-logo" src="/ahuza-brand-logo.png" alt="" width="839" height="720" loading="lazy" /></a><span>© AHUZA Apparel 2026</span><a className="footer-terms" href="/terms.html">Terms and Conditions</a><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
       </footer>
 
-      {orderSuccessPage && paymentOrder?.paymentMethod === 'upi' && paymentStatus === 'paid' && <main className="payment-success-page" aria-labelledby="payment-success-title">
-        <div className="payment-success-card">
-          <div className="payment-success-brand"><span>AHUZA</span><small>APPAREL</small></div>
-          <div className="payment-success-body">
-            <CheckCircle2 className="payment-success-icon" size={64} aria-hidden="true" />
-            <h1 id="payment-success-title">{paymentOrderStatus === 'cancelled' ? 'Payment received' : 'Payment successful'}</h1>
-            <p className="payment-success-lead">{paymentOrderStatus === 'cancelled'
-              ? 'Your payment was verified, but the order needs review. AHUZA will contact you about the next steps.'
-              : 'Thank you for choosing AHUZA. Your order is confirmed.'}</p>
-            <p><strong>{formatPaymentAmount(paymentOrder.amount)}</strong>{paymentOrder.paymentReference ? ` · Reference ${paymentOrder.paymentReference}` : ` · Order ${paymentOrder.orderId.slice(0, 8)}`}</p>
-            {paymentOrder.items && <div className="payment-success-items" aria-label="Order summary">{paymentOrder.items.map((item, index) => <p key={`${item.name}-${index}`}>{item.quantity} × {item.name}{item.size ? ` · Size ${item.size}` : ''}</p>)}</div>}
-            <p>Please check your email for the payment confirmation and invoice. If you don’t see them, check your spam or promotions folder.</p>
-            <div className="payment-success-actions"><button className="dark-button" type="button" onClick={closePaymentSuccess}>Continue shopping</button><button className="invoice-button" type="button" onClick={() => { closePaymentSuccess(); openCustomerPage('orders'); }}>View orders</button></div>
-          </div>
-        </div>
-      </main>}
+      {orderSuccessPage && paymentOrder?.paymentMethod === 'upi' && paymentStatus === 'paid' && <PaymentSuccess
+        orderId={paymentOrder.orderId} amount={formatPaymentAmount(paymentOrder.amount)} reference={paymentOrder.paymentReference}
+        items={paymentOrder.items} needsReview={paymentOrderStatus === 'cancelled'}
+        onContinueShopping={closePaymentSuccess} onViewOrders={() => { closePaymentSuccess(); openCustomerPage('orders'); }}
+      />}
       {cartOpen && <div className="overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setCartOpen(false); }}>
         <aside ref={cartDrawer} className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="bag-title">
           <div className="drawer-heading"><div><p className="eyebrow dark-eyebrow">AHUZA Apparel</p><h2 id="bag-title">{storefrontText('bagTitle')} <span>({cartCount})</span></h2></div><button className="icon-button" aria-label="Close bag" onClick={() => setCartOpen(false)}><X size={21} /></button></div>

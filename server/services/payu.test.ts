@@ -200,6 +200,9 @@ test('PayU webhook confirms the matching order only after server-side verificati
     assert.equal(payment.amount, 261345);
     assert.equal(payment.paymentForm.fields.amount, '2613.45');
     assert.equal('PAYU_MERCHANT_SALT' in payment.paymentForm.fields, false);
+    const statusUrl = `${base}/api/payments/orders/${payment.orderId}/status`;
+    assert.equal((await originalFetch(statusUrl)).status, 401);
+    assert.equal((await (await originalFetch(statusUrl, { headers: { Cookie: cookie } })).json() as { status: string }).status, 'pending');
 
     const fields = payment.paymentForm.fields;
     const callback: Record<string, string> = {
@@ -261,6 +264,7 @@ test('PayU webhook confirms the matching order only after server-side verificati
     assert.equal(returned.headers.get('location'), '/order-success');
     const stored = (await getDatabase()).orders.find((entry) => entry.id === payment.orderId);
     assert.equal(stored?.paymentStatus, 'paid');
+    assert.equal((await (await originalFetch(statusUrl, { headers: { Cookie: cookie } })).json() as { status: string }).status, 'paid');
     assert.equal(stored?.paymentVerificationMethod, 'payu');
     assert.equal(stored?.manualPaymentReference, '987654321');
     assert.equal((await getDatabase()).orderEmailNotifications?.filter((entry) => entry.orderId === payment.orderId && entry.kind === 'payment_confirmed').length, 1);

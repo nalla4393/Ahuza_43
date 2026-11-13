@@ -203,6 +203,11 @@ webhook notifications alone never mark an order paid. Keep the merchant salt
 server-side and configure the callback/webhook URLs to the publicly reachable
 HTTPS address for this deployment.
 
+After PayU returns the customer to the store, the checkout checks the order
+status and shows the payment-success page only once payment is verified.
+Refreshing that page rechecks the status; customers can view their order or
+continue shopping from there.
+
 The PayU key, salt, mode, and endpoints can also be edited or deleted from
 **Owner Studio → Payments → PayU India checkout**. Credentials entered there
 are encrypted in the storefront database using `PAYMENT_CONFIG_KEY` (or
