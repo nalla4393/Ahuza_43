@@ -153,6 +153,7 @@ export default function App() {
     copy: defaultStorefrontCopy,
   });
   const [products, setProducts] = useState<Product[]>([]);
+  const openedSeoRoute = useRef(false);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [notice, setNotice] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
@@ -336,6 +337,20 @@ export default function App() {
       return [{ ...line, quantity: Math.min(line.quantity, product.stock, 10) }];
     }));
   }, [products]);
+
+  useEffect(() => {
+    if (openedSeoRoute.current || sitePublished !== true || products.length === 0) return;
+    const pathname = window.location.pathname;
+    const product = products.find((entry) => pathname === `/products/${encodeURIComponent(entry.id)}`);
+    const category = products.find((entry) => pathname === `/collections/${encodeURIComponent(entry.category)}`)?.category;
+    if (product) openProduct(product);
+    if (category) {
+      setSelectedCategory(category);
+      setCatalogOpen(true);
+      window.setTimeout(() => document.querySelector('#shop')?.scrollIntoView(), 0);
+    }
+    openedSeoRoute.current = true;
+  }, [products, sitePublished]);
 
   // Remember the pending order while the customer is in the payment app.
   useEffect(() => {
@@ -913,10 +928,10 @@ export default function App() {
     const quantityLimit = Math.min(product.stock, 10);
     return <article className="product" key={product.id}>
       <div className={`product-image image-tone-${index % 4} ${product.images?.length ? 'has-upload' : ''}`} style={product.images?.length ? undefined : { background: displayBackground }}>
-        <button type="button" className="product-open" onClick={(event) => { animateAssistant(product, event.currentTarget, 'preview'); openProduct(product); }} aria-label={`View ${product.name}`}>
+        <a href={`/products/${encodeURIComponent(product.id)}`} className="product-open" onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); animateAssistant(product, event.currentTarget, 'preview'); openProduct(product); }} aria-label={`View ${product.name}`}>
           <img src={displayImage.url} srcSet={displayImage.srcSet} sizes="(max-width: 760px) 50vw, 25vw" alt={product.name} loading="lazy" className={product.images?.length ? 'upload-product-image' : 'ghost-product-image'} />
           {hoverImage && <img src={hoverImage.url} srcSet={hoverImage.srcSet} sizes="(max-width: 760px) 50vw, 25vw" alt="" loading="lazy" className="upload-product-image hover-image" />}
-        </button>
+        </a>
         <span className="product-number">{String(index + 1).padStart(2, '0')}</span>
         <button className={`wishlist-toggle ${wishlist.includes(product.id) ? 'saved' : ''}`} type="button" onClick={() => void toggleWishlist(product)} aria-pressed={wishlist.includes(product.id)} aria-label={wishlist.includes(product.id) ? `Remove ${product.name} from wishlist` : `Save ${product.name} to wishlist`}><Heart size={17} fill={wishlist.includes(product.id) ? 'currentColor' : 'none'} /></button>
         <button className={`quick-add ${product.stock < 1 ? 'notify-stock-button' : ''}`} type="button" onClick={(event) => product.stock < 1 ? void requestRestockAlert(product) : product.sizes?.length ? openProduct(product) : addToBag(product, undefined, event.currentTarget.closest<HTMLElement>('.product-image') || event.currentTarget)} disabled={product.stock > 0 && quantityInBag >= quantityLimit} aria-label={product.stock < 1 ? `Notify me when ${product.name} is back in stock` : quantityInBag >= quantityLimit ? `${product.name} quantity limit reached` : product.sizes?.length ? `Choose a size for ${product.name}` : `Add ${product.name} to cart`}>
@@ -924,12 +939,12 @@ export default function App() {
         </button>
       </div>
       {gallery.length > 1 && <div className="card-swatches" role="group" aria-label={`${product.name} views`}>{gallery.slice(0, 6).map((image, position) => <button key={image.id} type="button" className={position === (cardView[product.id] ?? 0) ? 'active' : ''} aria-label={`Show view ${position + 1} of ${product.name}`} aria-pressed={position === (cardView[product.id] ?? 0)} onClick={() => setCardView((views) => ({ ...views, [product.id]: position }))}><img src={image.thumb} alt="" loading="lazy" /></button>)}{gallery.length > 6 && <small>+{gallery.length - 6}</small>}</div>}
-      <button className="product-meta" type="button" onClick={() => openProduct(product)} aria-label={`View details for ${product.name}`}>
+      <a className="product-meta" href={`/products/${encodeURIComponent(product.id)}`} onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); openProduct(product); }} aria-label={`View details for ${product.name}`}>
         <span><strong>{product.name}</strong><small>{product.description}</small></span>
         <b>{formatPrice(product.price)} <small>{usdEstimate(product.price)}</small></b>
         {product.sizes?.length ? <em className="card-sizes">Sizes: {product.sizes.join(' · ')}</em> : null}
         {product.stock < 1 ? <em className="card-stock out">{storefrontText('cardOutOfStock')}</em> : product.stock <= 3 ? <em className="card-stock low">Only {product.stock} left</em> : null}
-      </button>
+      </a>
     </article>;
   }
 
@@ -1067,7 +1082,7 @@ export default function App() {
       <footer className="site-footer">
         <div className="footer-top"><button type="button" className="back-to-top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>{storefrontText('footerBackToTop')}</button></div>
         <div className="footer-columns">
-          <div><h3>{storefrontText('footerShopTitle')}</h3><ul><li><button type="button" onClick={() => openCollection('All', 'All')}>{storefrontText('footerAllWear')}</button></li>{categories.slice(1).map((category) => <li key={category}><button type="button" onClick={() => openCollection(category, 'All')}>{category}</button></li>)}<li><button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}>{storefrontText('footerNewArrivals')}</button></li></ul></div>
+          <div><h3>{storefrontText('footerShopTitle')}</h3><ul><li><button type="button" onClick={() => openCollection('All', 'All')}>{storefrontText('footerAllWear')}</button></li>{categories.slice(1).map((category) => <li key={category}><a href={`/collections/${encodeURIComponent(category)}`} onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); openCollection(category, 'All'); }}>{category}</a></li>)}<li><button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}>{storefrontText('footerNewArrivals')}</button></li></ul></div>
           <div><h3>{storefrontText('footerCustomerTitle')}</h3><ul><li><a href="#contact">{storefrontText('footerContact')}</a></li><li><a href={`mailto:${storefrontText('contactEmail')}`}>{storefrontText('contactEmail')}</a></li><li><a href={`tel:${storefrontText('contactPhone').replace(/\s+/g, '')}`}>{storefrontText('contactPhone')}</a></li></ul></div>
           <div><h3>AHUZA</h3><p className="footer-tagline">{storefrontText('footerBrandTagline')}</p><p className="footer-loc">{storefrontText('footerLocation')}</p></div>
         </div>
@@ -1184,7 +1199,7 @@ export default function App() {
               </div>
               {showAll && layout.thumbnails && <div className="pd-thumbs">{gallery.map((image, position) => <button key={image.id} type="button" className={position === detailIndex ? 'active' : ''} onClick={() => { setDetailIndex(position); setZoomed(false); }} aria-label={`Show image ${position + 1}`}><img src={image.thumb} alt="" /></button>)}</div>}
             </div>
-            <div className="pd-copy"><p className="eyebrow dark-eyebrow">{detailProduct.category} · {detailProduct.sku}</p><h2>{detailProduct.name}</h2><p>{detailProduct.description}</p><strong>{formatPrice(detailProduct.price)}</strong><small>{usdEstimate(detailProduct.price)}</small>
+            <div className="pd-copy"><p className="eyebrow dark-eyebrow">{detailProduct.category} · {detailProduct.sku}</p><h2>{detailProduct.name}</h2><p>{detailProduct.description}</p><strong>{formatPrice(detailProduct.price)}</strong><small>{usdEstimate(detailProduct.price)}</small><a className="text-link" href={`/products/${encodeURIComponent(detailProduct.id)}`} target="_blank" rel="noopener noreferrer">Open shareable product page</a>
               {detailProduct.sizes?.length ? <fieldset className="customer-size-picker"><legend>{storefrontText('detailChooseSize')}</legend><div className="size-options">{detailProduct.sizes.map((size) => <button key={size} type="button" className={`size-option size-choice ${selectedSize === size ? 'selected' : ''}`} aria-pressed={selectedSize === size} onClick={() => setSelectedSize(size)}>{size}</button>)}</div></fieldset> : null}
               {detailProduct.stock < 1 ? <button className="dark-button" type="button" onClick={() => void requestRestockAlert(detailProduct)}>{storefrontText('detailNotify')}</button> : <button className="dark-button" type="button" disabled={Boolean(detailProduct.sizes?.length && !selectedSize)} onClick={(event) => { const image = event.currentTarget.closest('.product-detail')?.querySelector<HTMLElement>('.pd-main'); addToBag(detailProduct, selectedSize || undefined, image || event.currentTarget); setDetailProduct(null); }}>{detailProduct.sizes?.length && !selectedSize ? storefrontText('detailChooseSizeButton') : storefrontText('addToCart')}</button>}</div>
           </section>

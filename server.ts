@@ -15,6 +15,7 @@ import { startGmailPaymentAlertWatcher } from './server/services/gmailPaymentAle
 import { sendRestockAlerts } from './server/services/stock-alerts.js';
 import { paymentWebhook } from './server/services/webhookVerifier.js';
 import { getDatabase } from './server/services/database.js';
+import { createSeoRouter } from './server/seo.js';
 
 const app = express();
 const FileStore = createFileStore(session);
@@ -81,6 +82,8 @@ app.use('/uploads', express.static(uploadRoot, { index: false, dotfiles: 'deny',
 app.use('/api', api);
 const frontendPath = path.resolve('dist');
 if (existsSync(frontendPath)) {
+  app.use(createSeoRouter(frontendPath, getDatabase));
+  app.use('/order-success', (_request, response, next) => { response.set('X-Robots-Tag', 'noindex'); next(); });
   app.use(express.static(frontendPath, { index: false, maxAge: isProduction ? '1h' : 0 }));
   app.get(/.*/, (_request, response) => response.sendFile(path.join(frontendPath, 'index.html')));
 } else {

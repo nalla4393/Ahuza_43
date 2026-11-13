@@ -222,6 +222,16 @@ requires both credentials for the selected mode and replaces the previous pair.
 Keep the previous credentials secure, and resolve outstanding transactions
 before switching, because verification uses the currently selected environment.
 
+### Search and sharing
+
+Active products and categories have shareable `/products/<id>` and
+`/collections/<category>` pages with server-rendered metadata. The live
+`/sitemap.xml` is generated from the active catalog, and product schema uses
+the current INR price and availability. Product ratings are not published as
+product schema because existing reviews are attached to orders, not products.
+Submit the sitemap in Google Search Console and validate product URLs with
+Google's Rich Results Test and social preview debuggers.
+
 The Owner Studio payment review assistant ranks exact-amount Gmail alert
 candidates using any trusted bank transaction timestamp and the order's stock
 reservation window. It also queues customer-submitted screenshots for owner
