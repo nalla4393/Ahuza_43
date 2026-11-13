@@ -92,10 +92,22 @@ test('Owner Studio can create, edit, and delete encrypted PayU settings', async 
     assert.notEqual(stored?.payuMerchantKeyEnc, payload.merchantKey);
     assert.notEqual(stored?.payuMerchantSaltEnc, payload.merchantSalt);
 
+    const sameMode = await fetch(base, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ ...payload, merchantKey: '', merchantSalt: '' }),
+    });
+    assert.equal(sameMode.status, 200);
+    for (const credentials of [{ merchantKey: '', merchantSalt: '' }, { merchantKey: 'live-key', merchantSalt: '' }, { merchantKey: '', merchantSalt: 'live-salt' }]) {
+      const rejected = await fetch(base, { method: 'PUT', headers, body: JSON.stringify({ ...payload, ...credentials, mode: 'production' }) });
+      assert.equal(rejected.status, 400);
+      assert.match((await rejected.json() as { error: string }).error, /key and salt/);
+      assert.equal((await (await fetch(base, { headers })).json() as { settings: { mode: string } }).settings.mode, 'test');
+    }
     const edited = await fetch(base, {
       method: 'PUT',
       headers,
-      body: JSON.stringify({ ...payload, merchantKey: '', merchantSalt: '', mode: 'production' }),
+      body: JSON.stringify({ ...payload, merchantKey: 'live-key', merchantSalt: 'live-salt', mode: 'production' }),
     });
     assert.equal(edited.status, 200);
     assert.equal((await edited.json() as { settings: { mode: string } }).settings.mode, 'production');

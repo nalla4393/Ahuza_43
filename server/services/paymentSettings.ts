@@ -80,6 +80,9 @@ export async function savePayUSettings(input: {
   webhookUrl: string;
 }): Promise<PayUSettingsStatus> {
   const current = await getPayUSettings();
+  if (current && current.mode !== input.mode && (!input.merchantKey.trim() || !input.merchantSalt.trim())) {
+    throw new Error('Enter both the merchant key and salt for the selected PayU environment');
+  }
   const merchantKey = input.merchantKey.trim() || current?.merchantKey || '';
   const merchantSalt = input.merchantSalt.trim() || current?.merchantSalt || '';
   if (!merchantKey || !merchantSalt) throw new Error('Enter both PayU merchant credentials to enable PayU');

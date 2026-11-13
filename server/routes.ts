@@ -1041,7 +1041,7 @@ api.put('/owner/payment-provider/payu', requireOwner, ownerLimit, async (request
     });
     response.json({ settings, activeProvider: await activePaymentProvider() });
   } catch (error) {
-    if (error instanceof Error && error.message === 'Enter both PayU merchant credentials to enable PayU') {
+    if (error instanceof Error && ['Enter both PayU merchant credentials to enable PayU', 'Enter both the merchant key and salt for the selected PayU environment'].includes(error.message)) {
       response.status(400).json({ error: error.message });
       return;
     }

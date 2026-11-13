@@ -214,6 +214,14 @@ are restored. If older Owner Studio settings select manual UPI, save PayU
 settings in Owner Studio to replace them; those saved settings override
 environment credentials.
 
+To find sandbox credentials, switch the PayU dashboard to **Test Mode** and
+open **Developer → API Keys**. Use the key and **Salt-32 bit** shown there
+([PayU instructions](https://docs.payu.in/docs/generate-test-merchant-key-and-salt)).
+Owner Studio stores one credential pair at a time: switching environments
+requires both credentials for the selected mode and replaces the previous pair.
+Keep the previous credentials secure, and resolve outstanding transactions
+before switching, because verification uses the currently selected environment.
+
 The Owner Studio payment review assistant ranks exact-amount Gmail alert
 candidates using any trusted bank transaction timestamp and the order's stock
 reservation window. It also queues customer-submitted screenshots for owner
