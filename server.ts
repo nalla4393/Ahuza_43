@@ -10,7 +10,7 @@ import { uploadRoot } from './server/services/images.js';
 import { api, expireReservationsOnStartup } from './server/routes.js';
 import { expirePendingOrders, startFollowUpScheduler } from './server/services/integrations.js';
 import { startSocialScheduler } from './server/services/social.js';
-import { reconcileInstamojoOrders, reconcilePayUPayments } from './server/services/paymentSync.js';
+import { reconcilePayUPayments } from './server/services/paymentSync.js';
 import { startGmailPaymentAlertWatcher } from './server/services/gmailPaymentAlerts.js';
 import { sendRestockAlerts } from './server/services/stock-alerts.js';
 import { paymentWebhook } from './server/services/webhookVerifier.js';
@@ -104,7 +104,7 @@ app.use((error: unknown, _request: express.Request, response: express.Response, 
 await getDatabase();
 void expireReservationsOnStartup().catch((error) => console.error('Reservation cleanup failed:', error));
 startGmailPaymentAlertWatcher();
-const paymentSyncTimer = setInterval(() => void Promise.all([reconcileInstamojoOrders(), reconcilePayUPayments()]).catch((error) => console.error('Payment reconcile failed:', error)), 15 * 1000);
+const paymentSyncTimer = setInterval(() => void reconcilePayUPayments().catch((error) => console.error('Payment reconcile failed:', error)), 15 * 1000);
 paymentSyncTimer.unref();
 const reservationTimer = setInterval(() => void expirePendingOrders().catch((error) => console.error('Reservation cleanup failed:', error)), 60 * 1000);
 reservationTimer.unref();

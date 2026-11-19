@@ -190,7 +190,7 @@ export const defaultStorefrontCopy = Object.fromEntries(
 const obsoleteStorefrontCopy: Partial<Record<StorefrontCopyId, string[]>> = {
   bagShippingNote: ['₹100 shipping below ₹2,500 Complimentary shipping at or above ₹2,500 No discounts or additional taxes are currently applied'],
   checkoutUpiNote: [
-    'Payment remains pending until Instamojo confirms it',
+    'Payment remains pending until PayU confirms it',
     'UPI opens directly in your app Payment remains pending until AHUZA manually verifies the bank settlement',
   ],
   payAppOpened: [

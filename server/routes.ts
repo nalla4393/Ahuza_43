@@ -12,10 +12,9 @@ import { publishSocialPost, runSchedule, socialStatus, validateSchedule } from '
 import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
 import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
-import { instamojoAmountInPaise, instamojoWebhookConfigured, verifyInstamojoWebhook, instamojoWebhookFailureReason } from './services/instamojo.js';
 import { createPayUCheckout, payuAmountInPaise, payuConfigured, verifyPayUResponseHash } from './services/payu.js';
 import { customerDataConfigured, decryptCustomerValue, encryptCustomerValue, isValidUpiId } from './services/customerData.js';
-import { confirmInstamojoWebhookPayment, confirmPayUWebhookPayment, confirmUpiPaymentByOwner, outOfStockItems, syncInstamojoPayment, syncPayUPayment } from './services/paymentSync.js';
+import { confirmPayUWebhookPayment, confirmUpiPaymentByOwner, outOfStockItems, syncPayUPayment } from './services/paymentSync.js';
 import { activePaymentProvider, deletePayUSettings, getPayUSettingsStatus, savePayUSettings } from './services/paymentSettings.js';
 import { gmailPaymentAlertsConfigured } from './services/gmailPaymentAlerts.js';
 import { buildInvoicePdf } from './services/invoice.js';
@@ -103,7 +102,7 @@ api.use(async (request, response, next) => {
   const paymentReadOnly = (method === 'GET' && path === '/payments/config')
     || (method === 'GET' && /^\/payments\/orders\/[^/]+\/status$/.test(path))
     || (method === 'POST' && /^\/payments\/orders\/[^/]+\/cancel$/.test(path));
-  const paymentWebhook = method === 'POST' && ['/payments/instamojo/webhook', '/payments/payu/webhook', '/payments/payu/callback'].includes(path);
+  const paymentWebhook = method === 'POST' && ['/payments/payu/webhook', '/payments/payu/callback'].includes(path);
   const customerAccount = (method === 'GET' && path === '/auth/me')
     || (method === 'POST' && (path === '/auth/login' || path === '/auth/logout'));
   const existingOrders = (method === 'GET' && (path === '/orders' || /^\/orders\/[^/]+(?:\/invoice)?$/.test(path)))
@@ -468,38 +467,6 @@ api.get('/payments/config', async (_request, response) => {
   response.json({ configured, automaticVerification: configured, provider: 'payu' });
 });
 
-api.post('/payments/instamojo/webhook', express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {
-  if (!instamojoWebhookConfigured()) { console.error('Instamojo webhook rejected: INSTAMOJO_SALT is not set'); response.status(503).json({ error: 'Instamojo webhook verification is not configured' }); return; }
-  const payload = request.body as Record<string, unknown>;
-  if (!verifyInstamojoWebhook(payload)) { console.error(`Instamojo webhook rejected: ${instamojoWebhookFailureReason(payload)}`); response.status(400).json({ error: 'Invalid Instamojo webhook signature' }); return; }
-
-  const requestId = payload.payment_request_id;
-  const paymentId = payload.payment_id;
-  if (typeof requestId !== 'string') { response.status(400).json({ error: 'Instamojo payment request ID is missing' }); return; }
-  const order = (await getDatabase()).orders.find((entry) => entry.instamojoRequestId === requestId);
-  if (!order) {
-    console.error('Signed Instamojo webhook has no matching order:', requestId);
-    response.status(200).json({ received: true });
-    return;
-  }
-  if (payload.status !== 'Credit') { response.status(200).json({ received: true }); return; }
-
-  const amount = instamojoAmountInPaise(payload.amount);
-  if (typeof paymentId !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(paymentId)
-      || amount !== order.amount || payload.currency !== 'INR' || payload.purpose !== `AHUZA order ${order.id}`) {
-    console.error(`Signed Instamojo webhook does not match order ${order.id}`);
-    response.status(200).json({ received: true });
-    return;
-  }
-
-  const confirmed = await confirmInstamojoWebhookPayment(requestId, amount, paymentId);
-  if (!confirmed) {
-    const current = (await getDatabase()).orders.find((entry) => entry.id === order.id);
-    if (current?.paymentStatus !== 'paid') console.error(`Signed Instamojo credit for order ${order.id} could not be applied; owner review required`);
-  }
-  response.status(200).json({ received: true });
-});
-
 api.post('/payments/payu/callback', express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {
   const payload = request.body as Record<string, unknown>;
   if (!await verifyPayUResponseHash(payload)) {
@@ -558,7 +525,7 @@ api.post('/payments/orders/:id/proof', requireCustomer, paymentLimit, express.ra
   if (!Buffer.isBuffer(request.body)) { response.status(415).json({ error: 'Upload a JPEG or PNG payment screenshot' }); return; }
   const existing = (await getDatabase()).orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!existing) { response.status(404).json({ error: 'Order not found' }); return; }
-  if (existing.paymentMethod !== 'upi' || existing.instamojoRequestId || existing.payuTxnId || existing.paymentStatus === 'paid'
+  if (existing.paymentMethod !== 'upi' || existing.payuTxnId || existing.paymentStatus === 'paid'
     || !['pending_payment', 'cancelled'].includes(existing.status)) {
     response.status(409).json({ error: 'This order cannot accept a payment screenshot' }); return;
   }
@@ -577,7 +544,7 @@ api.post('/payments/orders/:id/proof', requireCustomer, paymentLimit, express.ra
   try {
     const updated = await mutateDatabase((database) => {
       const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
-      if (!order || order.paymentMethod !== 'upi' || order.instamojoRequestId || order.payuTxnId
+      if (!order || order.paymentMethod !== 'upi' || order.payuTxnId
         || order.paymentStatus === 'paid' || !['pending_payment', 'cancelled'].includes(order.status)) return false;
       previousProof = order.manualPaymentProof;
       order.manualPaymentProof = proof;
@@ -597,7 +564,6 @@ api.post('/payments/orders/:id/proof', requireCustomer, paymentLimit, express.ra
 
 api.get('/payments/orders/:id/status', requireCustomer, paymentLimit, async (request, response) => {
   await expirePendingOrders();
-  await syncInstamojoPayment(String(request.params.id), request.session.userId!).catch((error) => console.error('Instamojo status sync failed:', error));
   await syncPayUPayment(String(request.params.id), request.session.userId!).catch((error) => console.error('PayU status sync failed:', error));
   const order = (await getDatabase()).orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
@@ -640,7 +606,6 @@ api.get('/orders/:id', requireCustomer, async (request, response) => {
 api.get('/orders', requireCustomer, async (request, response) => {
   const pending = (await getDatabase()).orders.filter((order) => order.userId === request.session.userId && order.paymentMethod === 'upi' && order.paymentStatus !== 'paid' && ['pending_payment', 'cancelled'].includes(order.status));
   await Promise.all(pending.flatMap((order) => [
-    syncInstamojoPayment(order.id, request.session.userId!).catch((error) => console.error('Instamojo order list sync failed:', error)),
     syncPayUPayment(order.id, request.session.userId!).catch((error) => console.error('PayU order list sync failed:', error)),
   ]));
   const database = await getDatabase();
@@ -957,7 +922,7 @@ api.get('/owner/payment-alerts', requireOwner, ownerLimit, async (_request, resp
       ...alert,
       candidates: rankPaymentCandidates(alert, database.orders
         .filter((order) => order.paymentMethod === 'upi'
-          && !order.payuTxnId && !order.instamojoRequestId
+          && !order.payuTxnId
           && order.amount === alert.amount
           && order.paymentStatus !== 'paid'
           && ['pending_payment', 'cancelled'].includes(order.status)

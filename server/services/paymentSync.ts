@@ -1,5 +1,4 @@
 import { getDatabase, isUnreviewedBankPaymentAlert, mutateDatabase, type Database, type Order } from './database.js';
-import { getInstamojoStatus, instamojoConfigured } from './instamojo.js';
 import { getPayUStatus, payuConfigured } from './payu.js';
 import { enqueueOrderEmail } from './integrations.js';
 
@@ -22,10 +21,10 @@ async function finalizeVerifiedPayment(
   amount: number,
   transactionReference: string | undefined,
   userId?: string,
-  provider: 'instamojo' | 'payu' = 'instamojo',
+  provider: 'payu' = 'payu',
 ): Promise<boolean> {
   const matches = (entry: Order) =>
-    entry.id === orderId && (provider === 'payu' ? entry.payuTxnId : entry.instamojoRequestId) === requestId && entry.amount === amount
+    entry.id === orderId && entry.payuTxnId === requestId && entry.amount === amount
     && (userId === undefined || entry.userId === userId);
   const result = await mutateDatabase((database): Confirmation | null => {
     const order = database.orders.find(matches);
@@ -66,22 +65,6 @@ async function finalizeVerifiedPayment(
   return result.kind === 'confirmed';
 }
 
-export async function confirmInstamojoWebhookPayment(requestId: string, amount: number, transactionReference: string): Promise<boolean> {
-  const order = (await getDatabase()).orders.find((entry) => entry.instamojoRequestId === requestId);
-  if (!order || order.paymentMethod !== 'upi' || order.amount !== amount || !OPEN_STATUSES.includes(order.status)) return false;
-  return finalizeVerifiedPayment(order.id, requestId, amount, transactionReference);
-}
-
-export async function syncInstamojoPayment(orderId: string, userId?: string): Promise<boolean> {
-  if (!instamojoConfigured()) return false;
-  const order = (await getDatabase()).orders.find((entry) => entry.id === orderId && (userId === undefined || entry.userId === userId));
-  if (!order || order.paymentMethod !== 'upi' || order.paymentStatus === 'paid' || !order.instamojoRequestId || !OPEN_STATUSES.includes(order.status)) return false;
-
-  const remote = await getInstamojoStatus(order.instamojoRequestId, order.amount);
-  if (!remote.confirmed) return false;
-  return finalizeVerifiedPayment(order.id, order.instamojoRequestId, order.amount, remote.transactionReference, userId);
-}
-
 export async function confirmPayUWebhookPayment(txnid: string): Promise<boolean> {
   const order = (await getDatabase()).orders.find((entry) => entry.payuTxnId === txnid);
   if (!order || order.paymentMethod !== 'upi' || !OPEN_STATUSES.includes(order.status)) return false;
@@ -96,19 +79,6 @@ export async function syncPayUPayment(orderId: string, userId?: string): Promise
   const remote = await getPayUStatus(order.payuTxnId, order.amount);
   if (!remote.confirmed) return false;
   return finalizeVerifiedPayment(order.id, order.payuTxnId, order.amount, remote.transactionReference, userId, 'payu');
-}
-
-export async function reconcileInstamojoOrders(): Promise<void> {
-  if (!instamojoConfigured()) return;
-  const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
-  const candidates = (await getDatabase()).orders.filter((order) => order.instamojoRequestId && order.paymentMethod === 'upi' && order.paymentStatus !== 'paid'
-    && (order.status === 'pending_payment' || (order.status === 'cancelled' && Date.parse(order.createdAt) >= recentCutoff)));
-  for (const candidate of candidates) {
-    await syncInstamojoPayment(candidate.id).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`Instamojo reconcile failed for order ${candidate.id}:`, message);
-    });
-  }
 }
 
 export async function reconcilePayUPayments(): Promise<void> {
@@ -128,7 +98,7 @@ export async function confirmUpiPaymentByOwner(orderId: string, transactionRefer
   const result = await mutateDatabase((database) => {
     const current = database.orders.find((entry) => entry.id === orderId);
     if (!current || current.paymentMethod !== 'upi') return 'Only UPI orders can be confirmed here' as const;
-    if (current.instamojoRequestId || current.payuTxnId) return 'Online provider payments must be verified with their provider' as const;
+    if (current.payuTxnId) return 'Online provider payments must be verified with their provider' as const;
     if (current.paymentStatus === 'paid') return 'This order is already paid' as const;
     if (!OPEN_STATUSES.includes(current.status)) return 'This order cannot be confirmed in its current status' as const;
     if (!/^[a-zA-Z0-9-]{6,100}$/.test(transactionReference)) return 'Enter a valid bank transaction reference' as const;

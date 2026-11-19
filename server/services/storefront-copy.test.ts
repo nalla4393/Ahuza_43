@@ -35,6 +35,6 @@ test('replaces only the obsolete UPI checkout message', () => {
   const merged = mergeStorefrontCopy(legacy);
   assert.equal(merged.checkoutUpiNote, defaultStorefrontCopy.checkoutUpiNote);
   assert.equal(merged.payAppOpened, defaultStorefrontCopy.payAppOpened);
-  assert.equal(mergeStorefrontCopy({ checkoutUpiNote: 'Payment remains pending until Instamojo confirms it' }).checkoutUpiNote, defaultStorefrontCopy.checkoutUpiNote);
+  assert.equal(mergeStorefrontCopy({ checkoutUpiNote: 'Payment remains pending until PayU confirms it' }).checkoutUpiNote, defaultStorefrontCopy.checkoutUpiNote);
   assert.equal(mergeStorefrontCopy({ checkoutUpiNote: 'Custom payment information' }).checkoutUpiNote, 'Custom payment information');
 });

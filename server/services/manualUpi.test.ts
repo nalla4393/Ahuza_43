@@ -44,7 +44,7 @@ test('manual UPI configuration fails closed and link contains the server amount 
     assert.equal(paymentProvider(), 'manual_upi');
     process.env.PAYMENT_PROVIDER = 'unknown';
     assert.equal(paymentProvider(), 'manual_upi');
-    process.env.PAYMENT_PROVIDER = 'instamojo';
+    process.env.PAYMENT_PROVIDER = 'payu';
     assert.equal(paymentProvider(), 'manual_upi');
     delete process.env.PAYMENT_PROVIDER;
     assert.equal(paymentProvider(), 'manual_upi');
