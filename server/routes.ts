@@ -13,8 +13,9 @@ import { createRule, listAutomations, runAutomations, validateRule } from './ser
 import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
 import { instamojoAmountInPaise, instamojoWebhookConfigured, verifyInstamojoWebhook, instamojoWebhookFailureReason } from './services/instamojo.js';
-import { createPayUCheckout, payuAmountInPaise, payuConfigured, verifyPayUResponseHash } from './services/payu.js';
+import { payuAmountInPaise, verifyPayUResponseHash } from './services/payu.js';
 import { customerDataConfigured, decryptCustomerValue, encryptCustomerValue, isValidUpiId } from './services/customerData.js';
+import { paymentProvider } from './services/manualUpi.js';
 import { confirmInstamojoWebhookPayment, confirmPayUWebhookPayment, confirmUpiPaymentByOwner, outOfStockItems, syncInstamojoPayment, syncPayUPayment } from './services/paymentSync.js';
 import { activePaymentProvider, deletePayUSettings, getPayUSettingsStatus, savePayUSettings } from './services/paymentSettings.js';
 import { gmailPaymentAlertsConfigured } from './services/gmailPaymentAlerts.js';
@@ -338,9 +339,6 @@ api.delete('/wishlist/:productId', requireCustomer, async (request, response) =>
 async function createPaymentOrder(request: Request, response: Response): Promise<void> {
   const paymentMethod = request.body?.paymentMethod;
   if (paymentMethod !== 'upi' && paymentMethod !== 'cod') { response.status(400).json({ error: 'Choose UPI or cash on delivery' }); return; }
-  if (paymentMethod === 'upi' && !await payuConfigured()) {
-    response.status(503).json({ error: 'UPI payment is unavailable: PayU configuration is incomplete' }); return;
-  }
   const rawPayerUpi = request.body?.payerUpiId;
   const payerUpiId = typeof rawPayerUpi === 'string' ? rawPayerUpi.trim() : '';
   if (paymentMethod === 'upi' && payerUpiId && !isValidUpiId(payerUpiId)) { response.status(400).json({ error: 'Enter a valid UPI ID such as name@bank, or leave it blank' }); return; }
@@ -397,9 +395,6 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   const subtotalAmount = orderItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0) * 100;
   if (!Number.isSafeInteger(subtotalAmount) || subtotalAmount < 100) { response.status(400).json({ error: 'Order total is invalid' }); return; }
   const customerEmail = (await getDatabase()).customers.find((entry) => entry.id === request.session.userId)?.email;
-  if (paymentMethod === 'upi' && !customerEmail) {
-    response.status(409).json({ error: 'A customer email is required for PayU checkout' }); return;
-  }
   const localOrderId = randomUUID();
   const paymentReference = `AHUZA-${randomUUID().replaceAll('-', '').slice(0, 20).toUpperCase()}`;
   const persisted = await mutateDatabase((database) => {
@@ -421,7 +416,6 @@ async function createPaymentOrder(request: Request, response: Response): Promise
       amount, subtotalAmount, shippingAmount, discountAmount: 0, taxAmount: 0,
       currency: 'INR', status: paymentMethod === 'cod' ? 'confirmed' : 'pending_payment', paymentStatus: 'pending', paymentMethod,
       ...(paymentMethod === 'upi' ? { paymentReference, reservationExpiresAt: expiresAt } : {}),
-      ...(paymentMethod === 'upi' ? { payuTxnId: `AH${randomUUID().replaceAll('-', '').slice(0, 20)}` } : {}),
       ...(paymentMethod === 'upi' && payerUpiId && customerDataConfigured() ? { payerUpiIdEnc: encryptCustomerValue(payerUpiId) } : {}),
       marketingConsent: request.body?.marketingConsent === true,
       createdAt: new Date(now).toISOString(),
@@ -448,28 +442,17 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     response.status(201).json({ orderId: localOrderId, paymentMethod, status: 'confirmed', amount, currency: 'INR' });
     return;
   }
-  if (customerEmail) {
-    try {
-      const checkout = await createPayUCheckout(placed, customerEmail);
-      if (customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
-      void enqueueOrderEmail(localOrderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
-      response.status(201).json({
-        orderId: localOrderId, paymentMethod, paymentReference, provider: 'payu',
-        paymentForm: checkout, amount, currency: 'INR', expiresAt: placed.reservationExpiresAt,
-        status: 'pending', items: placed.items.map(({ name, quantity, size }) => ({ name, quantity, size })),
-      });
-    } catch (error) {
-      console.error(`PayU checkout creation failed for order ${localOrderId}:`, error);
-      response.status(503).json({ error: 'Could not start PayU checkout' });
-    }
-    return;
-  }
-  response.status(503).json({ error: 'PayU is not configured for UPI checkout' });
+  if (customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
+  void enqueueOrderEmail(localOrderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
+  response.status(201).json({
+    orderId: localOrderId, paymentMethod, paymentReference, provider: 'manual_upi',
+    amount, currency: 'INR', expiresAt: placed.reservationExpiresAt,
+    status: 'pending', items: placed.items.map(({ name, quantity, size }) => ({ name, quantity, size })),
+  });
 }
 
-api.get('/payments/config', async (_request, response) => {
-  const configured = await payuConfigured();
-  response.json({ configured, automaticVerification: configured, provider: 'payu' });
+api.get('/payments/config', (_request, response) => {
+  response.json({ configured: true, automaticVerification: false, provider: paymentProvider() });
 });
 
 api.post('/payments/instamojo/webhook', express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {
@@ -757,7 +740,7 @@ api.patch('/owner/site-status', requireOwner, ownerLimit, async (request, respon
 api.get('/owner/inventory', requireOwner, ownerLimit, async (_request, response) => response.json({ products: (await getDatabase()).products }));
 
 api.post('/owner/inventory', requireOwner, ownerLimit, async (request, response) => {
-  const { name, description, price, sku, stock, category, imageUrl, ghostMannequin, images, mainImageId, active, sizes } = request.body || {};
+  const { name, description, price, sku, stock, category, imageUrl, ghostMannequin, images, mainImageId, active, sizes, fabric, pattern, components, bulletPoints } = request.body || {};
   const hasImages = Array.isArray(images) && images.length > 0;
   if (!stringValue(name, 120) || !stringValue(description, 1000) || !Number.isFinite(price) || price <= 0 || price > 10000000 || !stringValue(sku, 80) || !Number.isInteger(stock) || stock < 0 || stock > 100000 || !stringValue(category, 80) || (!hasImages && !httpsUrl(imageUrl))) {
     response.status(400).json({ error: 'Provide a title, description, positive price, SKU, stock, category, and at least one uploaded image' }); return;
@@ -766,9 +749,10 @@ api.post('/owner/inventory', requireOwner, ownerLimit, async (request, response)
   if (sizes !== undefined && !validProductSizes(sizes)) { response.status(400).json({ error: 'Sizes must be a list of up to 20 unique labels, each 1 to 20 characters' }); return; }
   if (active !== undefined && typeof active !== 'boolean') { response.status(400).json({ error: 'Status must be Published or Unpublished' }); return; }
   if (ghostMannequin !== undefined && !validGhostMannequin(ghostMannequin)) { response.status(400).json({ error: 'Ghost mannequin metadata is invalid' }); return; }
+  if (!validProductDetails({ fabric, pattern, components, bulletPoints })) { response.status(400).json({ error: 'Product details must have text fields of at most 200 characters and up to 10 bullet points of 300 characters each' }); return; }
   const product = await mutateDatabase((database) => {
     if (database.products.some((entry) => entry.sku.toLowerCase() === sku.trim().toLowerCase())) return null;
-    const created: Product = { id: randomUUID(), name: name.trim(), description: description.trim(), price, sku: sku.trim(), stock, category: category.trim(), imageUrl: imageUrl || '', active: active ?? true, ghostMannequin: { tags: [], ...(ghostMannequin as Product['ghostMannequin'] | undefined) }, ...(sizes?.length ? { sizes } : {}) };
+    const created: Product = { id: randomUUID(), name: name.trim(), description: description.trim(), price, sku: sku.trim(), stock, category: category.trim(), imageUrl: imageUrl || '', active: active ?? true, ghostMannequin: { tags: [], ...(ghostMannequin as Product['ghostMannequin'] | undefined) }, ...(sizes?.length ? { sizes } : {}), ...cleanProductDetails({ fabric, pattern, components, bulletPoints }) };
     if (images !== undefined && !applyImages(database, created, images, mainImageId)) return 'bad-images' as const;
     database.products.push(created);
     return created;
@@ -779,7 +763,7 @@ api.post('/owner/inventory', requireOwner, ownerLimit, async (request, response)
 });
 
 api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, response) => {
-  const { name, description, price, category, imageUrl, stock, sku, active, ghostMannequin, images, mainImageId, sizes } = request.body || {};
+  const { name, description, price, category, imageUrl, stock, sku, active, ghostMannequin, images, mainImageId, sizes, fabric, pattern, components, bulletPoints } = request.body || {};
   if (images !== undefined && !validImageIds(images, mainImageId)) { response.status(400).json({ error: 'Image list is invalid' }); return; }
   if (sizes !== undefined && !validProductSizes(sizes)) { response.status(400).json({ error: 'Sizes must be a list of up to 20 unique labels, each 1 to 20 characters' }); return; }
   if (name !== undefined && !stringValue(name, 120)) { response.status(400).json({ error: 'Title must be 1 to 120 characters' }); return; }
@@ -791,6 +775,7 @@ api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, resp
   if (sku !== undefined && !stringValue(sku, 80)) { response.status(400).json({ error: 'SKU must be 1 to 80 characters' }); return; }
   if (active !== undefined && typeof active !== 'boolean') { response.status(400).json({ error: 'Active must be a boolean' }); return; }
   if (ghostMannequin !== undefined && !validGhostMannequin(ghostMannequin)) { response.status(400).json({ error: 'Ghost mannequin metadata is invalid' }); return; }
+  if (!validProductDetails({ fabric, pattern, components, bulletPoints })) { response.status(400).json({ error: 'Product details must have text fields of at most 200 characters and up to 10 bullet points of 300 characters each' }); return; }
   const removedImageIds: string[] = [];
   const result = await mutateDatabase<{ product: Product } | { error: string; status: number }>((database) => {
     const product = database.products.find((entry) => entry.id === request.params.id);
@@ -806,6 +791,7 @@ api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, resp
     if (sku !== undefined) product.sku = sku.trim();
     if (active !== undefined) product.active = active;
     if (sizes !== undefined) product.sizes = sizes;
+    Object.assign(product, cleanProductDetails({ fabric, pattern, components, bulletPoints }));
     if (ghostMannequin !== undefined) product.ghostMannequin = { ...product.ghostMannequin, ...ghostMannequin } as Product['ghostMannequin'];
     if (images !== undefined) {
       if (!applyImages(database, product, images, mainImageId)) return { error: 'One or more images were not uploaded successfully', status: 400 };
@@ -819,6 +805,21 @@ api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, resp
   if (result.product.stock > 0) void sendRestockAlerts().catch((error) => console.error('Restock alert scan failed:', error));
   response.json(result);
 });
+
+function validProductDetails(details: Record<string, unknown>): boolean {
+  return ['fabric', 'pattern', 'components'].every((key) => details[key] === undefined || (typeof details[key] === 'string' && details[key].length <= 200))
+    && (details.bulletPoints === undefined || (Array.isArray(details.bulletPoints) && details.bulletPoints.length <= 10
+      && details.bulletPoints.every((point: unknown) => stringValue(point, 300))));
+}
+
+function cleanProductDetails(details: { fabric?: string; pattern?: string; components?: string; bulletPoints?: string[] }): Pick<Product, 'fabric' | 'pattern' | 'components' | 'bulletPoints'> {
+  return {
+    ...(details.fabric !== undefined ? { fabric: details.fabric.trim() } : {}),
+    ...(details.pattern !== undefined ? { pattern: details.pattern.trim() } : {}),
+    ...(details.components !== undefined ? { components: details.components.trim() } : {}),
+    ...(details.bulletPoints !== undefined ? { bulletPoints: details.bulletPoints.map((point) => point.trim()) } : {}),
+  };
+}
 
 function validProductSizes(sizes: unknown): sizes is string[] {
   return Array.isArray(sizes) && sizes.length <= 20

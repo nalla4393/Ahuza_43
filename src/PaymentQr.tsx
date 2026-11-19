@@ -1,8 +1,6 @@
-import { QRCodeSVG } from 'qrcode.react';
-
-export default function PaymentQr({ payUrl }: { payUrl: string }) {
+export default function PaymentQr({ reference }: { reference?: string }) {
   return <div className="payment-qr">
-    <QRCodeSVG value={payUrl} size={224} marginSize={4} level="M" role="img" aria-label="UPI payment QR code" />
-    <p>Scan with your UPI app on another device. Check the recipient and amount before paying.</p>
+    <img src="/ahuza-upi-qr.png" width="224" height="224" alt="AHUZA UPI payment QR code" />
+    <p>Scan with your UPI app, enter the exact amount shown above, and use order reference {reference || 'shown above'} as the payment note.</p>
   </div>;
 }

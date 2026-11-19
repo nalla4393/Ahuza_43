@@ -9,6 +9,7 @@ import session from 'express-session';
 import sharp from 'sharp';
 import { manualUpiAdjustment, manualUpiConfiguration, manualUpiLink, paymentProvider } from './manualUpi.js';
 import type { Order } from './database.js';
+import { defaultShippingCharge, shippingForSubtotal } from '../../shared/shipping.js';
 
 test('manual UPI adjustments avoid recent amounts, report exhaustion and can be reused later', () => {
   const now = Date.parse('2026-01-02T10:00:00Z');
@@ -40,11 +41,11 @@ test('manual UPI configuration fails closed and link contains the server amount 
     assert.equal(link.searchParams.get('tn'), 'AHUZA-123');
     assert.throws(() => manualUpiLink(config, NaN, 'ref'));
     process.env.PAYMENT_PROVIDER = 'payu';
-    assert.equal(paymentProvider(), 'payu');
+    assert.equal(paymentProvider(), 'manual_upi');
     process.env.PAYMENT_PROVIDER = 'unknown';
-    assert.equal(paymentProvider(), 'invalid');
+    assert.equal(paymentProvider(), 'manual_upi');
     process.env.PAYMENT_PROVIDER = 'instamojo';
-    assert.equal(paymentProvider(), 'invalid');
+    assert.equal(paymentProvider(), 'manual_upi');
     delete process.env.PAYMENT_PROVIDER;
     assert.equal(paymentProvider(), 'manual_upi');
   } finally {
@@ -54,7 +55,7 @@ test('manual UPI configuration fails closed and link contains the server amount 
   }
 });
 
-test('new manual checkout is disabled while legacy UPI orders remain reviewable', async () => {
+test('new UPI checkout uses manual QR confirmation while legacy orders remain reviewable', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'ahuza-manual-upi-'));
   process.env.DATA_FILE = path.join(directory, 'db.json');
   process.env.PAYMENT_PROVIDER = 'manual_upi';
@@ -81,14 +82,23 @@ test('new manual checkout is disabled while legacy UPI orders remain reviewable'
   const base = `http://127.0.0.1:${address.port}`;
   try {
     const config = await (await fetch(`${base}/api/payments/config`)).json() as { configured: boolean; automaticVerification: boolean; provider: string };
-    assert.deepEqual(config, { configured: false, automaticVerification: false, provider: 'payu' });
+    assert.deepEqual(config, { configured: true, automaticVerification: false, provider: 'manual_upi' });
     const login = await fetch(`${base}/test-login`, { method: 'POST' });
     const cookie = login.headers.get('set-cookie')?.split(';')[0];
     assert.ok(cookie);
     const headers = { 'Content-Type': 'application/json', Cookie: cookie };
     const shippingAddress = { name: 'Test Customer', addressLine1: 'Test Street', city: 'Chennai', state: 'Tamil Nadu', postalCode: '600001', country: 'India', phone: '9876543210' };
-    const create = () => fetch(`${base}/api/payments/orders`, { method: 'POST', headers, body: JSON.stringify({ paymentMethod: 'upi', items: [{ productId: 'soft-form-shirt', quantity: 1 }], shippingAddress }) });
-    assert.equal((await create()).status, 503);
+    const database = await getDatabase();
+    const product = database.products.find((entry) => entry.id === 'soft-form-shirt')!;
+    const expectedShippingAmount = shippingForSubtotal(product.price * 100, database.shippingChargeAmount ?? defaultShippingCharge);
+    const create = () => fetch(`${base}/api/payments/orders`, { method: 'POST', headers, body: JSON.stringify({ paymentMethod: 'upi', expectedShippingAmount, items: [{ productId: product.id, quantity: 1 }], shippingAddress }) });
+    const created = await create();
+    assert.equal(created.status, 201);
+    const order = await created.json() as { orderId: string; paymentReference: string; provider: string; amount: number; paymentForm?: unknown };
+    assert.equal(order.provider, 'manual_upi');
+    assert.equal(order.amount, product.price * 100 + expectedShippingAmount);
+    assert.ok(order.paymentReference);
+    assert.equal(order.paymentForm, undefined);
     let nextLegacyOrder = 0;
     const createLegacy = async () => mutateDatabase((database) => {
       const index = ++nextLegacyOrder;
@@ -104,7 +114,6 @@ test('new manual checkout is disabled while legacy UPI orders remain reviewable'
       database.orders.push(order);
       return { orderId: order.id, amount: order.amount };
     });
-    const order = await createLegacy();
     const second = await createLegacy();
     const status = await fetch(`${base}/api/payments/orders/${order.orderId}/status`, { headers });
     assert.equal((await status.json() as { status: string }).status, 'pending');

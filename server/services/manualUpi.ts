@@ -12,9 +12,8 @@ export function manualUpiAdjustment(baseAmount: number, orders: Order[], now: nu
   return null;
 }
 
-export function paymentProvider(): 'manual_upi' | 'payu' | 'invalid' {
-  const provider = process.env.PAYMENT_PROVIDER?.trim() || 'manual_upi';
-  return provider === 'manual_upi' || provider === 'payu' ? provider : 'invalid';
+export function paymentProvider(): 'manual_upi' {
+  return 'manual_upi';
 }
 
 export function manualUpiConfiguration(): { vpa: string; payee: string } | null {

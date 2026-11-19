@@ -60,6 +60,14 @@
 .pd-thumbs img{width:100%;height:100%;object-fit:cover;display:block}
 .pd-copy{display:grid;gap:12px;align-content:start}
 .pd-copy h2{margin:0}
+.pd-details{display:grid;gap:16px;padding:14px 0;border-block:1px solid var(--line);font-size:13px;line-height:1.5}
+.pd-attributes{display:grid;gap:8px;margin:0}
+.pd-attributes div{display:grid;grid-template-columns:minmax(90px,130px) 1fr;gap:12px}
+.pd-attributes dt,.pd-highlights h3{font-weight:700}
+.pd-attributes dd{margin:0;overflow-wrap:anywhere}
+.pd-highlights h3{margin:0 0 6px;font-size:13px}
+.pd-highlights ul{margin:0;padding-left:20px}
+.pd-highlights li+li{margin-top:4px}
 @media(max-width:760px){
   .product-grid{gap:26px var(--pi-gap-mobile,11px)}
   .product-image{width:var(--pi-size-mobile,100%);aspect-ratio:var(--pi-ratio-mobile,3/4)}

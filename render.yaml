@@ -23,6 +23,16 @@ services:
         generateValue: true
       - key: OWNER_API_KEY
         sync: false
+      - key: PAYU_MERCHANT_KEY
+        sync: false
+      - key: PAYU_MERCHANT_SALT
+        sync: false
+      - key: PAYU_MODE
+        value: test
+      - key: PAYU_CALLBACK_URL
+        value: https://www.ahuzawear.com/api/payments/payu/callback
+      - key: PAYU_WEBHOOK_URL
+        value: https://www.ahuzawear.com/api/payments/payu/webhook
       - key: GEMINI_API_KEY
         sync: false
       - key: OPENAI_API_KEY
