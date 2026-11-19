@@ -3,10 +3,10 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Database, Product } from './services/database.js';
 import { mergeStorefrontCopy, type StorefrontCopy } from '../shared/storefrontCopy.js';
+import { findProductBySlug, productPath } from '../shared/productUrl.js';
 
 const origin = 'https://www.ahuzawear.com';
 const defaultImage = `${origin}/ahuza-brand-social.jpg`;
-const productPath = (id: string) => `/products/${encodeURIComponent(id)}`;
 const categoryPath = (category: string) => `/collections/${encodeURIComponent(category)}`;
 const escape = (value: string) => value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 
@@ -43,7 +43,7 @@ function meta(title: string, description: string, url: string, image: string, ty
 }
 
 function productPage(product: Product, copy: StorefrontCopy): { head: string; body: string } {
-  const url = origin + productPath(product.id);
+  const url = origin + productPath(product);
   const image = imageUrl(product);
   const title = `${product.name} | AHUZA Apparel`;
   const description = product.description || `Shop ${product.name} at AHUZA Apparel.`;
@@ -79,7 +79,7 @@ function collectionPage(category: string, products: Product[]): { head: string; 
   const title = `${category} | AHUZA Apparel`;
   const description = `Explore ${category} at AHUZA Apparel. Shop our collection online.`;
   const schema = { '@context': 'https://schema.org', '@type': 'CollectionPage', name: title, description, url };
-  const items = products.map((product) => `<li><a href="${escape(productPath(product.id))}">${escape(product.name)}</a></li>`).join('');
+  const items = products.map((product) => `<li><a href="${escape(productPath(product))}">${escape(product.name)}</a></li>`).join('');
   return { head: meta(title, description, url, imageUrl(products[0]!), 'website', schema), body: `<main><a href="/">AHUZA Apparel</a><h1>${escape(category)}</h1><p>${escape(description)}</p><ul>${items}</ul></main>` };
 }
 
@@ -95,11 +95,26 @@ export function createSeoRouter(frontendPath: string, loadDatabase: () => Promis
     }
     const products = database.products.filter((product) => product.active);
     const categories = [...new Set(products.map((product) => product.category).filter(Boolean))];
-    const urls = ['/', '/terms.html', ...products.map((product) => productPath(product.id)), ...categories.map(categoryPath)];
+    const urls = ['/', '/terms.html', ...products.map(productPath), ...categories.map(categoryPath)];
     response.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.map((url) => `<url><loc>${escape(origin + url)}</loc></url>`).join('')}</urlset>`);
   });
 
-  router.get(['/products/:id', '/collections/:category'], async (request, response) => {
+  router.get('/', async (_request, response) => {
+    const database = await loadDatabase();
+    response.set('Cache-Control', 'no-store');
+    const template = await readFile(path.join(frontendPath, 'index.html'), 'utf8');
+    if (database.sitePublished === false) {
+      response.set('X-Robots-Tag', 'noindex');
+      response.type('html').send(template);
+      return;
+    }
+    const links = database.products.filter((product) => product.active)
+      .map((product) => `<li><a href="${escape(productPath(product))}">${escape(product.name)}</a></li>`).join('');
+    if (!template.includes('<div id="root"></div>')) throw new Error('Storefront root is missing');
+    response.type('html').send(template.replace('<div id="root"></div>', () => `<div id="root"><main><h1>AHUZA Wear</h1><ul>${links}</ul></main></div>`));
+  });
+
+  router.get(['/products/:slug', '/collections/:category'], async (request, response) => {
     const database = await loadDatabase();
     response.set('Cache-Control', 'no-store');
     if (database.sitePublished === false) {
@@ -108,7 +123,7 @@ export function createSeoRouter(frontendPath: string, loadDatabase: () => Promis
       return;
     }
     const products = database.products.filter((product) => product.active);
-    const product = request.params.id && products.find((entry) => entry.id === request.params.id);
+    const product = typeof request.params.slug === 'string' ? findProductBySlug(products, request.params.slug) : undefined;
     const category = typeof request.params.category === 'string' ? request.params.category : '';
     const matches = category ? products.filter((entry) => entry.category === category) : [];
     if (!product && !matches.length) {
@@ -116,12 +131,16 @@ export function createSeoRouter(frontendPath: string, loadDatabase: () => Promis
       response.status(404).type('text').send('Page not found');
       return;
     }
+    if (product && request.path !== productPath(product)) {
+      response.redirect(301, productPath(product));
+      return;
+    }
     const page = product ? productPage(product, mergeStorefrontCopy(database.content.copy)) : collectionPage(category, matches);
     const template = await readFile(path.join(frontendPath, 'index.html'), 'utf8');
     if (!template.includes('<!-- SEO_START -->') || !template.includes('<!-- SEO_END -->') || !template.includes('<div id="root"></div>')) {
       throw new Error('Storefront SEO template markers are missing');
     }
-    const html = template.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/, () => page.head)
+    const html = template.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/, () => `<!-- SEO_START -->${page.head}<!-- SEO_END -->`)
       .replace('<div id="root"></div>', () => `<div id="root">${page.body}</div>`);
     response.type('html').send(html);
   });

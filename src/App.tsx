@@ -13,10 +13,14 @@ import PaymentSuccess from './PaymentSuccess';
 import { defaultImageSettings, imageSettingsVars, mainImage, srcSet, type ImageSettings, type ProductImage } from './imageTypes';
 import { defaultStorefrontCopy, type StorefrontCopyId } from '../shared/storefrontCopy';
 import { freeShippingThreshold, maxShippingCharge, shippingForSubtotal } from '../shared/shipping';
+import { productPath } from '../shared/productUrl';
+import type { ProductDetails as ProductDetailsData } from '../shared/productDetails';
+import ProductDetails from './ProductDetails';
+import { copyProductLink, shareProduct } from './productSharing';
 
 const OwnerStudio = lazy(() => import('./OwnerStudio'));
 
-type Product = {
+type Product = ProductDetailsData & {
   id: string;
   name: string;
   description: string;
@@ -182,7 +186,8 @@ export default function App() {
     copy: defaultStorefrontCopy,
   });
   const [products, setProducts] = useState<Product[]>([]);
-  const openedSeoRoute = useRef(false);
+  const [routePath, setRoutePath] = useState(window.location.pathname);
+  const seoRouteInitialized = useRef(false);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [notice, setNotice] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
@@ -240,6 +245,7 @@ export default function App() {
   const [ownerStudioOpen, setOwnerStudioOpen] = useState(false);
   const [imageSettings, setImageSettings] = useState<ImageSettings>(defaultImageSettings);
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
+  const [sharingMessage, setSharingMessage] = useState('');
   const [detailIndex, setDetailIndex] = useState(0);
   const [cardView, setCardView] = useState<Record<string, number>>({});
   const [selectedSize, setSelectedSize] = useState('');
@@ -374,18 +380,54 @@ export default function App() {
   }, [products]);
 
   useEffect(() => {
-    if (openedSeoRoute.current || sitePublished !== true || products.length === 0) return;
-    const pathname = window.location.pathname;
-    const product = products.find((entry) => pathname === `/products/${encodeURIComponent(entry.id)}`);
-    const category = products.find((entry) => pathname === `/collections/${encodeURIComponent(entry.category)}`)?.category;
-    if (product) openProduct(product);
+    if (sitePublished !== true) { setDetailProduct(null); return; }
+    const product = products.find((entry) => routePath === productPath(entry));
+    const category = products.find((entry) => routePath === `/collections/${encodeURIComponent(entry.category)}`)?.category;
+    setDetailProduct(product || null);
+    setDetailIndex(0);
+    setSelectedSize('');
+    setZoomed(false);
+    setSharingMessage('');
     if (category) {
       setSelectedCategory(category);
       setCatalogOpen(true);
       window.setTimeout(() => document.querySelector('#shop')?.scrollIntoView(), 0);
     }
-    openedSeoRoute.current = true;
-  }, [products, sitePublished]);
+  }, [products, sitePublished, routePath]);
+
+  useEffect(() => {
+    if (!seoRouteInitialized.current) { seoRouteInitialized.current = true; return; }
+    const controller = new AbortController();
+    void fetch(routePath, { signal: controller.signal }).then(async (response) => {
+      if (!response.ok) throw new Error(`SEO page returned ${response.status}`);
+      const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+      const markers = (head: HTMLHeadElement) => {
+        const walker = document.createTreeWalker(head, NodeFilter.SHOW_COMMENT);
+        let start: Node | null = null;
+        let end: Node | null = null;
+        while (walker.nextNode()) {
+          if (walker.currentNode.textContent?.trim() === 'SEO_START') start = walker.currentNode;
+          if (walker.currentNode.textContent?.trim() === 'SEO_END') { end = walker.currentNode; break; }
+        }
+        return { start, end };
+      };
+      const source = markers(page.head);
+      const target = markers(document.head);
+      if (!source.start || !source.end || !target.start || !target.end) throw new Error('SEO markers are missing');
+      const range = document.createRange();
+      range.setStartAfter(target.start);
+      range.setEndBefore(target.end);
+      range.deleteContents();
+      let node = source.start.nextSibling;
+      while (node && node !== source.end) {
+        target.end.parentNode!.insertBefore(document.importNode(node, true), target.end);
+        node = node.nextSibling;
+      }
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) console.error('Could not update page metadata:', error);
+    });
+    return () => controller.abort();
+  }, [routePath]);
 
   // Recheck the order after returning from the payment app or reloading the confirmation.
   useEffect(() => {
@@ -543,7 +585,10 @@ export default function App() {
   }, [paymentProofFile]);
 
   useEffect(() => {
-    const updateRoute = () => setOrderSuccessPage(window.location.pathname === '/order-success');
+    const updateRoute = () => {
+      setOrderSuccessPage(window.location.pathname === '/order-success');
+      setRoutePath(window.location.pathname);
+    };
     window.addEventListener('popstate', updateRoute);
     return () => window.removeEventListener('popstate', updateRoute);
   }, []);
@@ -551,6 +596,7 @@ export default function App() {
   useEffect(() => {
     if (!paymentOrder || paymentStatus !== 'paid' || paymentOrderStatus === 'cancelled') return;
     if (window.location.pathname !== '/order-success') window.history.pushState({ paymentSuccess: true }, '', '/order-success');
+    setRoutePath(window.location.pathname);
     setOrderSuccessPage(true);
   }, [paymentOrder?.orderId, paymentStatus, paymentOrderStatus]);
 
@@ -637,10 +683,39 @@ export default function App() {
   }
 
   function openProduct(product: Product) {
+    const path = productPath(product);
+    if (window.location.pathname !== path) {
+      window.history.pushState({ productReturnUrl: window.location.pathname + window.location.search + window.location.hash }, '', path);
+      setRoutePath(path);
+    }
     setDetailProduct(product);
     setDetailIndex(0);
     setSelectedSize('');
     setZoomed(false);
+    setSharingMessage('');
+  }
+
+  function closeProduct() {
+    const returnUrl = window.history.state?.productReturnUrl;
+    const destination = typeof returnUrl === 'string' && returnUrl.startsWith('/') && !returnUrl.startsWith('//') ? returnUrl : '/';
+    window.history.pushState({}, '', destination);
+    setRoutePath(window.location.pathname);
+    setDetailProduct(null);
+  }
+
+  async function handleProductSharing(product: Product, action: 'copy' | 'share') {
+    setSharingMessage('');
+    try {
+      if (action === 'copy') {
+        await copyProductLink(product, window.location.origin, navigator);
+        setSharingMessage('Product link copied.');
+      } else {
+        await shareProduct(product, window.location.origin, navigator);
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      setSharingMessage(error instanceof Error ? error.message : 'Could not share this product. Please try again.');
+    }
   }
 
   function animateAssistant(product: Product, source: HTMLElement, mode: AssistantTrip['mode']) {
@@ -990,6 +1065,7 @@ export default function App() {
 
   function closePaymentSuccess() {
     window.history.replaceState({}, '', '/');
+    setRoutePath('/');
     setReturnedPaymentId(null);
     setOrderSuccessPage(false);
     setPaymentOrder(null);
@@ -1068,7 +1144,7 @@ export default function App() {
     const quantityLimit = Math.min(product.stock, 10);
     return <article className="product" key={product.id}>
       <div className={`product-image image-tone-${index % 4} ${product.images?.length ? 'has-upload' : ''}`} style={product.images?.length ? undefined : { background: displayBackground }}>
-        <a href={`/products/${encodeURIComponent(product.id)}`} className="product-open" onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); animateAssistant(product, event.currentTarget, 'preview'); openProduct(product); }} aria-label={`View ${product.name}`}>
+        <a href={productPath(product)} className="product-open" onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); animateAssistant(product, event.currentTarget, 'preview'); openProduct(product); }} aria-label={`View ${product.name}`}>
           <img src={displayImage.url} srcSet={displayImage.srcSet} sizes="(max-width: 760px) 50vw, 25vw" alt={product.name} loading="lazy" className={product.images?.length ? 'upload-product-image' : 'ghost-product-image'} />
           {hoverImage && <img src={hoverImage.url} srcSet={hoverImage.srcSet} sizes="(max-width: 760px) 50vw, 25vw" alt="" loading="lazy" className="upload-product-image hover-image" />}
         </a>
@@ -1079,7 +1155,7 @@ export default function App() {
         </button>
       </div>
       {gallery.length > 1 && <div className="card-swatches" role="group" aria-label={`${product.name} views`}>{gallery.slice(0, 6).map((image, position) => <button key={image.id} type="button" className={position === (cardView[product.id] ?? 0) ? 'active' : ''} aria-label={`Show view ${position + 1} of ${product.name}`} aria-pressed={position === (cardView[product.id] ?? 0)} onClick={() => setCardView((views) => ({ ...views, [product.id]: position }))}><img src={image.thumb} alt="" loading="lazy" /></button>)}{gallery.length > 6 && <small>+{gallery.length - 6}</small>}</div>}
-      <a className="product-meta" href={`/products/${encodeURIComponent(product.id)}`} onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); openProduct(product); }} aria-label={`View details for ${product.name}`}>
+      <a className="product-meta" href={productPath(product)} onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); openProduct(product); }} aria-label={`View details for ${product.name}`}>
         <span><strong>{product.name}</strong><small>{product.description}</small></span>
         <b>{formatPrice(product.price)} <small>{usdEstimate(product.price)}</small></b>
         {product.sizes?.length ? <em className="card-sizes">Sizes: {product.sizes.join(' · ')}</em> : null}
@@ -1267,7 +1343,7 @@ export default function App() {
               {paymentProofError && <p className="payment-proof-error" role="alert">{paymentProofError}</p>}
             </section>}
             {paymentStatus === 'failed' && <p>{storefrontText('payFailureNote')}</p>}
-            {(paymentOrder.paymentMethod === 'cod' || paymentStatus === 'paid' || paymentStatus === 'cancelled' || paymentStatus === 'expired') && <button className="dark-button" type="button" onClick={() => { window.history.replaceState({}, '', '/'); setReturnedPaymentId(null); setPaymentOrder(null); setPaymentStatus('pending'); setCartOpen(false); }}>{paymentStatus === 'cancelled' ? storefrontText('payReturn') : 'Done'}</button>}
+            {(paymentOrder.paymentMethod === 'cod' || paymentStatus === 'paid' || paymentStatus === 'cancelled' || paymentStatus === 'expired') && <button className="dark-button" type="button" onClick={() => { window.history.replaceState({}, '', '/'); setRoutePath('/'); setReturnedPaymentId(null); setPaymentOrder(null); setPaymentStatus('pending'); setCartOpen(false); }}>{paymentStatus === 'cancelled' ? storefrontText('payReturn') : 'Done'}</button>}
             {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && paymentOrderStatus === 'cancelled' && <p className="payment-next-steps">Please contact AHUZA if you need an update about fulfillment or refund arrangements.</p>}
             {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && paymentOrderStatus !== 'cancelled' && <p className="payment-next-steps">Thank you for choosing AHUZA. Please check your email for payment confirmation and order approval. Your invoice and receipt are also available under Account › Order history. We’ll email you tracking details as soon as your order is on its way.</p>}
             {paymentOrder.paymentMethod === 'upi' && paymentOrder.provider === 'manual_upi' && paymentStatus !== 'paid' && <ManualPaymentInstructions email={storefrontText('contactEmail')} orderId={paymentOrder.orderId} />}
@@ -1320,24 +1396,27 @@ export default function App() {
         const layout = imageSettings.layout;
         const showAll = layout.mode === 'gallery' && gallery.length > 1;
         const current = gallery[Math.min(detailIndex, gallery.length - 1)]!;
-        return <div className="overlay product-detail-backdrop" onClick={() => setDetailProduct(null)}>
+        return <div className="overlay product-detail-backdrop" onClick={closeProduct}>
           <section className={`product-detail thumbs-${layout.thumbnailPlacement}`} role="dialog" aria-modal="true" aria-label={detailProduct.name} style={imageSettingsVars(imageSettings) as CSSProperties} onClick={(event) => event.stopPropagation()}>
-            <button className="icon-button dialog-close" aria-label="Close product" onClick={() => setDetailProduct(null)}><X size={20} /></button>
+            <button className="icon-button dialog-close" aria-label="Close product" onClick={closeProduct}><X size={20} /></button>
             <div className="pd-gallery">
               <div className={`pd-main ${layout.zoom ? 'can-zoom' : ''} ${zoomed ? 'is-zoomed' : ''}`} onClick={() => layout.zoom && setZoomed((value) => !value)}>
                 <img src={current.url} srcSet={current.srcSet} sizes="(max-width: 760px) 100vw, 50vw" alt={detailProduct.name} />
               </div>
               {showAll && layout.thumbnails && <div className="pd-thumbs">{gallery.map((image, position) => <button key={image.id} type="button" className={position === detailIndex ? 'active' : ''} onClick={() => { setDetailIndex(position); setZoomed(false); }} aria-label={`Show image ${position + 1}`}><img src={image.thumb} alt="" /></button>)}</div>}
             </div>
-            <div className="pd-copy"><p className="eyebrow dark-eyebrow">{detailProduct.category} · {detailProduct.sku}</p><h2>{detailProduct.name}</h2><p>{detailProduct.description}</p><strong>{formatPrice(detailProduct.price)}</strong><small>{usdEstimate(detailProduct.price)}</small><a className="text-link" href={`/products/${encodeURIComponent(detailProduct.id)}`} target="_blank" rel="noopener noreferrer">Open shareable product page</a>
+            <div className="pd-copy"><p className="eyebrow dark-eyebrow">{detailProduct.category} · {detailProduct.sku}</p><h2>{detailProduct.name}</h2><p>{detailProduct.description}</p><strong>{formatPrice(detailProduct.price)}</strong><small>{usdEstimate(detailProduct.price)}</small><p>{detailProduct.stock > 0 ? 'In stock' : 'Out of stock'}</p>
+              <ProductDetails product={detailProduct} text={storefrontText} />
+              <div className="product-sharing"><button className="text-link" type="button" onClick={() => void handleProductSharing(detailProduct, 'share')}>Share Product</button><button className="text-link" type="button" onClick={() => void handleProductSharing(detailProduct, 'copy')}>Copy Link</button></div>
+              {sharingMessage && <small role="status">{sharingMessage}</small>}
               {detailProduct.sizes?.length ? <fieldset className="customer-size-picker"><legend>{storefrontText('detailChooseSize')}</legend><div className="size-options">{detailProduct.sizes.map((size) => <button key={size} type="button" className={`size-option size-choice ${selectedSize === size ? 'selected' : ''}`} aria-pressed={selectedSize === size} onClick={() => setSelectedSize(size)}>{size}</button>)}</div></fieldset> : null}
-              {detailProduct.stock < 1 ? <button className="dark-button" type="button" onClick={() => void requestRestockAlert(detailProduct)}>{storefrontText('detailNotify')}</button> : <button className="dark-button" type="button" disabled={Boolean(detailProduct.sizes?.length && !selectedSize)} onClick={(event) => { const image = event.currentTarget.closest('.product-detail')?.querySelector<HTMLElement>('.pd-main'); addToBag(detailProduct, selectedSize || undefined, image || event.currentTarget); setDetailProduct(null); }}>{detailProduct.sizes?.length && !selectedSize ? storefrontText('detailChooseSizeButton') : storefrontText('addToCart')}</button>}</div>
+              {detailProduct.stock < 1 ? <button className="dark-button" type="button" onClick={() => void requestRestockAlert(detailProduct)}>{storefrontText('detailNotify')}</button> : <button className="dark-button" type="button" disabled={Boolean(detailProduct.sizes?.length && !selectedSize)} onClick={(event) => { const image = event.currentTarget.closest('.product-detail')?.querySelector<HTMLElement>('.pd-main'); addToBag(detailProduct, selectedSize || undefined, image || event.currentTarget); closeProduct(); }}>{detailProduct.sizes?.length && !selectedSize ? storefrontText('detailChooseSizeButton') : storefrontText('addToCart')}</button>}</div>
           </section>
         </div>;
       })()}
       {ownerStudioOpen && <Suspense fallback={<div className="store-maintenance" role="status">Opening Owner Studio…</div>}><OwnerStudio onClose={() => setOwnerStudioOpen(false)} onProductsChange={setProducts} onContentChange={setStoreContent} onSiteStatusChange={setSitePublished} onImageSettingsChange={setImageSettings} onShippingChargeChange={setShippingChargeAmount} /></Suspense>}
       {sitePublished && <CustomerSupportChat onOpenAccount={() => setAccountOpen(true)} avatarImageUrl={storeContent.chatbotImageUrl} />}
-      {sitePublished && <ShoppingAssistant trip={assistantTrip} onOpenBag={() => { setAssistantTrip(null); setDetailProduct(null); setCartOpen(true); }} />}
+      {sitePublished && <ShoppingAssistant trip={assistantTrip} onOpenBag={() => { setAssistantTrip(null); if (detailProduct) closeProduct(); setCartOpen(true); }} />}
     </main>
   );
 }

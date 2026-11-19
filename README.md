@@ -254,10 +254,13 @@ before switching, because verification uses the currently selected environment.
 
 ### Search and sharing
 
-Active products and categories have shareable `/products/<id>` and
-`/collections/<category>` pages with server-rendered metadata. The live
-`/sitemap.xml` is generated from the active catalog, and product schema uses
-the current INR price and availability. Product ratings are not published as
+Active products have descriptive `/products/<name>--<id>` URLs and categories
+have `/collections/<category>` pages with server-rendered metadata. The ID
+keeps duplicate names distinct; old ID-only links and links with an outdated
+product name redirect to the current URL. Product pages offer native sharing
+where supported and a copy-link button. The live `/sitemap.xml` is generated
+from the active catalog by Express, rather than a static file, and product schema
+uses the current INR price and availability. Product ratings are not published as
 product schema because existing reviews are attached to orders, not products.
 Submit the sitemap in Google Search Console and validate product URLs with
 Google's Rich Results Test and social preview debuggers.

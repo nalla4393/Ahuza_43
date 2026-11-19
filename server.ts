@@ -79,13 +79,16 @@ app.use(session({
 }));
 
 app.use('/uploads', express.static(uploadRoot, { index: false, dotfiles: 'deny', immutable: true, maxAge: '365d', setHeaders: (res) => res.setHeader('X-Content-Type-Options', 'nosniff') }));
-app.use('/api', api);
+app.use('/api', (_request, response, next) => { response.set('X-Robots-Tag', 'noindex, nofollow'); next(); }, api);
 const frontendPath = path.resolve('dist');
 if (existsSync(frontendPath)) {
   app.use(createSeoRouter(frontendPath, getDatabase));
   app.use('/order-success', (_request, response, next) => { response.set('X-Robots-Tag', 'noindex'); next(); });
   app.use(express.static(frontendPath, { index: false, maxAge: isProduction ? '1h' : 0 }));
-  app.get(/.*/, (_request, response) => response.sendFile(path.join(frontendPath, 'index.html')));
+  app.get(/.*/, (_request, response) => {
+    response.set('X-Robots-Tag', 'noindex, nofollow');
+    response.sendFile(path.join(frontendPath, 'index.html'));
+  });
 } else {
   app.use((_request, response) => response.status(404).json({ error: 'Not found.' }));
 }
