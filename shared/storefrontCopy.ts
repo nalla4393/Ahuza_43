@@ -55,7 +55,7 @@ export const storefrontCopyFields = [
   { id: 'footerBrandTagline', label: 'Footer brand tagline', group: 'Footer', defaultValue: 'Where Fashion Meets Passion' },
   { id: 'footerLocation', label: 'Footer location', group: 'Footer', defaultValue: 'Telangana, India' },
   { id: 'footerBackToTop', label: 'Back to top link', group: 'Footer', defaultValue: 'Back to top ↑' },
-  { id: 'headerBrandTagline', label: 'Header brand tagline', group: 'Footer', defaultValue: 'Celebrations start at Ahuza' },
+  { id: 'headerBrandTagline', label: 'Header brand tagline', group: 'Footer', defaultValue: 'Start ur celebrations' },
   { id: 'searchPlaceholder', label: 'Header search placeholder', group: 'Header & menu', defaultValue: 'Search for products, categories or fabrics' },
   { id: 'askAhuzaLabel', label: 'Ask Ahuza button', group: 'Header & menu', defaultValue: 'Ask Ahuza' },
   { id: 'megaCategoryTitle', label: 'Menu column: categories', group: 'Header & menu', defaultValue: 'Shop by category' },

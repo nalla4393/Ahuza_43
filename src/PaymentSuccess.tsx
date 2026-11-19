@@ -17,7 +17,7 @@ export default function PaymentSuccess({ orderId, amount, reference, items, need
 
   return <section className="payment-success-page" aria-labelledby="payment-success-title">
     <div className="payment-success-card">
-      <div className="payment-success-brand"><span>AHUZA</span><small>APPAREL</small></div>
+      <div className="payment-success-brand"><span>AHUZA</span></div>
       <div className="payment-success-body">
         <div className="payment-success-mark"><Check size={32} strokeWidth={2} aria-hidden="true" /></div>
         <p className="payment-success-eyebrow">PAYMENT VERIFIED</p>

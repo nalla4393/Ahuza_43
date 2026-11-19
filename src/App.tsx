@@ -955,7 +955,7 @@ export default function App() {
 
   return (
     <main>
-      {sitePublished === null ? <section className="store-maintenance"><p className="eyebrow">AHUZA APPAREL</p><h1>{storefrontText('statusChecking')}</h1><p>{storefrontText('statusWait')}</p></section> : sitePublished ? <>
+      {sitePublished === null ? <section className="store-maintenance"><p className="eyebrow">AHUZA</p><h1>{storefrontText('statusChecking')}</h1><p>{storefrontText('statusWait')}</p></section> : sitePublished ? <>
       <div className="announcement">{storeContent.announcement}</div>
       <header className="site-header">
         <button className="icon-button mobile-menu" type="button" aria-label="Open women's collection menu" aria-expanded={mobileMenuOpen} aria-controls="collection-drawer" onClick={() => setMobileMenuOpen(true)}><Menu size={22} /></button>
@@ -971,7 +971,7 @@ export default function App() {
             </div>
             : <button key={label} type="button" onClick={() => openNavItem(label)}>{label}</button>)}
         </nav>
-        <a className="wordmark" href="#home" aria-label="AHUZA home"><span className="wordmark-star" aria-hidden="true">☆</span><span className="wordmark-stack"><span className="wordmark-text">AHUZA</span><span className="wordmark-tagline">{storefrontText('headerBrandTagline')}</span></span></a>
+        <a className="wordmark" href="#home" aria-label="AHUZA home"><span className="wordmark-star" aria-hidden="true">☆</span><img src="/ahuza-brand-logo.png" alt="" className="brand-logo-image" /><span className="wordmark-stack"><span className="wordmark-text">huza</span><span className="wordmark-tagline">{storefrontText('headerBrandTagline')}</span></span></a>
         <form className="header-search" role="search" onSubmit={(event) => { event.preventDefault(); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>
           <label className="sr-only" htmlFor="header-search-input">Search AHUZA</label>
           <input id="header-search-input" type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); if (event.target.value) setCatalogOpen(true); }} placeholder={storefrontText('searchPlaceholder')} autoComplete="off" />
@@ -1091,7 +1091,7 @@ export default function App() {
           <div><h3>{storefrontText('footerCustomerTitle')}</h3><ul><li><a href="#contact">{storefrontText('footerContact')}</a></li><li><a href={`mailto:${storefrontText('contactEmail')}`}>{storefrontText('contactEmail')}</a></li><li><a href={`tel:${storefrontText('contactPhone').replace(/\s+/g, '')}`}>{storefrontText('contactPhone')}</a></li></ul></div>
           <div><h3>AHUZA</h3><p className="footer-tagline">{storefrontText('footerBrandTagline')}</p><p className="footer-loc">{storefrontText('footerLocation')}</p></div>
         </div>
-        <div className="footer-bottom"><a className="wordmark" href="#home">AHUZA</a><span>© AHUZA Apparel 2026</span><a className="footer-terms" href="/terms.html">Terms and Conditions</a><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
+        <div className="footer-bottom"><a className="wordmark" href="#home"><img src="/ahuza-a-icon.png" alt="" className="brand-logo-image" /><span className="wordmark-text">huza</span></a><span>© AHUZA 2026</span><a className="footer-terms" href="/terms.html">Terms and Conditions</a><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
       </footer>
 
       {orderSuccessPage && paymentOrder?.paymentMethod === 'upi' && paymentStatus === 'paid' && <PaymentSuccess
@@ -1101,7 +1101,7 @@ export default function App() {
       />}
       {cartOpen && <div className="overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setCartOpen(false); }}>
         <aside ref={cartDrawer} className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="bag-title">
-          <div className="drawer-heading"><div><p className="eyebrow dark-eyebrow">AHUZA Apparel</p><h2 id="bag-title">{storefrontText('bagTitle')} <span>({cartCount})</span></h2></div><button className="icon-button" aria-label="Close bag" onClick={() => setCartOpen(false)}><X size={21} /></button></div>
+          <div className="drawer-heading"><div><p className="eyebrow dark-eyebrow">AHUZA</p><h2 id="bag-title">{storefrontText('bagTitle')} <span>({cartCount})</span></h2></div><button className="icon-button" aria-label="Close bag" onClick={() => setCartOpen(false)}><X size={21} /></button></div>
           {paymentOrder ? <section className="payment-panel" aria-live="polite">
             {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && <CheckCircle2 className="payment-success-icon" size={46} aria-hidden="true" />}
             <p className="eyebrow dark-eyebrow">{paymentOrder.paymentMethod === 'cod' ? storefrontText('checkoutCod') : paymentOrder.provider === 'manual_upi' ? 'Ahuza Pay · UPI' : 'PayU checkout'}</p>
@@ -1174,7 +1174,7 @@ export default function App() {
         </section>
       </div>}
       </> : <section className="store-maintenance">
-        <p className="eyebrow">AHUZA APPAREL</p>
+        <p className="eyebrow">AHUZA</p>
         <h1>{storefrontText('maintenanceTitle')}</h1>
         <p>{storefrontText('maintenanceBody')}</p>
         <button className="dark-button" type="button" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button>
