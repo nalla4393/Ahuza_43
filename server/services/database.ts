@@ -106,6 +106,8 @@ export type Order = {
   paymentReference?: string;
   instamojoRequestId?: string;
   payuTxnId?: string;
+  payuCheckoutMode?: 'qr';
+  payuQr?: { state: 'starting' | 'ready' | 'error'; startedAt: string; value?: string; expiresAt?: string };
   payerUpiIdEnc?: string;
   paymentVerifiedAt?: string;
   manualPaymentReference?: string;

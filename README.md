@@ -210,8 +210,20 @@ status and shows the payment-success page only once payment is verified.
 Refreshing that page rechecks the status; customers can view their order or
 continue shopping from there. If browser storage is unavailable, the return
 link restores the order after the customer signs in with the account used to
-place it. A pending order can reopen its PayU checkout while its reservation
-is valid; customers should not retry if their bank has already debited them.
+place it. When enabled, new UPI orders use an order-specific PayU Dynamic QR and continue
+checking the PayU verification API after the customer scans it. On a phone,
+the same QR payment can be opened in a UPI app. The QR expires no later than
+30 minutes after generation and is not regenerated for the same order if
+generation fails or its outcome is uncertain; contact AHUZA if money was
+debited or the QR is unavailable. Older hosted PayU orders can still reopen
+their checkout while the reservation is valid.
+
+PayU must enable Dynamic QR (`DBQR`) for the merchant account. Test QR
+generation and a complete payment with PayU before enabling it in production;
+PayU notes that test-mode QR transactions may require their support team's
+assistance. See [PayU's Dynamic QR documentation](https://docs.payu.in/reference/dynamic-qr-generation-api).
+Set `PAYU_DYNAMIC_QR_ENABLED=true` to enable QR for new orders; without it,
+new orders continue to use PayU hosted checkout.
 
 The PayU key, salt, mode, and endpoints can also be edited or deleted from
 **Owner Studio → Payments → PayU India checkout**. Credentials entered there

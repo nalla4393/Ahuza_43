@@ -12,7 +12,7 @@ import { publishSocialPost, runSchedule, socialStatus, validateSchedule } from '
 import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
 import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
-import { createPayUCheckout, payuAmountInPaise, payuConfigured, verifyPayUResponseHash } from './services/payu.js';
+import { createPayUCheckout, createPayUQr, payuAmountInPaise, payuConfigured, verifyPayUResponseHash } from './services/payu.js';
 import { customerDataConfigured, decryptCustomerValue, encryptCustomerValue, isValidUpiId } from './services/customerData.js';
 import { confirmPayUWebhookPayment, confirmUpiPaymentByOwner, outOfStockItems, syncPayUPayment } from './services/paymentSync.js';
 import { activePaymentProvider, deletePayUSettings, getPayUSettingsStatus, savePayUSettings } from './services/paymentSettings.js';
@@ -401,6 +401,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   }
   const localOrderId = randomUUID();
   const paymentReference = `AHUZA-${randomUUID().replaceAll('-', '').slice(0, 20).toUpperCase()}`;
+  const usePayuQr = paymentMethod === 'upi' && process.env.PAYU_DYNAMIC_QR_ENABLED === 'true';
   const persisted = await mutateDatabase((database) => {
     const available = !outOfStockItems(database, { items: orderItems }).length && orderItems.every((item) => {
       const product = database.products.find((entry) => entry.id === item.productId && entry.active);
@@ -420,7 +421,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
       amount, subtotalAmount, shippingAmount, discountAmount: 0, taxAmount: 0,
       currency: 'INR', status: paymentMethod === 'cod' ? 'confirmed' : 'pending_payment', paymentStatus: 'pending', paymentMethod,
       ...(paymentMethod === 'upi' ? { paymentReference, reservationExpiresAt: expiresAt } : {}),
-      ...(paymentMethod === 'upi' ? { payuTxnId: `AH${randomUUID().replaceAll('-', '').slice(0, 20)}` } : {}),
+      ...(paymentMethod === 'upi' ? { payuTxnId: `AH${randomUUID().replaceAll('-', '').slice(0, 20)}`, ...(usePayuQr ? { payuCheckoutMode: 'qr' as const } : {}) } : {}),
       ...(paymentMethod === 'upi' && payerUpiId && customerDataConfigured() ? { payerUpiIdEnc: encryptCustomerValue(payerUpiId) } : {}),
       marketingConsent: request.body?.marketingConsent === true,
       createdAt: new Date(now).toISOString(),
@@ -453,7 +454,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     void enqueueOrderEmail(localOrderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
     response.status(201).json({
       orderId: localOrderId, paymentMethod, paymentReference, provider: 'payu',
-      paymentForm: checkout, amount, currency: 'INR', expiresAt: placed.reservationExpiresAt,
+      ...(usePayuQr ? { checkoutMode: 'qr' } : { paymentForm: checkout }), amount, currency: 'INR', expiresAt: placed.reservationExpiresAt,
       status: 'pending', items: placed.items.map(({ name, quantity, size }) => ({ name, quantity, size })),
     });
   } catch (error) {
@@ -521,12 +522,61 @@ api.post('/payments/orders', requireCustomer, paymentLimit, async (request, resp
   await createPaymentOrder(request, response);
 });
 
+api.post('/payments/orders/:id/qr', requireCustomer, paymentLimit, async (request, response) => {
+  await expirePendingOrders();
+  const startedAt = new Date().toISOString();
+  const result = await mutateDatabase((database) => {
+    const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
+    if (!order) return { kind: 'missing' as const };
+    if (order.payuCheckoutMode !== 'qr' || !order.payuTxnId || order.status !== 'pending_payment'
+      || !['pending', 'failed'].includes(order.paymentStatus || 'pending') || !order.reservationExpiresAt
+      || !Number.isFinite(Date.parse(order.reservationExpiresAt)) || Date.parse(order.reservationExpiresAt) <= Date.now()) return { kind: 'closed' as const };
+    if (order.payuQr) return { kind: 'existing' as const, qr: order.payuQr };
+    const customer = database.customers.find((entry) => entry.id === order.userId);
+    if (!customer?.email || !request.ip || !request.get('user-agent')) return { kind: 'unavailable' as const };
+    order.payuQr = { state: 'starting', startedAt };
+    return { kind: 'create' as const, order: structuredClone(order), email: customer.email, ip: request.ip, userAgent: request.get('user-agent')! };
+  });
+  if (result.kind === 'missing') { response.status(404).json({ error: 'Order not found' }); return; }
+  if (result.kind === 'closed') { response.status(409).json({ error: 'This payment request can no longer be used' }); return; }
+  if (result.kind === 'unavailable') { response.status(503).json({ error: 'Could not start PayU QR checkout. Contact AHUZA for help.' }); return; }
+  if (result.kind === 'existing') {
+    if (result.qr.state === 'ready' && result.qr.value && result.qr.expiresAt && Date.parse(result.qr.expiresAt) > Date.now()) {
+      response.set('Cache-Control', 'no-store').json({ qr: result.qr.value, expiresAt: result.qr.expiresAt }); return;
+    }
+    if (result.qr.state === 'starting' && Date.now() - Date.parse(result.qr.startedAt) < 30000) {
+      response.status(202).json({ pending: true }); return;
+    }
+    response.status(409).json({ error: 'This QR is unavailable or expired. Do not pay again if money was debited; contact AHUZA.' }); return;
+  }
+  try {
+    const qr = await createPayUQr(result.order, result.email, result.ip, result.userAgent);
+    const saved = await mutateDatabase((database) => {
+      const order = database.orders.find((entry) => entry.id === result.order.id && entry.userId === request.session.userId);
+      if (!order || order.status !== 'pending_payment' || !['pending', 'failed'].includes(order.paymentStatus || 'pending')
+        || order.payuQr?.state !== 'starting' || order.payuQr.startedAt !== startedAt
+        || !order.reservationExpiresAt || Date.parse(order.reservationExpiresAt) <= Date.now()) return false;
+      order.payuQr = { state: 'ready', startedAt, ...qr };
+      return true;
+    });
+    if (!saved) { response.status(409).json({ error: 'This payment request can no longer be used' }); return; }
+    response.set('Cache-Control', 'no-store').json({ qr: qr.value, expiresAt: qr.expiresAt });
+  } catch (error) {
+    console.error(`PayU QR generation failed for order ${result.order.id}:`, error);
+    await mutateDatabase((database) => {
+      const order = database.orders.find((entry) => entry.id === result.order.id);
+      if (order?.payuQr?.state === 'starting' && order.payuQr.startedAt === startedAt) order.payuQr.state = 'error';
+    });
+    response.status(503).json({ error: 'Could not create the PayU QR. Do not pay again if money was debited; contact AHUZA.' });
+  }
+});
+
 api.post('/payments/orders/:id/checkout', requireCustomer, paymentLimit, async (request, response) => {
   await expirePendingOrders();
   const database = await getDatabase();
   const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
-  if (order.paymentMethod !== 'upi' || !order.payuTxnId || order.status !== 'pending_payment'
+  if (order.paymentMethod !== 'upi' || !order.payuTxnId || order.payuCheckoutMode === 'qr' || order.status !== 'pending_payment'
     || !['pending', 'failed'].includes(order.paymentStatus || 'pending')
     || !order.reservationExpiresAt || !Number.isFinite(Date.parse(order.reservationExpiresAt)) || Date.parse(order.reservationExpiresAt) <= Date.now()) {
     response.status(409).json({ error: 'This payment request can no longer be used' }); return;

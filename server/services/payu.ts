@@ -72,6 +72,42 @@ export async function createPayUCheckout(order: Order, email: string): Promise<{
   return { action: payuCheckoutEndpoint(settings.mode), fields };
 }
 
+export async function createPayUQr(order: Order, email: string, clientIp: string, userAgent: string): Promise<{ value: string; expiresAt: string }> {
+  if (!clientIp || !userAgent || !order.reservationExpiresAt) throw new Error('PayU QR request is missing device or reservation information');
+  const checkout = await createPayUCheckout(order, email);
+  const remaining = Math.floor((Date.parse(order.reservationExpiresAt) - Date.now()) / 1000);
+  const expirySeconds = Math.min(1800, remaining);
+  if (!Number.isFinite(expirySeconds) || expirySeconds < 60) throw new Error('Not enough reservation time remains for a PayU QR');
+  const expiresAt = new Date(Date.now() + expirySeconds * 1000).toISOString();
+  const response = await fetch(checkout.action, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    body: new URLSearchParams({
+      ...checkout.fields, pg: 'DBQR', bankcode: 'UPIDBQR', txn_s2s_flow: '4',
+      expiry_time: String(expirySeconds), s2s_client_ip: clientIp, s2s_device_info: userAgent,
+    }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`PayU QR API returned HTTP ${response.status}`);
+  const data = object(await response.json());
+  const metadata = object(data?.metaData);
+  const result = object(data?.result);
+  if (!metadata || metadata.txnId !== order.payuTxnId || typeof metadata.txnStatus !== 'string'
+    || metadata.txnStatus.toLowerCase() !== 'pending' || !result
+    || payuAmountInPaise(result.amount) !== order.amount || typeof result.qrString !== 'string'
+    || typeof result.merchantVpa !== 'string' || result.qrString.length > 4096) {
+    throw new Error('PayU returned an invalid QR response');
+  }
+  const qr = new URL(result.qrString);
+  if (qr.protocol !== 'upi:' || qr.hostname !== 'pay' || qr.username || qr.password || qr.hash
+    || qr.searchParams.getAll('pa').length !== 1 || qr.searchParams.get('pa') !== result.merchantVpa
+    || qr.searchParams.getAll('am').length !== 1 || payuAmountInPaise(qr.searchParams.get('am')) !== order.amount
+    || qr.searchParams.getAll('cu').length !== 1 || qr.searchParams.get('cu') !== 'INR') {
+    throw new Error('PayU returned a QR that does not match the order');
+  }
+  return { value: result.qrString, expiresAt };
+}
+
 export async function verifyPayUResponseHash(data: unknown): Promise<boolean> {
   const settings = await getPayUSettings();
   if (!settings || !callbackUrl(settings.callbackUrl) || !data || typeof data !== 'object' || Array.isArray(data)) return false;

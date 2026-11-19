@@ -12,7 +12,7 @@ import type { Order } from './database.js';
 const testDirectory = await mkdtemp(path.join(os.tmpdir(), 'ahuza-payu-suite-'));
 const previousDataFile = process.env.DATA_FILE;
 process.env.DATA_FILE = path.join(testDirectory, 'db.json');
-const { createPayUCheckout, parsePayUStatus, payuAmountInPaise, payuConfigured, verifyPayUResponseHash } = await import('./payu.js');
+const { createPayUCheckout, createPayUQr, parsePayUStatus, payuAmountInPaise, payuConfigured, verifyPayUResponseHash } = await import('./payu.js');
 
 after(async () => {
   if (previousDataFile === undefined) delete process.env.DATA_FILE; else process.env.DATA_FILE = previousDataFile;
@@ -63,6 +63,33 @@ test('PayU checkout payload has a server-generated hash and trusted callback URL
       '', '', '', '', '', 'test-salt',
     ].join('|')).digest('hex');
     assert.equal(hash, expected);
+  });
+});
+
+test('PayU QR generation validates the transaction, amount and UPI destination', async () => {
+  await withPayUEnvironment(async () => {
+    const originalFetch = globalThis.fetch;
+    const qrOrder = { ...order, reservationExpiresAt: new Date(Date.now() + 3600000).toISOString() };
+    const value = 'upi://pay?pa=merchant%40payu&am=680.00&cu=INR&tr=provider-reference';
+    let response: unknown = { metaData: { txnId: order.payuTxnId, txnStatus: 'pending' }, result: { amount: '680.00', merchantVpa: 'merchant@payu', qrString: value } };
+    globalThis.fetch = async (input, init) => {
+      assert.equal(String(input), 'https://test.payu.in/_payment');
+      const body = init?.body as URLSearchParams;
+      assert.equal(body.get('pg'), 'DBQR');
+      assert.equal(body.get('bankcode'), 'UPIDBQR');
+      assert.equal(body.get('txn_s2s_flow'), '4');
+      assert.equal(body.get('s2s_client_ip'), '127.0.0.1');
+      assert.equal(body.get('s2s_device_info'), 'test-browser');
+      assert.ok(Number(body.get('expiry_time')) <= 1800);
+      return Response.json(response);
+    };
+    try {
+      assert.equal((await createPayUQr(qrOrder, 'customer@example.test', '127.0.0.1', 'test-browser')).value, value);
+      response = { metaData: { txnId: 'other', txnStatus: 'pending' }, result: { amount: '680.00', merchantVpa: 'merchant@payu', qrString: value } };
+      await assert.rejects(createPayUQr(qrOrder, 'customer@example.test', '127.0.0.1', 'test-browser'));
+      response = { metaData: { txnId: order.payuTxnId, txnStatus: 'pending' }, result: { amount: '680.00', merchantVpa: 'merchant@payu', qrString: value.replace('680.00', '1.00') } };
+      await assert.rejects(createPayUQr(qrOrder, 'customer@example.test', '127.0.0.1', 'test-browser'));
+    } finally { globalThis.fetch = originalFetch; }
   });
 });
 
@@ -153,6 +180,7 @@ test('PayU webhook confirms the matching order only after server-side verificati
     salt: process.env.PAYU_MERCHANT_SALT,
     mode: process.env.PAYU_MODE,
     callbackUrl: process.env.PAYU_CALLBACK_URL,
+    dynamicQr: process.env.PAYU_DYNAMIC_QR_ENABLED,
   };
   process.env.DATA_FILE = path.join(directory, 'db.json');
   process.env.PAYMENT_PROVIDER = 'manual_upi';
@@ -160,6 +188,7 @@ test('PayU webhook confirms the matching order only after server-side verificati
   process.env.PAYU_MERCHANT_SALT = 'test-salt';
   process.env.PAYU_MODE = 'test';
   process.env.PAYU_CALLBACK_URL = 'https://store.example/api/payments/payu/callback';
+  process.env.PAYU_DYNAMIC_QR_ENABLED = 'true';
   let server: ReturnType<express.Application['listen']> | undefined;
   try {
     const [{ api }, { getDatabase, mutateDatabase }] = await Promise.all([
@@ -196,11 +225,15 @@ test('PayU webhook confirms the matching order only after server-side verificati
       }),
     });
     assert.equal(create.status, 201);
-    const payment = await create.json() as { orderId: string; paymentForm: { action: string; fields: Record<string, string> }; amount: number };
-    assert.equal(payment.paymentForm.action, 'https://test.payu.in/_payment');
+    const payment = await create.json() as { orderId: string; checkoutMode: string; paymentForm?: unknown; amount: number };
+    assert.equal(payment.checkoutMode, 'qr');
+    assert.equal(payment.paymentForm, undefined);
+    const storedOrder = (await getDatabase()).orders.find((entry) => entry.id === payment.orderId)!;
+    const paymentForm = await createPayUCheckout(storedOrder, 'customer@example.test');
+    assert.equal(paymentForm.action, 'https://test.payu.in/_payment');
     assert.equal(payment.amount, 261345);
-    assert.equal(payment.paymentForm.fields.amount, '2613.45');
-    assert.equal('PAYU_MERCHANT_SALT' in payment.paymentForm.fields, false);
+    assert.equal(paymentForm.fields.amount, '2613.45');
+    assert.equal('PAYU_MERCHANT_SALT' in paymentForm.fields, false);
     const statusUrl = `${base}/api/payments/orders/${payment.orderId}/status`;
     const retryUrl = `${base}/api/payments/orders/${payment.orderId}/checkout`;
     assert.equal((await originalFetch(statusUrl)).status, 401);
@@ -210,19 +243,54 @@ test('PayU webhook confirms the matching order only after server-side verificati
     assert.ok(otherCookie);
     assert.equal((await originalFetch(retryUrl, { method: 'POST', headers: { Cookie: otherCookie } })).status, 404);
     assert.equal((await originalFetch(`${base}/api/orders/${payment.orderId}`, { headers: { Cookie: otherCookie } })).status, 404);
-    const retry = await originalFetch(retryUrl, { method: 'POST', headers: { Cookie: cookie } });
+    const qrUrl = `${base}/api/payments/orders/${payment.orderId}/qr`;
+    assert.equal((await originalFetch(qrUrl, { method: 'POST' })).status, 401);
+    assert.equal((await originalFetch(qrUrl, { method: 'POST', headers: { Cookie: otherCookie } })).status, 404);
+    assert.equal((await originalFetch(retryUrl, { method: 'POST', headers: { Cookie: cookie } })).status, 409);
+    let qrCalls = 0;
+    globalThis.fetch = async (_input, init) => {
+      qrCalls++;
+      const body = init?.body as URLSearchParams;
+      assert.equal(body.get('txnid'), paymentForm.fields.txnid);
+      return Response.json({ metaData: { txnId: body.get('txnid'), txnStatus: 'pending' }, result: {
+        amount: body.get('amount'), merchantVpa: 'merchant@payu',
+        qrString: `upi://pay?pa=merchant%40payu&am=${body.get('amount')}&cu=INR`,
+      } });
+    };
+    const qrResponse = await originalFetch(qrUrl, { method: 'POST', headers: { Cookie: cookie } });
+    assert.equal(qrResponse.status, 200);
+    const qr = await qrResponse.json() as { qr: string; expiresAt: string };
+    assert.match(qr.qr, /^upi:\/\/pay\?/);
+    assert.equal((await originalFetch(qrUrl, { method: 'POST', headers: { Cookie: cookie } })).status, 200);
+    assert.equal(qrCalls, 1);
+    await mutateDatabase((database) => {
+      const current = database.orders.find((entry) => entry.id === payment.orderId)!;
+      database.orders.push({ ...current, id: 'failed-qr-order', payuTxnId: 'failed-qr-transaction', payuQr: undefined });
+    });
+    globalThis.fetch = async () => { qrCalls++; throw new Error('test provider timeout'); };
+    const failedQrUrl = `${base}/api/payments/orders/failed-qr-order/qr`;
+    assert.equal((await originalFetch(failedQrUrl, { method: 'POST', headers: { Cookie: cookie } })).status, 503);
+    assert.equal((await originalFetch(failedQrUrl, { method: 'POST', headers: { Cookie: cookie } })).status, 409);
+    assert.equal(qrCalls, 2);
+    globalThis.fetch = originalFetch;
+    await mutateDatabase((database) => {
+      const current = database.orders.find((entry) => entry.id === payment.orderId)!;
+      database.orders.push({ ...current, id: 'legacy-order', payuCheckoutMode: undefined, payuQr: undefined });
+    });
+    const retry = await originalFetch(`${base}/api/payments/orders/legacy-order/checkout`, { method: 'POST', headers: { Cookie: cookie } });
     assert.equal(retry.status, 200);
     const retryForm = (await retry.json() as { paymentForm: { fields: Record<string, string> } }).paymentForm;
-    assert.equal(retryForm.fields.txnid, payment.paymentForm.fields.txnid);
-    assert.equal(retryForm.fields.amount, payment.paymentForm.fields.amount);
+    assert.equal(retryForm.fields.txnid, paymentForm.fields.txnid);
+    assert.equal(retryForm.fields.amount, paymentForm.fields.amount);
     assert.equal((await (await originalFetch(statusUrl, { headers: { Cookie: cookie } })).json() as { status: string }).status, 'pending');
     await mutateDatabase((database) => {
       const current = database.orders.find((entry) => entry.id === payment.orderId)!;
       database.orders.push({ ...current, id: 'expired-order', payuTxnId: 'expired-transaction', reservationExpiresAt: new Date(Date.now() - 1000).toISOString() });
     });
     assert.equal((await originalFetch(`${base}/api/payments/orders/expired-order/checkout`, { method: 'POST', headers: { Cookie: cookie } })).status, 409);
+    assert.equal((await originalFetch(`${base}/api/payments/orders/expired-order/qr`, { method: 'POST', headers: { Cookie: cookie } })).status, 409);
 
-    const fields = payment.paymentForm.fields;
+    const fields = paymentForm.fields;
     const callback: Record<string, string> = {
       key: fields.key,
       status: 'success',
@@ -299,6 +367,7 @@ test('PayU webhook confirms the matching order only after server-side verificati
     if (previous.salt === undefined) delete process.env.PAYU_MERCHANT_SALT; else process.env.PAYU_MERCHANT_SALT = previous.salt;
     if (previous.mode === undefined) delete process.env.PAYU_MODE; else process.env.PAYU_MODE = previous.mode;
     if (previous.callbackUrl === undefined) delete process.env.PAYU_CALLBACK_URL; else process.env.PAYU_CALLBACK_URL = previous.callbackUrl;
+    if (previous.dynamicQr === undefined) delete process.env.PAYU_DYNAMIC_QR_ENABLED; else process.env.PAYU_DYNAMIC_QR_ENABLED = previous.dynamicQr;
     await rm(directory, { recursive: true, force: true });
   }
 });
