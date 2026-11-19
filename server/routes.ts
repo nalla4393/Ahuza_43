@@ -12,7 +12,7 @@ import { publishSocialPost, runSchedule, socialStatus, validateSchedule } from '
 import { createRule, listAutomations, runAutomations, validateRule } from './services/automations.js';
 import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
-import { createPayUCheckout, createPayUQr, payuAmountInPaise, payuConfigured, verifyPayUResponseHash } from './services/payu.js';
+import { createPayUIntent, createPayUQr, payuAmountInPaise, payuConfigured, verifyPayUResponseHash } from './services/payu.js';
 import { customerDataConfigured, decryptCustomerValue, encryptCustomerValue, isValidUpiId } from './services/customerData.js';
 import { confirmPayUWebhookPayment, confirmUpiPaymentByOwner, outOfStockItems, syncPayUPayment } from './services/paymentSync.js';
 import { activePaymentProvider, deletePayUSettings, getPayUSettingsStatus, savePayUSettings } from './services/paymentSettings.js';
@@ -449,12 +449,17 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     return;
   }
   try {
-    const checkout = await createPayUCheckout(placed, customerEmail!);
+    const checkout = usePayuQr
+      ? { checkoutMode: 'qr' as const }
+      : {
+        checkoutMode: 'intent' as const,
+        intentUri: (await createPayUIntent(placed, customerEmail!, request.ip || '', request.get('user-agent') || '')).value,
+      };
     if (customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
     void enqueueOrderEmail(localOrderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
     response.status(201).json({
       orderId: localOrderId, paymentMethod, paymentReference, provider: 'payu',
-      ...(usePayuQr ? { checkoutMode: 'qr' } : { paymentForm: checkout }), amount, currency: 'INR', expiresAt: placed.reservationExpiresAt,
+      ...checkout, amount, currency: 'INR', expiresAt: placed.reservationExpiresAt,
       status: 'pending', items: placed.items.map(({ name, quantity, size }) => ({ name, quantity, size })),
     });
   } catch (error) {
@@ -584,7 +589,8 @@ api.post('/payments/orders/:id/checkout', requireCustomer, paymentLimit, async (
   const customer = database.customers.find((entry) => entry.id === request.session.userId);
   if (!customer?.email) { response.status(409).json({ error: 'A customer email is required for PayU checkout' }); return; }
   try {
-    response.set('Cache-Control', 'no-store').json({ paymentForm: await createPayUCheckout(order, customer.email) });
+    const intent = await createPayUIntent(order, customer.email, request.ip || '', request.get('user-agent') || '');
+    response.set('Cache-Control', 'no-store').json({ intentUri: intent.value });
   } catch (error) {
     console.error(`PayU checkout retry failed for order ${order.id}:`, error);
     response.status(503).json({ error: 'Could not open PayU checkout. Please try again.' });

@@ -12,7 +12,7 @@ import type { Order } from './database.js';
 const testDirectory = await mkdtemp(path.join(os.tmpdir(), 'ahuza-payu-suite-'));
 const previousDataFile = process.env.DATA_FILE;
 process.env.DATA_FILE = path.join(testDirectory, 'db.json');
-const { createPayUCheckout, createPayUQr, parsePayUStatus, payuAmountInPaise, payuConfigured, verifyPayUResponseHash } = await import('./payu.js');
+const { createPayUCheckout, createPayUIntent, createPayUQr, parsePayUStatus, payuAmountInPaise, payuConfigured, verifyPayUResponseHash } = await import('./payu.js');
 
 after(async () => {
   if (previousDataFile === undefined) delete process.env.DATA_FILE; else process.env.DATA_FILE = previousDataFile;
@@ -22,7 +22,7 @@ const order = {
   id: 'order-123',
   payuTxnId: 'AH12345678901234567890',
   amount: 68000,
-  shippingAddress: { name: 'Test Customer', phone: '9876543210' },
+  shippingAddress: { name: 'Test Customer', phone: '9876543210', postalCode: '600001' },
 } as Order;
 
 async function withPayUEnvironment(callback: () => void | Promise<void>): Promise<void> {
@@ -63,6 +63,56 @@ test('PayU checkout payload has a server-generated hash and trusted callback URL
       '', '', '', '', '', 'test-salt',
     ].join('|')).digest('hex');
     assert.equal(hash, expected);
+  });
+});
+
+test('PayU UPI intent is created with the order amount and validated intent URI', async () => {
+  await withPayUEnvironment(async () => {
+    const originalFetch = globalThis.fetch;
+    const intentOrder = { ...order, reservationExpiresAt: new Date(Date.now() + 3600000).toISOString() };
+    let responseData: unknown = {
+      metaData: { txnId: order.payuTxnId, txnStatus: 'pending' },
+      result: {
+        amount: '680.00',
+        merchantVpa: 'merchant@payu',
+        intentURIData: 'pa=merchant%40payu&pn=Merchant&tr=provider-reference&am=680.00&cu=INR&tn=Order%20Payment',
+      },
+    };
+    globalThis.fetch = async (input, init) => {
+      assert.equal(String(input), 'https://test.payu.in/_payment');
+      assert.equal(init?.method, 'POST');
+      const body = init?.body as URLSearchParams;
+      assert.equal(body.get('pg'), 'UPI');
+      assert.equal(body.get('bankcode'), 'INTENT');
+      assert.equal(body.get('txn_s2s_flow'), '4');
+      assert.equal(body.get('s2s_client_ip'), '203.0.113.10');
+      assert.equal(body.get('s2s_device_info'), 'Mozilla/5.0 (Android 13; Mobile)');
+      assert.equal(body.get('zipcode'), order.shippingAddress.postalCode);
+      assert.equal(body.get('udf5'), order.id);
+      const expectedHash = createHash('sha512').update([
+        body.get('key'), body.get('txnid'), body.get('amount'), body.get('productinfo'), body.get('firstname'),
+        body.get('email'), body.get('udf1'), body.get('udf2'), body.get('udf3'), body.get('udf4'), body.get('udf5'),
+        '', '', '', '', '', 'test-salt',
+      ].join('|')).digest('hex');
+      assert.equal(body.get('hash'), expectedHash);
+      return Response.json(responseData);
+    };
+    try {
+      const intent = await createPayUIntent(intentOrder, 'customer@example.test', '203.0.113.10', 'Mozilla/5.0 (Android 13; Mobile)');
+      assert.equal(intent.value, 'upi://pay?pa=merchant%40payu&pn=Merchant&tr=provider-reference&am=680.00&cu=INR&tn=Order%20Payment');
+      assert.equal(intent.expiresAt, intentOrder.reservationExpiresAt);
+      responseData = {
+        metaData: { txnId: order.payuTxnId, txnStatus: 'pending' },
+        result: {
+          amount: '680.00',
+          merchantVpa: 'merchant@payu',
+          intentURIData: 'pa=merchant%40payu&pn=Merchant&tr=provider-reference&am=1.00&cu=INR',
+        },
+      };
+      await assert.rejects(createPayUIntent(intentOrder, 'customer@example.test', '203.0.113.10', 'test-browser'));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 
@@ -273,15 +323,64 @@ test('PayU webhook confirms the matching order only after server-side verificati
     assert.equal((await originalFetch(failedQrUrl, { method: 'POST', headers: { Cookie: cookie } })).status, 409);
     assert.equal(qrCalls, 2);
     globalThis.fetch = originalFetch;
+
+    process.env.PAYU_DYNAMIC_QR_ENABLED = 'false';
+    await mutateDatabase((database) => {
+      const product = database.products.find((entry) => entry.id === 'soft-form-shirt')!;
+      product.stock = Math.max(product.stock, 2);
+    });
+    globalThis.fetch = async (input, init) => {
+      assert.equal(String(input), 'https://test.payu.in/_payment');
+      const body = init?.body as URLSearchParams;
+      return Response.json({
+        metaData: { txnId: body.get('txnid'), txnStatus: 'pending' },
+        result: {
+          amount: body.get('amount'),
+          merchantVpa: 'merchant@payu',
+          intentURIData: `pa=merchant%40payu&pn=Merchant&tr=provider-reference&am=${body.get('amount')}&cu=INR`,
+        },
+      });
+    };
+    const directCreate = await originalFetch(`${base}/api/payments/orders`, {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json', 'User-Agent': 'test-browser' },
+      body: JSON.stringify({
+        paymentMethod: 'upi',
+        expectedShippingAmount: 12345,
+        items: [{ productId: 'soft-form-shirt', quantity: 1 }],
+        shippingAddress: { name: 'Test Customer', addressLine1: 'Test Street', city: 'Chennai', state: 'Tamil Nadu', postalCode: '600001', country: 'India', phone: '9876543210' },
+      }),
+    });
+    assert.equal(directCreate.status, 201);
+    const directPayment = await directCreate.json() as { checkoutMode: string; intentUri: string; paymentForm?: unknown };
+    assert.equal(directPayment.checkoutMode, 'intent');
+    assert.match(directPayment.intentUri, /^upi:\/\/pay\?/);
+    assert.equal(directPayment.paymentForm, undefined);
+    globalThis.fetch = originalFetch;
+
     await mutateDatabase((database) => {
       const current = database.orders.find((entry) => entry.id === payment.orderId)!;
       database.orders.push({ ...current, id: 'legacy-order', payuCheckoutMode: undefined, payuQr: undefined });
     });
-    const retry = await originalFetch(`${base}/api/payments/orders/legacy-order/checkout`, { method: 'POST', headers: { Cookie: cookie } });
+    globalThis.fetch = async (_input, init) => {
+      const body = init?.body as URLSearchParams;
+      return Response.json({
+        metaData: { txnId: body.get('txnid'), txnStatus: 'pending' },
+        result: {
+          amount: body.get('amount'),
+          merchantVpa: 'merchant@payu',
+          intentURIData: `pa=merchant%40payu&pn=Merchant&tr=provider-reference&am=${body.get('amount')}&cu=INR`,
+        },
+      });
+    };
+    const retry = await originalFetch(`${base}/api/payments/orders/legacy-order/checkout`, {
+      method: 'POST',
+      headers: { Cookie: cookie, 'User-Agent': 'test-browser' },
+    });
     assert.equal(retry.status, 200);
-    const retryForm = (await retry.json() as { paymentForm: { fields: Record<string, string> } }).paymentForm;
-    assert.equal(retryForm.fields.txnid, paymentForm.fields.txnid);
-    assert.equal(retryForm.fields.amount, paymentForm.fields.amount);
+    const retryIntent = (await retry.json() as { intentUri: string }).intentUri;
+    assert.match(retryIntent, /^upi:\/\/pay\?/);
+    globalThis.fetch = originalFetch;
     assert.equal((await (await originalFetch(statusUrl, { headers: { Cookie: cookie } })).json() as { status: string }).status, 'pending');
     await mutateDatabase((database) => {
       const current = database.orders.find((entry) => entry.id === payment.orderId)!;

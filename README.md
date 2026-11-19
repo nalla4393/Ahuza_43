@@ -216,14 +216,22 @@ the same QR payment can be opened in a UPI app. The QR expires no later than
 30 minutes after generation and is not regenerated for the same order if
 generation fails or its outcome is uncertain; contact AHUZA if money was
 debited or the QR is unavailable. Older hosted PayU orders can still reopen
-their checkout while the reservation is valid.
+their payment attempt while the reservation is valid.
+
+Without Dynamic QR enabled, checkout creates an order-specific PayU UPI Intent
+server-to-server (`pg=UPI`, `bankcode=INTENT`, `txn_s2s_flow=4`). On supported
+phones, the store opens the returned UPI app intent; on desktop, it displays a
+QR code for the same order-specific intent. The customer is returned to the
+store after payment, and the order is confirmed only after the existing
+server-side PayU verification succeeds. PayU must enable UPI Intent for the
+merchant account. See [PayU's UPI Intent documentation](https://docs.payu.in/docs/pacb-upi-intent-with-s2s-integration).
 
 PayU must enable Dynamic QR (`DBQR`) for the merchant account. Test QR
 generation and a complete payment with PayU before enabling it in production;
 PayU notes that test-mode QR transactions may require their support team's
 assistance. See [PayU's Dynamic QR documentation](https://docs.payu.in/reference/dynamic-qr-generation-api).
 Set `PAYU_DYNAMIC_QR_ENABLED=true` to enable QR for new orders; without it,
-new orders continue to use PayU hosted checkout.
+new orders use PayU UPI Intent checkout.
 
 The PayU key, salt, mode, and endpoints can also be edited or deleted from
 **Owner Studio → Payments → PayU India checkout**. Credentials entered there

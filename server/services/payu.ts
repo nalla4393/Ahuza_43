@@ -56,11 +56,12 @@ export async function createPayUCheckout(order: Order, email: string): Promise<{
     firstname: order.shippingAddress.name,
     email,
     phone: order.shippingAddress.phone,
+    zipcode: order.shippingAddress.postalCode,
     udf1: order.id,
     udf2: '',
     udf3: '',
     udf4: '',
-    udf5: '',
+    udf5: order.id,
     surl: callback.href,
     furl: callback.href,
   };
@@ -70,6 +71,51 @@ export async function createPayUCheckout(order: Order, email: string): Promise<{
     '', '', '', '', '', salt,
   ].join('|'));
   return { action: payuCheckoutEndpoint(settings.mode), fields };
+}
+
+export async function createPayUIntent(
+  order: Order,
+  email: string,
+  clientIp: string,
+  userAgent: string,
+): Promise<{ value: string; expiresAt: string }> {
+  if (!clientIp || !userAgent || !order.reservationExpiresAt) {
+    throw new Error('PayU UPI intent request is missing device or reservation information');
+  }
+  const checkout = await createPayUCheckout(order, email);
+  const response = await fetch(checkout.action, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    body: new URLSearchParams({
+      ...checkout.fields,
+      pg: 'UPI',
+      bankcode: 'INTENT',
+      txn_s2s_flow: '4',
+      s2s_client_ip: clientIp,
+      s2s_device_info: userAgent,
+    }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`PayU UPI intent API returned HTTP ${response.status}`);
+  const data = object(await response.json());
+  const metadata = object(data?.metaData);
+  const result = object(data?.result);
+  if (!metadata || metadata.txnId !== order.payuTxnId || typeof metadata.txnStatus !== 'string'
+    || metadata.txnStatus.toLowerCase() !== 'pending' || !result
+    || payuAmountInPaise(result.amount) !== order.amount || typeof result.merchantVpa !== 'string'
+    || typeof result.intentURIData !== 'string' || result.intentURIData.length > 4096) {
+    throw new Error('PayU returned an invalid UPI intent response');
+  }
+  const intent = new URL(`upi://pay?${result.intentURIData}`);
+  if (intent.protocol !== 'upi:' || intent.hostname !== 'pay' || intent.username || intent.password
+    || intent.pathname || intent.hash
+    || intent.searchParams.getAll('pa').length !== 1 || intent.searchParams.get('pa') !== result.merchantVpa
+    || intent.searchParams.getAll('am').length !== 1 || payuAmountInPaise(intent.searchParams.get('am')) !== order.amount
+    || intent.searchParams.getAll('cu').length !== 1 || intent.searchParams.get('cu') !== 'INR'
+    || intent.searchParams.getAll('tr').length !== 1 || !intent.searchParams.get('tr')) {
+    throw new Error('PayU returned a UPI intent that does not match the order');
+  }
+  return { value: intent.href, expiresAt: order.reservationExpiresAt };
 }
 
 export async function createPayUQr(order: Order, email: string, clientIp: string, userAgent: string): Promise<{ value: string; expiresAt: string }> {

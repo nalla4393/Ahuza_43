@@ -58,8 +58,35 @@ const orderStatusLabel = (order: { status: string; paymentStatus?: string; payme
   return `${order.status.replaceAll('_', ' ')}${order.paymentStatus === 'paid' ? ' · payment received' : ''}`;
 };
 type PayUPaymentForm = { action: string; fields: Record<string, string> };
-type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; provider?: 'manual_upi' | 'payu'; checkoutMode?: 'qr'; paymentReference?: string; payUrl?: string; paymentForm?: PayUPaymentForm; amount: number; paymentAdjustmentAmount?: number; currency: string; expiresAt?: string; status?: string; orderStatus?: string; items?: { name: string; quantity: number; size?: string }[] };
+type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; provider?: 'manual_upi' | 'payu'; checkoutMode?: 'qr' | 'intent'; paymentReference?: string; payUrl?: string; intentUri?: string; paymentForm?: PayUPaymentForm; amount: number; paymentAdjustmentAmount?: number; currency: string; expiresAt?: string; status?: string; orderStatus?: string; items?: { name: string; quantity: number; size?: string }[] };
 type PaymentConfiguration = { configured: boolean; automaticVerification: boolean; provider?: 'payu' };
+
+function isPayUIntentUri(value: unknown, expectedAmount?: number): value is string {
+  if (typeof value !== 'string') return false;
+  try {
+    const intent = new URL(value);
+    const payee = intent.searchParams.get('pa') || '';
+    const amount = intent.searchParams.get('am') || '';
+    const amountMatch = /^(\d+)(?:\.(\d{1,2}))?$/.exec(amount);
+    const amountPaise = amountMatch
+      ? Number(amountMatch[1]) * 100 + Number((amountMatch[2] || '').padEnd(2, '0'))
+      : null;
+    return intent.protocol === 'upi:' && intent.hostname === 'pay' && !intent.username && !intent.password
+      && !intent.pathname && !intent.hash
+      && intent.searchParams.getAll('pa').length === 1 && /^[\w.-]{2,256}@[\w.-]{2,64}$/.test(payee)
+      && intent.searchParams.getAll('am').length === 1 && Number.isSafeInteger(amountPaise)
+      && (expectedAmount === undefined || amountPaise === expectedAmount)
+      && intent.searchParams.getAll('cu').length === 1 && intent.searchParams.get('cu') === 'INR'
+      && intent.searchParams.getAll('tr').length === 1 && Boolean(intent.searchParams.get('tr'));
+  } catch {
+    return false;
+  }
+}
+
+function isMobileDevice(): boolean {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
 
 function submitPayUPayment(paymentForm: PayUPaymentForm | undefined): void {
   if (!paymentForm || !['https://test.payu.in/_payment', 'https://secure.payu.in/_payment'].includes(paymentForm.action)) {
@@ -775,7 +802,8 @@ export default function App() {
         throw new Error(order.error || 'Could not start checkout');
       }
       if (paymentMethod === 'upi' && (!order.paymentReference || order.provider !== 'payu'
-        || (order.checkoutMode !== 'qr' && !order.paymentForm?.fields.hash))) {
+        || (order.checkoutMode === 'intent' && !isPayUIntentUri(order.intentUri, order.amount))
+        || (!order.checkoutMode && !order.paymentForm?.fields.hash))) {
         throw new Error('The server returned an incomplete payment request');
       }
       setPaymentOrder(order);
@@ -787,7 +815,9 @@ export default function App() {
       setPaymentOrderStatus(paymentMethod === 'cod' ? 'confirmed' : 'pending_payment');
       setPaymentMessage(paymentMethod === 'cod'
         ? 'Your order is confirmed Please pay the delivery partner in cash when your order arrives'
-        : 'Complete your payment securely on PayU. Your order is confirmed after PayU verifies the payment.');
+        : order.checkoutMode === 'qr'
+          ? 'Scan the PayU QR with your UPI app. Your order is confirmed after PayU verifies the payment.'
+          : 'PayU is opening a supported UPI app when available. Your order is confirmed after PayU verifies the payment.');
       if (paymentMethod === 'cod') setCart([]);
       else {
         if (order.checkoutMode === 'qr') {
@@ -799,10 +829,16 @@ export default function App() {
         } catch (error) {
           console.warn('Payment recovery storage is unavailable; the PayU return link will recover the order:', error);
         }
-        try { if (order.checkoutMode !== 'qr') submitPayUPayment(order.paymentForm); }
+        try {
+          if (order.checkoutMode === 'intent' && isPayUIntentUri(order.intentUri, order.amount) && isMobileDevice()) {
+            window.location.assign(order.intentUri);
+          } else if (order.checkoutMode !== 'qr' && order.checkoutMode !== 'intent') {
+            submitPayUPayment(order.paymentForm);
+          }
+        }
         catch (error) {
-          console.error('PayU checkout could not be opened:', error);
-          setPaymentLaunchError('Could not open PayU. Use the PayU button below to try again.');
+          console.error('PayU UPI app could not be opened:', error);
+          setPaymentLaunchError('Could not open the UPI app. Use the PayU button below to try again.');
         }
       }
     } catch (error) {
@@ -819,12 +855,13 @@ export default function App() {
     try {
       const response = await fetch(`/api/payments/orders/${encodeURIComponent(paymentOrder.orderId)}/checkout`, { method: 'POST' });
       if (response.status === 401) { requirePaymentSignIn(); return; }
-      const result = await parseResponse<{ paymentForm?: PayUPaymentForm; error?: string }>(response);
-      if (!response.ok || !result.paymentForm) throw new Error(result.error || 'Could not open PayU checkout');
-      submitPayUPayment(result.paymentForm);
+      const result = await parseResponse<{ intentUri?: string; error?: string }>(response);
+      if (!response.ok || !isPayUIntentUri(result.intentUri, paymentOrder.amount)) throw new Error(result.error || 'Could not open the UPI app');
+      setPaymentOrder((current) => current ? { ...current, checkoutMode: 'intent', intentUri: result.intentUri } : current);
+      if (isMobileDevice()) window.location.assign(result.intentUri);
     } catch (error) {
       console.error('PayU checkout retry failed:', error);
-      setPaymentLaunchError(error instanceof Error ? error.message : 'Could not open PayU checkout');
+      setPaymentLaunchError(error instanceof Error ? error.message : 'Could not open the UPI app');
     } finally { setBusy(false); }
   }
 
@@ -1209,7 +1246,7 @@ export default function App() {
             {paymentOrder.paymentAdjustmentAmount && <p>Includes a {formatPaymentAmount(paymentOrder.paymentAdjustmentAmount)} UPI identification adjustment. Pay the exact total shown.</p>}
             {paymentSignInRequired && <button className="dark-button" type="button" onClick={() => { setAuthMode('login'); setAccountPageOpen(false); setAccountOpen(true); }}>Sign in to check payment</button>}
             {paymentLaunchError && <p className="payment-config-warning" role="alert">{paymentLaunchError}</p>}
-            {paymentOrder.paymentMethod === 'upi' && !paymentSignInRequired && ['pending', 'failed', 'cancelled'].includes(paymentStatus) && <>{paymentStatus !== 'cancelled' && (!paymentOrder.expiresAt || Date.parse(paymentOrder.expiresAt) > Date.now()) && (paymentOrder.provider === 'manual_upi' && paymentOrder.payUrl?.startsWith('upi://pay?') ? <PaymentQr reference={paymentOrder.paymentReference} /> : paymentOrder.provider === 'payu' && paymentOrder.checkoutMode === 'qr' ? payuQr?.orderId === paymentOrder.orderId ? <div className="payment-qr"><QRCodeSVG value={payuQr.value} size={224} level="M" marginSize={4} title="Scan to pay with UPI" /><p>Scan with your UPI app, or open the payment link on your phone.</p><a className="dark-button" href={payuQr.value}>Open UPI app</a></div> : !paymentLaunchError && <p>Preparing your PayU QR code…</p> : paymentOrder.provider === 'payu' ? <button className="dark-button" type="button" disabled={busy} onClick={() => void retryPayUCheckout()}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : storefrontText('checkoutPayUpi')}</button> : paymentOrder.provider !== 'manual_upi' && <a className="dark-button" href={paymentOrder.payUrl} onClick={() => setPaymentMessage(storefrontText('payAppOpened'))}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : storefrontText('checkoutPayUpi')}</a>)}<p className="payment-pending"><span className="payment-spinner" /> {storefrontText('payChecking')}</p><button className="invoice-button" type="button" disabled={busy} onClick={() => void refreshPaymentStatus()}>{storefrontText('payRefresh')}</button>{paymentOrder.provider !== 'manual_upi' && paymentStatus === 'pending' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void reportPaymentFailure()}>{storefrontText('payReportFailure')}</button>}{paymentStatus !== 'cancelled' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void cancelPayment()}>{storefrontText('payCancel')}</button>}</>}
+            {paymentOrder.paymentMethod === 'upi' && !paymentSignInRequired && ['pending', 'failed', 'cancelled'].includes(paymentStatus) && <>{paymentStatus !== 'cancelled' && (!paymentOrder.expiresAt || Date.parse(paymentOrder.expiresAt) > Date.now()) && (paymentOrder.provider === 'manual_upi' && paymentOrder.payUrl?.startsWith('upi://pay?') ? <PaymentQr reference={paymentOrder.paymentReference} /> : paymentOrder.provider === 'payu' && paymentOrder.checkoutMode === 'qr' ? payuQr?.orderId === paymentOrder.orderId ? <div className="payment-qr"><QRCodeSVG value={payuQr.value} size={224} level="M" marginSize={4} title="Scan to pay with UPI" /><p>Scan with your UPI app, or open the payment link on your phone.</p><a className="dark-button" href={payuQr.value}>Open UPI app</a></div> : !paymentLaunchError && <p>Preparing your PayU QR code…</p> : paymentOrder.provider === 'payu' && paymentOrder.checkoutMode === 'intent' && isPayUIntentUri(paymentOrder.intentUri, paymentOrder.amount) ? <div className="payment-qr"><QRCodeSVG value={paymentOrder.intentUri} size={224} level="M" marginSize={4} title="Scan to pay with UPI" /><p>On your phone, open the UPI app to pay. On desktop, scan this QR with your UPI app.</p><a className="dark-button" href={paymentOrder.intentUri}>Open UPI app</a></div> : paymentOrder.provider === 'payu' ? <button className="dark-button" type="button" disabled={busy} onClick={() => void retryPayUCheckout()}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : 'Open UPI app'}</button> : paymentOrder.provider !== 'manual_upi' && <a className="dark-button" href={paymentOrder.payUrl} onClick={() => setPaymentMessage(storefrontText('payAppOpened'))}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : storefrontText('checkoutPayUpi')}</a>)}<p className="payment-pending"><span className="payment-spinner" /> {storefrontText('payChecking')}</p><button className="invoice-button" type="button" disabled={busy} onClick={() => void refreshPaymentStatus()}>{storefrontText('payRefresh')}</button>{paymentOrder.provider !== 'manual_upi' && paymentStatus === 'pending' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void reportPaymentFailure()}>{storefrontText('payReportFailure')}</button>}{paymentStatus !== 'cancelled' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void cancelPayment()}>{storefrontText('payCancel')}</button>}</>}
             {paymentOrder.paymentMethod === 'upi' && paymentOrder.provider === 'manual_upi' && paymentStatus !== 'paid' && !paymentSignInRequired && <section className="payment-proof">
               <h4>Manual UPI / QR Payment</h4>
               <p>{paymentProofSubmitted ? 'Screenshot received and awaiting owner review. Payment is not confirmed until the bank credit is checked.' : 'Already paid? Upload your UPI payment screenshot for review. A screenshot is not proof of settlement and will not mark the order paid.'}</p>
@@ -1234,7 +1271,7 @@ export default function App() {
             {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && paymentOrderStatus === 'cancelled' && <p className="payment-next-steps">Please contact AHUZA if you need an update about fulfillment or refund arrangements.</p>}
             {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && paymentOrderStatus !== 'cancelled' && <p className="payment-next-steps">Thank you for choosing AHUZA. Please check your email for payment confirmation and order approval. Your invoice and receipt are also available under Account › Order history. We’ll email you tracking details as soon as your order is on its way.</p>}
             {paymentOrder.paymentMethod === 'upi' && paymentOrder.provider === 'manual_upi' && paymentStatus !== 'paid' && <ManualPaymentInstructions email={storefrontText('contactEmail')} orderId={paymentOrder.orderId} />}
-            {paymentOrder.paymentMethod === 'upi' && paymentStatus !== 'paid' && <small>{paymentOrder.provider === 'manual_upi' ? 'Manual confirmation is required. Do not pay after the 60-minute reservation expires. If you have already paid, contact AHUZA with your order and bank transaction reference.' : paymentOrder.provider === 'payu' ? 'Your order is confirmed only after PayU verifies the payment. Do not pay again if money was debited; contact AHUZA if confirmation is delayed.' : storefrontText('payVerificationNote')}</small>}
+            {paymentOrder.paymentMethod === 'upi' && paymentStatus !== 'paid' && <small>{paymentOrder.provider === 'manual_upi' ? 'Manual confirmation is required. Do not pay after the 60-minute reservation expires. If you have already paid, contact AHUZA with your order and bank transaction reference.' : paymentOrder.provider === 'payu' ? 'On supported phones, PayU opens a UPI app. Your order is confirmed only after PayU verifies the payment. Do not pay again if money was debited; contact AHUZA if confirmation is delayed.' : storefrontText('payVerificationNote')}</small>}
           </section> : returnedPaymentId ? <section className="payment-panel" role="status"><p>{paymentRecoveryMessage || 'Checking your payment…'}</p>{!customer && <button className="dark-button" type="button" onClick={() => { setAuthMode('login'); setAccountOpen(true); }}>Sign in to check payment</button>}</section> : cartLines.length === 0 ? <div className="empty-bag"><ShoppingBag size={25} /><p>{storefrontText('bagEmpty')}</p><button className="dark-button" onClick={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>{storefrontText('bagExplore')}</button></div> : <>
             <CheckoutItems items={cartLines.map(({ product, quantity, size }) => ({
               id: product.id,
@@ -1254,7 +1291,7 @@ export default function App() {
               {(sameAsBilling ? billingAddress : deliveryAddress).country !== 'India' && <p className="payment-config-warning" role="alert">Delivery is currently available only within India.</p>}
               <fieldset className="payment-method-options"><legend>{storefrontText('checkoutPaymentMethod')}</legend><label><input type="radio" name="paymentMethod" value="upi" checked={paymentMethod === 'upi'} onChange={() => setPaymentMethod('upi')} disabled={!paymentConfiguration?.configured} /> {storefrontText('checkoutPayUpi')}</label><label><input type="radio" name="paymentMethod" value="cod" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} /> {storefrontText('checkoutCod')}</label></fieldset>
               {paymentMethod === 'upi' && !paymentConfiguration?.configured && <p className="payment-config-warning" role="status">{paymentConfiguration ? storefrontText('checkoutUpiUnavailable') : storefrontText('checkoutUpiChecking')}</p>}
-              {paymentMethod === 'upi' && paymentConfiguration?.configured && <p className="payment-config-warning">Payment remains pending until PayU confirms it. Confirmation can take time.</p>}
+              {paymentMethod === 'upi' && paymentConfiguration?.configured && <p className="payment-config-warning">On supported phones, PayU opens a UPI app. Payment remains pending until PayU confirms it.</p>}
               {checkoutError && <p className="payment-config-warning" role="alert">{checkoutError}</p>}
               <label className="consent-check"><input type="checkbox" checked={marketingConsent} onChange={(event) => setMarketingConsent(event.target.checked)} />{storefrontText('checkoutConsent')}</label><button className="dark-button checkout-button" disabled={busy || estimatedShipping === null || (paymentMethod === 'upi' && paymentConfiguration?.configured !== true)}>{busy ? storefrontText('checkoutPlacing') : customer ? paymentMethod === 'cod' ? storefrontText('checkoutPlaceCod') : paymentConfiguration?.configured ? storefrontText('checkoutContinueUpi') : storefrontText('checkoutUpiUnavailableButton') : storefrontText('checkoutSignIn')} <ArrowRight size={16} /></button></form><small>{storefrontText('checkoutPolicy')}</small></div>
           </>}
