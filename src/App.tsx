@@ -170,12 +170,17 @@ export default function App() {
   const [paymentOrder, setPaymentOrder] = useState<PaymentOrder | null>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem('ahuza.pendingPayment') || 'null') as PaymentOrder | null;
+      const returnedId = window.location.pathname === '/order-success' ? new URLSearchParams(window.location.search).get('order') : null;
+      if (returnedId && saved?.orderId !== returnedId) return null;
       return saved?.paymentMethod === 'upi' && saved.orderId ? saved : null;
     } catch { return null; }
   });
   const [paymentStatus, setPaymentStatus] = useState(paymentOrder ? 'checking' : 'pending');
   const [paymentOrderStatus, setPaymentOrderStatus] = useState('');
   const [ordersRefresh, setOrdersRefresh] = useState(0);
+  const [returnedPaymentId, setReturnedPaymentId] = useState(() => window.location.pathname === '/order-success' ? new URLSearchParams(window.location.search).get('order') : null);
+  const [paymentRecoveryMessage, setPaymentRecoveryMessage] = useState('');
+  const [paymentLaunchError, setPaymentLaunchError] = useState('');
   const [paymentMessage, setPaymentMessage] = useState('');
   const [paymentSignInRequired, setPaymentSignInRequired] = useState(false);
   const [paymentProofFile, setPaymentProofFile] = useState<File | null>(null);
@@ -364,6 +369,35 @@ export default function App() {
   useEffect(() => {
     if (paymentOrder) setCartOpen(true);
   }, []);
+
+  useEffect(() => {
+    if (!returnedPaymentId || paymentOrder?.orderId === returnedPaymentId) return;
+    const controller = new AbortController();
+    setCartOpen(true);
+    setPaymentRecoveryMessage('Checking your payment. Please do not pay again if money was debited.');
+    fetch(`/api/orders/${encodeURIComponent(returnedPaymentId)}`, { signal: controller.signal }).then(async (response) => {
+      if (response.status === 401) {
+        setAuthMode('login');
+        setAccountOpen(true);
+        setPaymentRecoveryMessage('Sign in with the account used for this order to check your payment.');
+        return;
+      }
+      const result = await parseResponse<{ order?: { id: string; amount: number; currency: string; paymentMethod?: string; payuTxnId?: string; paymentReference?: string; reservationExpiresAt?: string; items: { name: string; quantity: number; size?: string }[] }; error?: string }>(response);
+      if (!response.ok || !result.order || result.order.id !== returnedPaymentId || result.order.paymentMethod !== 'upi' || !result.order.payuTxnId) {
+        throw new Error(result.error || 'Could not find this PayU order. Contact AHUZA if money was debited.');
+      }
+      const order = result.order;
+      setPaymentOrder({ orderId: order.id, paymentMethod: 'upi', provider: 'payu', amount: order.amount, currency: order.currency, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt, items: order.items });
+      setPaymentStatus('checking');
+      setPaymentSignInRequired(false);
+      setPaymentRecoveryMessage('');
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      console.error('PayU order recovery failed:', error);
+      setPaymentRecoveryMessage(error instanceof Error ? error.message : 'Could not recover your PayU order. Contact AHUZA if money was debited.');
+    });
+    return () => controller.abort();
+  }, [returnedPaymentId, paymentOrder?.orderId, customer]);
 
   useEffect(() => {
     if (paymentOrder && cartOpen) cartDrawer.current?.scrollTo({ top: 0 });
@@ -670,6 +704,7 @@ export default function App() {
 
   async function checkout() {
     setCheckoutError('');
+    setPaymentLaunchError('');
     if (estimatedShipping === null) {
       setCheckoutError('Shipping information is unavailable. Refresh to try again.');
       return;
@@ -721,14 +756,38 @@ export default function App() {
         : 'Complete your payment securely on PayU. Your order is confirmed after PayU verifies the payment.');
       if (paymentMethod === 'cod') setCart([]);
       else {
-        localStorage.setItem('ahuza.pendingPayment', JSON.stringify(order));
-        submitPayUPayment(order.paymentForm);
+        try {
+          localStorage.setItem('ahuza.pendingPayment', JSON.stringify(order));
+        } catch (error) {
+          console.warn('Payment recovery storage is unavailable; the PayU return link will recover the order:', error);
+        }
+        try { submitPayUPayment(order.paymentForm); }
+        catch (error) {
+          console.error('PayU checkout could not be opened:', error);
+          setPaymentLaunchError('Could not open PayU. Use the PayU button below to try again.');
+        }
       }
     } catch (error) {
       setCheckoutError(error instanceof Error ? error.message : 'Could not start checkout');
     } finally {
       setBusy(false);
     }
+  }
+
+  async function retryPayUCheckout() {
+    if (!paymentOrder) return;
+    setPaymentLaunchError('');
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/payments/orders/${encodeURIComponent(paymentOrder.orderId)}/checkout`, { method: 'POST' });
+      if (response.status === 401) { requirePaymentSignIn(); return; }
+      const result = await parseResponse<{ paymentForm?: PayUPaymentForm; error?: string }>(response);
+      if (!response.ok || !result.paymentForm) throw new Error(result.error || 'Could not open PayU checkout');
+      submitPayUPayment(result.paymentForm);
+    } catch (error) {
+      console.error('PayU checkout retry failed:', error);
+      setPaymentLaunchError(error instanceof Error ? error.message : 'Could not open PayU checkout');
+    } finally { setBusy(false); }
   }
 
   async function refreshPaymentStatus() {
@@ -856,6 +915,7 @@ export default function App() {
 
   function closePaymentSuccess() {
     window.history.replaceState({}, '', '/');
+    setReturnedPaymentId(null);
     setOrderSuccessPage(false);
     setPaymentOrder(null);
     setPaymentStatus('pending');
@@ -1110,7 +1170,8 @@ export default function App() {
             <p><strong>{formatPaymentAmount(paymentOrder.amount)}</strong>{paymentOrder.paymentReference ? ` · Reference ${paymentOrder.paymentReference}` : ` · Order ${paymentOrder.orderId.slice(0, 8)}`}</p>
             {paymentOrder.paymentAdjustmentAmount && <p>Includes a {formatPaymentAmount(paymentOrder.paymentAdjustmentAmount)} UPI identification adjustment. Pay the exact total shown.</p>}
             {paymentSignInRequired && <button className="dark-button" type="button" onClick={() => { setAuthMode('login'); setAccountPageOpen(false); setAccountOpen(true); }}>Sign in to check payment</button>}
-            {paymentOrder.paymentMethod === 'upi' && !paymentSignInRequired && ['pending', 'failed', 'cancelled'].includes(paymentStatus) && <>{paymentStatus !== 'cancelled' && (!paymentOrder.expiresAt || Date.parse(paymentOrder.expiresAt) > Date.now()) && (paymentOrder.provider === 'manual_upi' && paymentOrder.payUrl?.startsWith('upi://pay?') ? <PaymentQr reference={paymentOrder.paymentReference} /> : paymentOrder.provider === 'payu' && paymentOrder.paymentForm ? <button className="dark-button" type="button" onClick={() => submitPayUPayment(paymentOrder.paymentForm)}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : storefrontText('checkoutPayUpi')}</button> : paymentOrder.provider !== 'manual_upi' && <a className="dark-button" href={paymentOrder.payUrl} onClick={() => setPaymentMessage(storefrontText('payAppOpened'))}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : storefrontText('checkoutPayUpi')}</a>)}<p className="payment-pending"><span className="payment-spinner" /> {storefrontText('payChecking')}</p><button className="invoice-button" type="button" disabled={busy} onClick={() => void refreshPaymentStatus()}>{storefrontText('payRefresh')}</button>{paymentOrder.provider !== 'manual_upi' && paymentStatus === 'pending' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void reportPaymentFailure()}>{storefrontText('payReportFailure')}</button>}{paymentStatus !== 'cancelled' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void cancelPayment()}>{storefrontText('payCancel')}</button>}</>}
+            {paymentLaunchError && <p className="payment-config-warning" role="alert">{paymentLaunchError}</p>}
+            {paymentOrder.paymentMethod === 'upi' && !paymentSignInRequired && ['pending', 'failed', 'cancelled'].includes(paymentStatus) && <>{paymentStatus !== 'cancelled' && (!paymentOrder.expiresAt || Date.parse(paymentOrder.expiresAt) > Date.now()) && (paymentOrder.provider === 'manual_upi' && paymentOrder.payUrl?.startsWith('upi://pay?') ? <PaymentQr reference={paymentOrder.paymentReference} /> : paymentOrder.provider === 'payu' ? <button className="dark-button" type="button" disabled={busy} onClick={() => void retryPayUCheckout()}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : storefrontText('checkoutPayUpi')}</button> : paymentOrder.provider !== 'manual_upi' && <a className="dark-button" href={paymentOrder.payUrl} onClick={() => setPaymentMessage(storefrontText('payAppOpened'))}>{paymentStatus === 'failed' ? storefrontText('payTryAgain') : storefrontText('checkoutPayUpi')}</a>)}<p className="payment-pending"><span className="payment-spinner" /> {storefrontText('payChecking')}</p><button className="invoice-button" type="button" disabled={busy} onClick={() => void refreshPaymentStatus()}>{storefrontText('payRefresh')}</button>{paymentOrder.provider !== 'manual_upi' && paymentStatus === 'pending' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void reportPaymentFailure()}>{storefrontText('payReportFailure')}</button>}{paymentStatus !== 'cancelled' && <button className="invoice-button" type="button" disabled={busy} onClick={() => void cancelPayment()}>{storefrontText('payCancel')}</button>}</>}
             {paymentOrder.paymentMethod === 'upi' && paymentOrder.provider === 'manual_upi' && paymentStatus !== 'paid' && !paymentSignInRequired && <section className="payment-proof">
               <h4>Manual UPI / QR Payment</h4>
               <p>{paymentProofSubmitted ? 'Screenshot received and awaiting owner review. Payment is not confirmed until the bank credit is checked.' : 'Already paid? Upload your UPI payment screenshot for review. A screenshot is not proof of settlement and will not mark the order paid.'}</p>
@@ -1131,12 +1192,12 @@ export default function App() {
               {paymentProofError && <p className="payment-proof-error" role="alert">{paymentProofError}</p>}
             </section>}
             {paymentStatus === 'failed' && <p>{storefrontText('payFailureNote')}</p>}
-            {(paymentOrder.paymentMethod === 'cod' || paymentStatus === 'paid' || paymentStatus === 'cancelled' || paymentStatus === 'expired') && <button className="dark-button" type="button" onClick={() => { setPaymentOrder(null); setPaymentStatus('pending'); setCartOpen(false); }}>{paymentStatus === 'cancelled' ? storefrontText('payReturn') : 'Done'}</button>}
+            {(paymentOrder.paymentMethod === 'cod' || paymentStatus === 'paid' || paymentStatus === 'cancelled' || paymentStatus === 'expired') && <button className="dark-button" type="button" onClick={() => { setReturnedPaymentId(null); setPaymentOrder(null); setPaymentStatus('pending'); setCartOpen(false); }}>{paymentStatus === 'cancelled' ? storefrontText('payReturn') : 'Done'}</button>}
             {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && paymentOrderStatus === 'cancelled' && <p className="payment-next-steps">Please contact AHUZA if you need an update about fulfillment or refund arrangements.</p>}
             {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && paymentOrderStatus !== 'cancelled' && <p className="payment-next-steps">Thank you for choosing AHUZA. Please check your email for payment confirmation and order approval. Your invoice and receipt are also available under Account › Order history. We’ll email you tracking details as soon as your order is on its way.</p>}
             {paymentOrder.paymentMethod === 'upi' && paymentOrder.provider === 'manual_upi' && paymentStatus !== 'paid' && <ManualPaymentInstructions email={storefrontText('contactEmail')} orderId={paymentOrder.orderId} />}
             {paymentOrder.paymentMethod === 'upi' && paymentStatus !== 'paid' && <small>{paymentOrder.provider === 'manual_upi' ? 'Manual confirmation is required. Do not pay after the 60-minute reservation expires. If you have already paid, contact AHUZA with your order and bank transaction reference.' : paymentOrder.provider === 'payu' ? 'Your order is confirmed only after PayU verifies the payment. Do not pay again if money was debited; contact AHUZA if confirmation is delayed.' : storefrontText('payVerificationNote')}</small>}
-          </section> : cartLines.length === 0 ? <div className="empty-bag"><ShoppingBag size={25} /><p>{storefrontText('bagEmpty')}</p><button className="dark-button" onClick={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>{storefrontText('bagExplore')}</button></div> : <>
+          </section> : returnedPaymentId ? <section className="payment-panel" role="status"><p>{paymentRecoveryMessage || 'Checking your payment…'}</p>{!customer && <button className="dark-button" type="button" onClick={() => { setAuthMode('login'); setAccountOpen(true); }}>Sign in to check payment</button>}</section> : cartLines.length === 0 ? <div className="empty-bag"><ShoppingBag size={25} /><p>{storefrontText('bagEmpty')}</p><button className="dark-button" onClick={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>{storefrontText('bagExplore')}</button></div> : <>
             <CheckoutItems items={cartLines.map(({ product, quantity, size }) => ({
               id: product.id,
               name: product.name,

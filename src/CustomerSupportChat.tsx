@@ -123,7 +123,13 @@ export default function CustomerSupportChat({ onOpenAccount, avatarImageUrl }: P
   const avatar = useRef<BeulahAvatarHandle>(null);
   const welcomed = useRef(false);
   const spokenCount = useRef(1);
-  const [muted, setMuted] = useState(() => localStorage.getItem('ahuza-beulah-muted') === '1');
+  const [muted, setMuted] = useState(() => {
+    try { return localStorage.getItem('ahuza-beulah-muted') === '1'; }
+    catch (error) {
+      console.warn('Could not read the support audio preference:', error);
+      return true;
+    }
+  });
 
   // Speak with the avatar: gesture and audio start together, jaw follows the audio.
   function say(text: string) {
@@ -166,7 +172,8 @@ export default function CustomerSupportChat({ onOpenAccount, avatarImageUrl }: P
   function toggleMute() {
     const next = !muted;
     setMuted(next);
-    localStorage.setItem('ahuza-beulah-muted', next ? '1' : '0');
+    try { localStorage.setItem('ahuza-beulah-muted', next ? '1' : '0'); }
+    catch (error) { console.warn('Could not save the support audio preference:', error); }
     if (next) stopSpeaking();
   }
 

@@ -208,7 +208,10 @@ HTTPS address for this deployment.
 After PayU returns the customer to the store, the checkout checks the order
 status and shows the payment-success page only once payment is verified.
 Refreshing that page rechecks the status; customers can view their order or
-continue shopping from there.
+continue shopping from there. If browser storage is unavailable, the return
+link restores the order after the customer signs in with the account used to
+place it. A pending order can reopen its PayU checkout while its reservation
+is valid; customers should not retry if their bank has already debited them.
 
 The PayU key, salt, mode, and endpoints can also be edited or deleted from
 **Owner Studio → Payments → PayU India checkout**. Credentials entered there

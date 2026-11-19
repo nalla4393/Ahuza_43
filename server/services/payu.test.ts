@@ -174,6 +174,7 @@ test('PayU webhook confirms the matching order only after server-side verificati
     app.use(express.json());
     app.use(session({ secret: 'payu-test-session-secret-with-more-than-32-characters', resave: false, saveUninitialized: false }));
     app.post('/test-login', (request, response) => { request.session.userId = 'payu-customer'; response.sendStatus(204); });
+    app.post('/test-other-login', (request, response) => { request.session.userId = 'other-customer'; response.sendStatus(204); });
     app.use('/api', api);
     server = app.listen(0, '127.0.0.1');
     await once(server, 'listening');
@@ -201,8 +202,25 @@ test('PayU webhook confirms the matching order only after server-side verificati
     assert.equal(payment.paymentForm.fields.amount, '2613.45');
     assert.equal('PAYU_MERCHANT_SALT' in payment.paymentForm.fields, false);
     const statusUrl = `${base}/api/payments/orders/${payment.orderId}/status`;
+    const retryUrl = `${base}/api/payments/orders/${payment.orderId}/checkout`;
     assert.equal((await originalFetch(statusUrl)).status, 401);
+    assert.equal((await originalFetch(retryUrl, { method: 'POST' })).status, 401);
+    const otherLogin = await originalFetch(`${base}/test-other-login`, { method: 'POST' });
+    const otherCookie = otherLogin.headers.get('set-cookie')?.split(';')[0];
+    assert.ok(otherCookie);
+    assert.equal((await originalFetch(retryUrl, { method: 'POST', headers: { Cookie: otherCookie } })).status, 404);
+    assert.equal((await originalFetch(`${base}/api/orders/${payment.orderId}`, { headers: { Cookie: otherCookie } })).status, 404);
+    const retry = await originalFetch(retryUrl, { method: 'POST', headers: { Cookie: cookie } });
+    assert.equal(retry.status, 200);
+    const retryForm = (await retry.json() as { paymentForm: { fields: Record<string, string> } }).paymentForm;
+    assert.equal(retryForm.fields.txnid, payment.paymentForm.fields.txnid);
+    assert.equal(retryForm.fields.amount, payment.paymentForm.fields.amount);
     assert.equal((await (await originalFetch(statusUrl, { headers: { Cookie: cookie } })).json() as { status: string }).status, 'pending');
+    await mutateDatabase((database) => {
+      const current = database.orders.find((entry) => entry.id === payment.orderId)!;
+      database.orders.push({ ...current, id: 'expired-order', payuTxnId: 'expired-transaction', reservationExpiresAt: new Date(Date.now() - 1000).toISOString() });
+    });
+    assert.equal((await originalFetch(`${base}/api/payments/orders/expired-order/checkout`, { method: 'POST', headers: { Cookie: cookie } })).status, 409);
 
     const fields = payment.paymentForm.fields;
     const callback: Record<string, string> = {
@@ -261,9 +279,10 @@ test('PayU webhook confirms the matching order only after server-side verificati
       redirect: 'manual',
     });
     assert.equal(returned.status, 303);
-    assert.equal(returned.headers.get('location'), '/order-success');
+    assert.equal(returned.headers.get('location'), `/order-success?order=${payment.orderId}`);
     const stored = (await getDatabase()).orders.find((entry) => entry.id === payment.orderId);
     assert.equal(stored?.paymentStatus, 'paid');
+    assert.equal((await originalFetch(retryUrl, { method: 'POST', headers: { Cookie: cookie } })).status, 409);
     assert.equal((await (await originalFetch(statusUrl, { headers: { Cookie: cookie } })).json() as { status: string }).status, 'paid');
     assert.equal(stored?.paymentVerificationMethod, 'payu');
     assert.equal(stored?.manualPaymentReference, '987654321');

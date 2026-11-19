@@ -489,7 +489,7 @@ api.post('/payments/payu/callback', express.urlencoded({ extended: false, limit:
   if (typeof payload.status === 'string' && payload.status.toLowerCase() === 'success') {
     await confirmPayUWebhookPayment(txnid).catch((error) => console.error(`PayU callback verification failed for order ${order.id}:`, error));
   }
-  response.redirect(303, '/order-success');
+  response.redirect(303, `/order-success?order=${encodeURIComponent(order.id)}`);
 });
 
 api.post('/payments/payu/webhook', express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {
@@ -519,6 +519,26 @@ api.post('/payments/payu/webhook', express.urlencoded({ extended: false, limit: 
 
 api.post('/payments/orders', requireCustomer, paymentLimit, async (request, response) => {
   await createPaymentOrder(request, response);
+});
+
+api.post('/payments/orders/:id/checkout', requireCustomer, paymentLimit, async (request, response) => {
+  await expirePendingOrders();
+  const database = await getDatabase();
+  const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
+  if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
+  if (order.paymentMethod !== 'upi' || !order.payuTxnId || order.status !== 'pending_payment'
+    || !['pending', 'failed'].includes(order.paymentStatus || 'pending')
+    || !order.reservationExpiresAt || !Number.isFinite(Date.parse(order.reservationExpiresAt)) || Date.parse(order.reservationExpiresAt) <= Date.now()) {
+    response.status(409).json({ error: 'This payment request can no longer be used' }); return;
+  }
+  const customer = database.customers.find((entry) => entry.id === request.session.userId);
+  if (!customer?.email) { response.status(409).json({ error: 'A customer email is required for PayU checkout' }); return; }
+  try {
+    response.set('Cache-Control', 'no-store').json({ paymentForm: await createPayUCheckout(order, customer.email) });
+  } catch (error) {
+    console.error(`PayU checkout retry failed for order ${order.id}:`, error);
+    response.status(503).json({ error: 'Could not open PayU checkout. Please try again.' });
+  }
 });
 
 api.post('/payments/orders/:id/proof', requireCustomer, paymentLimit, express.raw({ type: ['image/jpeg', 'image/png'], limit: maxUploadBytes, inflate: false }), async (request, response) => {
