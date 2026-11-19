@@ -60,7 +60,7 @@ const orderStatusLabel = (order: { status: string; paymentStatus?: string; payme
 };
 type PayUPaymentForm = { action: string; fields: Record<string, string> };
 type PaymentOrder = { orderId: string; paymentMethod: 'upi' | 'cod'; provider?: 'instamojo' | 'manual_upi' | 'payu'; paymentReference?: string; payUrl?: string; paymentForm?: PayUPaymentForm; amount: number; paymentAdjustmentAmount?: number; currency: string; expiresAt?: string; status?: string; orderStatus?: string; items?: { name: string; quantity: number; size?: string }[] };
-type PaymentConfiguration = { configured: boolean; automaticVerification: boolean; provider?: 'manual_upi' };
+type PaymentConfiguration = { configured: boolean; automaticVerification: boolean; provider?: 'payu' };
 
 function submitPayUPayment(paymentForm: PayUPaymentForm | undefined): void {
   if (!paymentForm || !['https://test.payu.in/_payment', 'https://secure.payu.in/_payment'].includes(paymentForm.action)) {
@@ -708,7 +708,7 @@ export default function App() {
       if (!response.ok || !order.orderId || order.paymentMethod !== paymentMethod || typeof order.amount !== 'number') {
         throw new Error(order.error || 'Could not start checkout');
       }
-      if (paymentMethod === 'upi' && (!order.paymentReference || order.provider !== 'manual_upi')) {
+      if (paymentMethod === 'upi' && (!order.paymentReference || order.provider !== 'payu' || !order.paymentForm?.fields.hash)) {
         throw new Error('The server returned an incomplete payment request');
       }
       setPaymentOrder(order);
@@ -720,9 +720,12 @@ export default function App() {
       setPaymentOrderStatus(paymentMethod === 'cod' ? 'confirmed' : 'pending_payment');
       setPaymentMessage(paymentMethod === 'cod'
         ? 'Your order is confirmed Please pay the delivery partner in cash when your order arrives'
-        : 'Scan the QR code and pay the exact amount shown. AHUZA will confirm your order after checking the bank credit.');
+        : 'Complete your payment securely on PayU. Your order is confirmed after PayU verifies the payment.');
       if (paymentMethod === 'cod') setCart([]);
-      else localStorage.setItem('ahuza.pendingPayment', JSON.stringify(order));
+      else {
+        localStorage.setItem('ahuza.pendingPayment', JSON.stringify(order));
+        submitPayUPayment(order.paymentForm);
+      }
     } catch (error) {
       setCheckoutError(error instanceof Error ? error.message : 'Could not start checkout');
     } finally {
@@ -970,7 +973,7 @@ export default function App() {
             </div>
             : <button key={label} type="button" onClick={() => openNavItem(label)}>{label}</button>)}
         </nav>
-        <a className="wordmark" href="#home" aria-label="AHUZA home"><span className="wordmark-star" aria-hidden="true">☆</span><span className="wordmark-stack"><span className="wordmark-text">AHUZA</span><span className="wordmark-tagline">{storefrontText('headerBrandTagline')}</span></span><span className="wordmark-sparkles" aria-hidden="true"><i>✦</i><i>★</i><i>✦</i><i>✧</i><i>✦</i></span></a>
+        <a className="wordmark" href="#home" aria-label="AHUZA home"><img className="brand-logo" src="/ahuza-brand-logo.png" alt="" /></a>
         <form className="header-search" role="search" onSubmit={(event) => { event.preventDefault(); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>
           <label className="sr-only" htmlFor="header-search-input">Search AHUZA</label>
           <input id="header-search-input" type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); if (event.target.value) setCatalogOpen(true); }} placeholder={storefrontText('searchPlaceholder')} autoComplete="off" />
@@ -1090,7 +1093,7 @@ export default function App() {
           <div><h3>{storefrontText('footerCustomerTitle')}</h3><ul><li><a href="#contact">{storefrontText('footerContact')}</a></li><li><a href={`mailto:${storefrontText('contactEmail')}`}>{storefrontText('contactEmail')}</a></li><li><a href={`tel:${storefrontText('contactPhone').replace(/\s+/g, '')}`}>{storefrontText('contactPhone')}</a></li></ul></div>
           <div><h3>AHUZA</h3><p className="footer-tagline">{storefrontText('footerBrandTagline')}</p><p className="footer-loc">{storefrontText('footerLocation')}</p></div>
         </div>
-        <div className="footer-bottom"><a className="wordmark footer-brand-logo" href="#home" aria-label="AHUZA home"><span className="wordmark-star" aria-hidden="true">☆</span><span className="wordmark-text">AHUZA</span></a><span>© AHUZA Apparel 2026</span><a className="footer-terms" href="/terms.html">Terms and Conditions</a><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
+        <div className="footer-bottom"><a className="wordmark footer-brand-logo" href="#home" aria-label="AHUZA home"><img className="brand-logo" src="/ahuza-brand-logo.png" alt="" /></a><span>© AHUZA Apparel 2026</span><a className="footer-terms" href="/terms.html">Terms and Conditions</a><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
       </footer>
 
       {orderSuccessPage && paymentOrder?.paymentMethod === 'upi' && paymentStatus === 'paid' && <PaymentSuccess
@@ -1154,7 +1157,7 @@ export default function App() {
               {(sameAsBilling ? billingAddress : deliveryAddress).country !== 'India' && <p className="payment-config-warning" role="alert">Delivery is currently available only within India.</p>}
               <fieldset className="payment-method-options"><legend>{storefrontText('checkoutPaymentMethod')}</legend><label><input type="radio" name="paymentMethod" value="upi" checked={paymentMethod === 'upi'} onChange={() => setPaymentMethod('upi')} disabled={!paymentConfiguration?.configured} /> {storefrontText('checkoutPayUpi')}</label><label><input type="radio" name="paymentMethod" value="cod" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} /> {storefrontText('checkoutCod')}</label></fieldset>
               {paymentMethod === 'upi' && !paymentConfiguration?.configured && <p className="payment-config-warning" role="status">{paymentConfiguration ? storefrontText('checkoutUpiUnavailable') : storefrontText('checkoutUpiChecking')}</p>}
-              {paymentMethod === 'upi' && paymentConfiguration?.configured && <p className="payment-config-warning">Pay by scanning AHUZA’s QR code after placing your order. Payment is confirmed after the bank credit is checked.</p>}
+              {paymentMethod === 'upi' && paymentConfiguration?.configured && <p className="payment-config-warning">Payment remains pending until PayU confirms it. Confirmation can take time.</p>}
               {checkoutError && <p className="payment-config-warning" role="alert">{checkoutError}</p>}
               <label className="consent-check"><input type="checkbox" checked={marketingConsent} onChange={(event) => setMarketingConsent(event.target.checked)} />{storefrontText('checkoutConsent')}</label><button className="dark-button checkout-button" disabled={busy || estimatedShipping === null || (paymentMethod === 'upi' && paymentConfiguration?.configured !== true)}>{busy ? storefrontText('checkoutPlacing') : customer ? paymentMethod === 'cod' ? storefrontText('checkoutPlaceCod') : paymentConfiguration?.configured ? storefrontText('checkoutContinueUpi') : storefrontText('checkoutUpiUnavailableButton') : storefrontText('checkoutSignIn')} <ArrowRight size={16} /></button></form><small>{storefrontText('checkoutPolicy')}</small></div>
           </>}

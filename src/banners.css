@@ -217,6 +217,8 @@ html,body,body *{font-family:var(--site-font) !important}
 .site-footer .footer-bottom{border-top-color:rgb(255 255 255 / 24%)}
 
 .footer-brand-logo{display:inline-flex;padding:6px 12px;border-radius:4px;background:#f6f3ec}
+.brand-logo{display:block;width:80px;height:auto}
+@media(max-width:600px){.site-header .brand-logo{width:60px}}
 .newsletter form>button{border:1px solid var(--ahuza-brand);background:var(--ahuza-brand);color:#fff;transition:background .2s,border-color .2s,transform .2s}
 .newsletter form>button:hover:not(:disabled){border-color:var(--ahuza-brand-hover);background:var(--ahuza-brand-hover)}
 .newsletter form>button:focus-visible{outline:2px solid var(--ahuza-brand);outline-offset:3px}

@@ -13,9 +13,8 @@ import { createRule, listAutomations, runAutomations, validateRule } from './ser
 import { generateMarketingEmail } from './services/ai.js';
 import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMarketingEvent, isEmailConfigured, sendEmail } from './services/integrations.js';
 import { instamojoAmountInPaise, instamojoWebhookConfigured, verifyInstamojoWebhook, instamojoWebhookFailureReason } from './services/instamojo.js';
-import { payuAmountInPaise, verifyPayUResponseHash } from './services/payu.js';
+import { createPayUCheckout, payuAmountInPaise, payuConfigured, verifyPayUResponseHash } from './services/payu.js';
 import { customerDataConfigured, decryptCustomerValue, encryptCustomerValue, isValidUpiId } from './services/customerData.js';
-import { paymentProvider } from './services/manualUpi.js';
 import { confirmInstamojoWebhookPayment, confirmPayUWebhookPayment, confirmUpiPaymentByOwner, outOfStockItems, syncInstamojoPayment, syncPayUPayment } from './services/paymentSync.js';
 import { activePaymentProvider, deletePayUSettings, getPayUSettingsStatus, savePayUSettings } from './services/paymentSettings.js';
 import { gmailPaymentAlertsConfigured } from './services/gmailPaymentAlerts.js';
@@ -339,6 +338,9 @@ api.delete('/wishlist/:productId', requireCustomer, async (request, response) =>
 async function createPaymentOrder(request: Request, response: Response): Promise<void> {
   const paymentMethod = request.body?.paymentMethod;
   if (paymentMethod !== 'upi' && paymentMethod !== 'cod') { response.status(400).json({ error: 'Choose UPI or cash on delivery' }); return; }
+  if (paymentMethod === 'upi' && !await payuConfigured()) {
+    response.status(503).json({ error: 'UPI payment is unavailable: PayU configuration is incomplete' }); return;
+  }
   const rawPayerUpi = request.body?.payerUpiId;
   const payerUpiId = typeof rawPayerUpi === 'string' ? rawPayerUpi.trim() : '';
   if (paymentMethod === 'upi' && payerUpiId && !isValidUpiId(payerUpiId)) { response.status(400).json({ error: 'Enter a valid UPI ID such as name@bank, or leave it blank' }); return; }
@@ -395,6 +397,9 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   const subtotalAmount = orderItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0) * 100;
   if (!Number.isSafeInteger(subtotalAmount) || subtotalAmount < 100) { response.status(400).json({ error: 'Order total is invalid' }); return; }
   const customerEmail = (await getDatabase()).customers.find((entry) => entry.id === request.session.userId)?.email;
+  if (paymentMethod === 'upi' && !customerEmail) {
+    response.status(409).json({ error: 'A customer email is required for PayU checkout' }); return;
+  }
   const localOrderId = randomUUID();
   const paymentReference = `AHUZA-${randomUUID().replaceAll('-', '').slice(0, 20).toUpperCase()}`;
   const persisted = await mutateDatabase((database) => {
@@ -416,6 +421,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
       amount, subtotalAmount, shippingAmount, discountAmount: 0, taxAmount: 0,
       currency: 'INR', status: paymentMethod === 'cod' ? 'confirmed' : 'pending_payment', paymentStatus: 'pending', paymentMethod,
       ...(paymentMethod === 'upi' ? { paymentReference, reservationExpiresAt: expiresAt } : {}),
+      ...(paymentMethod === 'upi' ? { payuTxnId: `AH${randomUUID().replaceAll('-', '').slice(0, 20)}` } : {}),
       ...(paymentMethod === 'upi' && payerUpiId && customerDataConfigured() ? { payerUpiIdEnc: encryptCustomerValue(payerUpiId) } : {}),
       marketingConsent: request.body?.marketingConsent === true,
       createdAt: new Date(now).toISOString(),
@@ -442,17 +448,24 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     response.status(201).json({ orderId: localOrderId, paymentMethod, status: 'confirmed', amount, currency: 'INR' });
     return;
   }
-  if (customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
-  void enqueueOrderEmail(localOrderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
-  response.status(201).json({
-    orderId: localOrderId, paymentMethod, paymentReference, provider: 'manual_upi',
-    amount, currency: 'INR', expiresAt: placed.reservationExpiresAt,
-    status: 'pending', items: placed.items.map(({ name, quantity, size }) => ({ name, quantity, size })),
-  });
+  try {
+    const checkout = await createPayUCheckout(placed, customerEmail!);
+    if (customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
+    void enqueueOrderEmail(localOrderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
+    response.status(201).json({
+      orderId: localOrderId, paymentMethod, paymentReference, provider: 'payu',
+      paymentForm: checkout, amount, currency: 'INR', expiresAt: placed.reservationExpiresAt,
+      status: 'pending', items: placed.items.map(({ name, quantity, size }) => ({ name, quantity, size })),
+    });
+  } catch (error) {
+    console.error(`PayU checkout creation failed for order ${localOrderId}:`, error);
+    response.status(503).json({ error: 'Could not start PayU checkout' });
+  }
 }
 
-api.get('/payments/config', (_request, response) => {
-  response.json({ configured: true, automaticVerification: false, provider: paymentProvider() });
+api.get('/payments/config', async (_request, response) => {
+  const configured = await payuConfigured();
+  response.json({ configured, automaticVerification: configured, provider: 'payu' });
 });
 
 api.post('/payments/instamojo/webhook', express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {

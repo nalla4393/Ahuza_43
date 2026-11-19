@@ -1,0 +1,39 @@
+import { verifyWebhookSignature } from './services/webhookVerifier';
+import crypto from 'crypto';
+import { Request, Response, NextFunction } from 'express';
+
+export function verifyWebhookSignature(req: Request, res: Response, next: NextFunction) {
+  const signature = req.headers['x-signature'] as string;
+  const webhookSecret = process.env.WEBHOOK_SECRET;
+
+  if (!webhookSecret) {
+    return res.status(500).json({ error: 'Webhook secret is not configured on the server.' });
+  }
+
+  if (!signature) {
+    return res.status(401).json({ error: 'Missing webhook signature header.' });
+  }
+
+  try {
+    const rawBody = (req as any).rawBody || JSON.stringify(req.body);
+
+    const computedSignature = crypto
+      .createHmac('sha256', webhookSecret)
+      .update(rawBody)
+      .digest('hex');
+
+    const isValid = crypto.timingSafeEqual(
+      Buffer.from(signature),
+      Buffer.from(computedSignature)
+    );
+
+    if (!isValid) {
+      return res.status(403).json({ error: 'Invalid webhook signature.' });
+    }
+
+    next();
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err);
+    return res.status(400).json({ error: 'Signature verification error.' });
+  }
+}

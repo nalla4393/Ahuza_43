@@ -289,14 +289,13 @@ The production server serves the built frontend and API from one origin on `PORT
 
 ## Deploy from GitHub with Railway
 
-GitHub Pages cannot host this application because it needs the Express API for the catalog, customer accounts, orders, checkout, and Owner Studio. GitHub Actions deploys the full Node application to Railway after the checks pass:
+GitHub Pages cannot host this application because it needs the Express API for the catalog, customer accounts, orders, checkout, and Owner Studio. Railway deploys the full Node application from the connected GitHub branch; GitHub Actions runs verification checks:
 
-1. Create a Railway project and an empty service for this application. In the service settings, set the build command to `npm ci && npm run build`, the start command to `npm start`, and the health-check path to `/api/health`. Do not enable Railway's own GitHub auto-deploy; GitHub Actions performs the deploy after verification.
+1. Create a Railway project and an empty service for this application. In the service settings, set the build command to `npm ci && npm run build`, the start command to `npm start`, and the health-check path to `/api/health`. Connect the service to the intended GitHub branch.
 2. Add a Railway volume to the service mounted at `/app/.data`. Set `DATA_FILE=/app/.data/ahuza-db.json` and `SESSION_FILE_PATH=/app/.data/sessions` so the JSON database, customer sessions and files survive deploys and restarts. To use PostgreSQL instead, follow the explicit import procedure above and set `STOREFRONT_DATABASE_URL`; retain the volume for sessions and files. Keep this as a single service instance.
 3. Add `SESSION_SECRET` (a stable random value of at least 32 characters) and `OWNER_API_KEY` in Railway's service variables. Railway supplies `PORT`. Configure PayU credentials and its webhook as described above for UPI checkout. Gmail OAuth is optional for reviewing legacy bank credits.
-4. Create a Railway project token. In the GitHub repository, add it under **Settings → Secrets and variables → Actions → Secrets** as `RAILWAY_TOKEN`. Add the Railway web service name or ID under **Settings → Secrets and variables → Actions → Variables** as `RAILWAY_SERVICE`. Do not commit or paste the token into the repository.
-5. Push to `main` or manually run **Actions → Verify and deploy to Railway**. The workflow runs `npm test` and `npm run build` first, then deploys only if those checks pass. Once Railway assigns a public domain, verify `/api/health` and the storefront.
-6. Before accepting online payments, configure Ahuza Pay and complete a small live transaction end to end, including bank reconciliation.
+4. Push to the connected branch. The GitHub Actions workflow runs `npm test` and `npm run build`; it does not deploy or gate Railway's automatic deployments. Once Railway assigns a public domain, verify `/api/health` and the storefront.
+5. Before accepting online payments, configure PayU and complete a small live transaction end to end, including bank reconciliation.
 
 Configure a Railway volume and stable secrets before treating the deployment as production-ready.
 
@@ -334,7 +333,7 @@ After DNS is correct, add `https://www.ahuzawear.com/` as a URL-prefix property 
 
 - `GET /api/products`, `GET /api/products/:id`
 - `POST /api/auth/signup`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
-- `GET /api/payments/config`, `POST /api/payments/orders`, `GET /api/payments/orders/:id/status`, `POST /api/payments/orders/:id/cancel` (Ahuza Pay UPI checkout; customer status is never trusted for confirmation)
+- `GET /api/payments/config`, `POST /api/payments/orders`, `GET /api/payments/orders/:id/status`, `POST /api/payments/orders/:id/cancel` (PayU UPI checkout; customer status is never trusted for confirmation)
 - `GET /api/orders`, `GET /api/orders/:id`, `GET /api/orders/:id/invoice` (PDF after payment confirmation), `POST /api/orders/:id/returns`
 - Storefront content: `GET /api/storefront`; owner edits via `PATCH /api/owner/content`
 - Owner: `GET/PATCH/POST /api/owner/inventory`, `GET/PATCH /api/owner/orders`, `GET /api/owner/analytics`, `GET/PATCH /api/owner/integrations`, `GET/PATCH /api/owner/support-tickets`, `POST /api/owner/chat`, `POST /api/owner/agent/execute` to approve proposed actions, `POST /api/owner/email-agent/draft`, `POST /api/owner/email-agent/send`, `POST /api/owner/social-post`, and `POST /api/owner/automations/test` for non-conversion webhook diagnostics.

@@ -55,7 +55,7 @@ test('manual UPI configuration fails closed and link contains the server amount 
   }
 });
 
-test('new UPI checkout uses manual QR confirmation while legacy orders remain reviewable', async () => {
+test('unconfigured PayU fails closed while legacy manual UPI orders remain reviewable', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'ahuza-manual-upi-'));
   process.env.DATA_FILE = path.join(directory, 'db.json');
   process.env.PAYMENT_PROVIDER = 'manual_upi';
@@ -82,7 +82,7 @@ test('new UPI checkout uses manual QR confirmation while legacy orders remain re
   const base = `http://127.0.0.1:${address.port}`;
   try {
     const config = await (await fetch(`${base}/api/payments/config`)).json() as { configured: boolean; automaticVerification: boolean; provider: string };
-    assert.deepEqual(config, { configured: true, automaticVerification: false, provider: 'manual_upi' });
+    assert.deepEqual(config, { configured: false, automaticVerification: false, provider: 'payu' });
     const login = await fetch(`${base}/test-login`, { method: 'POST' });
     const cookie = login.headers.get('set-cookie')?.split(';')[0];
     assert.ok(cookie);
@@ -92,13 +92,9 @@ test('new UPI checkout uses manual QR confirmation while legacy orders remain re
     const product = database.products.find((entry) => entry.id === 'soft-form-shirt')!;
     const expectedShippingAmount = shippingForSubtotal(product.price * 100, database.shippingChargeAmount ?? defaultShippingCharge);
     const create = () => fetch(`${base}/api/payments/orders`, { method: 'POST', headers, body: JSON.stringify({ paymentMethod: 'upi', expectedShippingAmount, items: [{ productId: product.id, quantity: 1 }], shippingAddress }) });
-    const created = await create();
-    assert.equal(created.status, 201);
-    const order = await created.json() as { orderId: string; paymentReference: string; provider: string; amount: number; paymentForm?: unknown };
-    assert.equal(order.provider, 'manual_upi');
-    assert.equal(order.amount, product.price * 100 + expectedShippingAmount);
-    assert.ok(order.paymentReference);
-    assert.equal(order.paymentForm, undefined);
+    const ordersBefore = database.orders.length;
+    assert.equal((await create()).status, 503);
+    assert.equal((await getDatabase()).orders.length, ordersBefore);
     let nextLegacyOrder = 0;
     const createLegacy = async () => mutateDatabase((database) => {
       const index = ++nextLegacyOrder;
@@ -114,6 +110,7 @@ test('new UPI checkout uses manual QR confirmation while legacy orders remain re
       database.orders.push(order);
       return { orderId: order.id, amount: order.amount };
     });
+    const order = await createLegacy();
     const second = await createLegacy();
     const status = await fetch(`${base}/api/payments/orders/${order.orderId}/status`, { headers });
     assert.equal((await status.json() as { status: string }).status, 'pending');
