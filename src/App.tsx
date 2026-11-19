@@ -971,7 +971,7 @@ export default function App() {
             </div>
             : <button key={label} type="button" onClick={() => openNavItem(label)}>{label}</button>)}
         </nav>
-        <a className="wordmark" href="#home" aria-label="AHUZA home"><span className="wordmark-star" aria-hidden="true">☆</span><img src="/ahuza-brand-logo.png" alt="" className="brand-logo-image" /><span className="wordmark-stack"><span className="wordmark-text">huza</span><span className="wordmark-tagline">{storefrontText('headerBrandTagline')}</span></span></a>
+        <a className="wordmark" href="#home" aria-label="AHUZA home"><span className="wordmark-star" aria-hidden="true">☆</span><img src="/ahuza-wordmark.png" alt="" className="wordmark-logo" /></a>
         <form className="header-search" role="search" onSubmit={(event) => { event.preventDefault(); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>
           <label className="sr-only" htmlFor="header-search-input">Search AHUZA</label>
           <input id="header-search-input" type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); if (event.target.value) setCatalogOpen(true); }} placeholder={storefrontText('searchPlaceholder')} autoComplete="off" />
@@ -1091,7 +1091,7 @@ export default function App() {
           <div><h3>{storefrontText('footerCustomerTitle')}</h3><ul><li><a href="#contact">{storefrontText('footerContact')}</a></li><li><a href={`mailto:${storefrontText('contactEmail')}`}>{storefrontText('contactEmail')}</a></li><li><a href={`tel:${storefrontText('contactPhone').replace(/\s+/g, '')}`}>{storefrontText('contactPhone')}</a></li></ul></div>
           <div><h3>AHUZA</h3><p className="footer-tagline">{storefrontText('footerBrandTagline')}</p><p className="footer-loc">{storefrontText('footerLocation')}</p></div>
         </div>
-        <div className="footer-bottom"><a className="wordmark" href="#home"><img src="/ahuza-a-icon.png" alt="" className="brand-logo-image" /><span className="wordmark-text">huza</span></a><span>© AHUZA 2026</span><a className="footer-terms" href="/terms.html">Terms and Conditions</a><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
+        <div className="footer-bottom"><a className="wordmark" href="#home" aria-label="AHUZA home"><img src="/ahuza-wordmark.png" alt="" className="wordmark-logo" /></a><span>© AHUZA 2026</span><a className="footer-terms" href="/terms.html">Terms and Conditions</a><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
       </footer>
 
       {orderSuccessPage && paymentOrder?.paymentMethod === 'upi' && paymentStatus === 'paid' && <PaymentSuccess

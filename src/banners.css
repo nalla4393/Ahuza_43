@@ -33,7 +33,6 @@
 .site-header{padding-left:2.2%;padding-right:2.2%}
 .site-header>.wordmark{font-family:'DM Sans',sans-serif;font-weight:700;font-size:42px;letter-spacing:.02em;margin-left:-4px;display:flex;align-items:center;gap:8px}
 .wordmark-star{font-size:28px;color:var(--accent);flex-shrink:0}
-.brand-logo-image{height:40px;width:auto;flex-shrink:0}
 .wordmark-stack{display:flex;flex-direction:column;align-items:flex-start;gap:0}
 .wordmark-text{display:block;font-size:inherit;line-height:1.1}
 .wordmark-tagline{display:block;font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:2px}
@@ -46,7 +45,7 @@
 .main-nav .mega-campaign{position:relative;display:block;padding:0;height:180px;overflow:hidden;border:0}
 .mega-campaign img{width:100%;height:100%;object-fit:cover}
 .main-nav .mega-campaign span{position:absolute;left:12px;bottom:12px;padding:8px 14px;background:#fff;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
-@media(max-width:760px){.site-header>.wordmark{font-size:34px;margin-left:0}.wordmark-star{font-size:22px}.brand-logo-image{height:24px}.wordmark-tagline{display:none}}
+@media(max-width:760px){.site-header>.wordmark{font-size:34px;margin-left:0}.wordmark-star{font-size:22px}.wordmark-tagline{display:none}}
 
 /* Visual polish */
 .announcement{background:linear-gradient(90deg,#111,#3a1a20 50%,#111);letter-spacing:.08em;text-transform:uppercase;font-size:11px}
@@ -179,6 +178,7 @@ html,body,body *{font-family:var(--site-font) !important}
 .wordmark .wordmark-stack{display:flex;flex-direction:column;align-items:flex-start;line-height:1.05}
 .wordmark .wordmark-tagline{margin-top:3px;font-size:10px;font-weight:500;letter-spacing:.04em;color:var(--muted,#6b6b63);-webkit-text-fill-color:currentColor}
 @media(max-width:760px){.wordmark .wordmark-tagline{font-size:9px;letter-spacing:.02em}}
+.wordmark-logo{display:block;width:auto;height:42px;flex-shrink:0;transform-origin:center;animation:wordmarkZoom 3.6s ease-in-out infinite}
 .wordmark .wordmark-star{font-size:1.15em;line-height:1;color:var(--ahuza-brand);animation:starTwinkle 2.4s ease-in-out infinite}
 .wordmark-sparkles{position:absolute;inset:-8px -10px;pointer-events:none}
 .wordmark-sparkles i{position:absolute;font-style:normal;font-size:12px;color:#d4a017;opacity:0;animation:sparkle 2.6s ease-in-out infinite}
@@ -189,11 +189,13 @@ html,body,body *{font-family:var(--site-font) !important}
 .wordmark-sparkles i:nth-child(5){left:48%;bottom:-4px;font-size:9px;animation-delay:2s}
 @keyframes sparkle{0%,100%{opacity:0;transform:translateY(4px) scale(.3) rotate(0)}40%,60%{opacity:1;transform:translateY(-3px) scale(1) rotate(90deg)}}
 @keyframes starTwinkle{0%,100%{transform:scale(1) rotate(0)}50%{transform:scale(1.3) rotate(20deg)}}
-@media(prefers-reduced-motion:reduce){.wordmark .wordmark-star,.wordmark-sparkles i{animation:none}.wordmark-sparkles i{opacity:.8}}
+@keyframes wordmarkZoom{0%,100%{transform:scale(.88)}50%{transform:scale(1.08)}}
+@media(prefers-reduced-motion:reduce){.wordmark-logo,.wordmark .wordmark-star,.wordmark-sparkles i{animation:none}.wordmark-sparkles i{opacity:.8}}
 
 @media(max-width:760px){
   .site-header{grid-template-columns:max-content minmax(48px,1fr) max-content;grid-template-areas:"logo search actions" "menu menu menu";column-gap:6px;row-gap:6px;padding:8px 3%}
   .site-header>.wordmark{justify-self:start;font-size:25px;margin:0}
+  .site-header .wordmark-logo{height:28px}
   .site-header .wordmark-tagline{font-size:7px;letter-spacing:0}
   .site-header .header-search{min-width:0;max-width:none;padding:0 3px 0 8px}
   .site-header .header-search input{height:36px;font-size:13px}
@@ -210,6 +212,7 @@ html,body,body *{font-family:var(--site-font) !important}
 @media(max-width:380px){
   .site-header{grid-template-columns:max-content minmax(40px,1fr) max-content;column-gap:4px;padding-right:2%;padding-left:2%}
   .site-header>.wordmark{font-size:22px}
+  .site-header .wordmark-logo{height:24px}
   .site-header .wordmark-tagline{font-size:6px}
   .site-header .header-actions{gap:1px}
   .site-header .header-actions>button{min-width:25px;padding:3px}
