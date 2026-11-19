@@ -3,8 +3,9 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import pg from 'pg';
 import { defaultStorefrontCopy, mergeStorefrontCopy, type StorefrontCopy } from '../../shared/storefrontCopy.js';
+import type { ProductDetails } from '../../shared/productDetails.js';
 
-export type Product = {
+export type Product = ProductDetails & {
   id: string;
   name: string;
   description: string;

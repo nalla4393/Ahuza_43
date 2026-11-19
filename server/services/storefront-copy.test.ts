@@ -13,6 +13,14 @@ test('storefront copy overrides preserve owner-entered text exactly', () => {
   assert.equal(copy.contactTitle, defaultStorefrontCopy.contactTitle);
 });
 
+test('product detail labels accept overrides and default missing fields', () => {
+  const copy = mergeStorefrontCopy({ detailFabric: 'Material', detailBulletPoints: 'Highlights' });
+  assert.equal(copy.detailFabric, 'Material');
+  assert.equal(copy.detailBulletPoints, 'Highlights');
+  assert.equal(copy.detailPattern, 'Pattern');
+  assert.equal(copy.detailComponents, 'Components');
+});
+
 test('storefront copy ignores unknown and non-string persisted fields', () => {
   const copy = mergeStorefrontCopy({ contactTitle: 42, notAField: 'unrecognized' });
   assert.equal(copy.contactTitle, defaultStorefrontCopy.contactTitle);

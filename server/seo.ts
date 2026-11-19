@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Database, Product } from './services/database.js';
+import { mergeStorefrontCopy, type StorefrontCopy } from '../shared/storefrontCopy.js';
 
 const origin = 'https://www.ahuzawear.com';
 const defaultImage = `${origin}/ahuza-brand-social.jpg`;
@@ -41,7 +42,7 @@ function meta(title: string, description: string, url: string, image: string, ty
 <script type="application/ld+json">${json}</script>`;
 }
 
-function productPage(product: Product): { head: string; body: string } {
+function productPage(product: Product, copy: StorefrontCopy): { head: string; body: string } {
   const url = origin + productPath(product.id);
   const image = imageUrl(product);
   const title = `${product.name} | AHUZA Apparel`;
@@ -62,7 +63,14 @@ function productPage(product: Product): { head: string; body: string } {
     },
   };
   const price = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(product.price);
-  const body = `<main><a href="/">AHUZA Apparel</a><h1>${escape(product.name)}</h1><p>${escape(description)}</p><img src="${escape(image)}" alt="${escape(product.name)}" width="400"><p>${escape(price)}</p><p>${product.stock > 0 ? 'In stock' : 'Out of stock'}</p><p>SKU: ${escape(product.sku)}</p><a href="/">Shop the collection</a></main>`;
+  const attributes = [
+    { label: copy.detailFabric, value: product.fabric },
+    { label: copy.detailPattern, value: product.pattern },
+    { label: copy.detailComponents, value: product.components },
+  ].filter((entry): entry is { label: string; value: string } => Boolean(entry.value));
+  const details = attributes.length ? `<dl>${attributes.map(({ label, value }) => `<dt>${escape(label)}</dt><dd>${escape(value)}</dd>`).join('')}</dl>` : '';
+  const highlights = product.bulletPoints?.length ? `<h2>${escape(copy.detailBulletPoints)}</h2><ul>${product.bulletPoints.map((point) => `<li>${escape(point)}</li>`).join('')}</ul>` : '';
+  const body = `<main><a href="/">AHUZA Apparel</a><h1>${escape(product.name)}</h1><p>${escape(description)}</p><img src="${escape(image)}" alt="${escape(product.name)}" width="400"><p>${escape(price)}</p><p>${product.stock > 0 ? 'In stock' : 'Out of stock'}</p><p>SKU: ${escape(product.sku)}</p>${details}${highlights}<a href="/">Shop the collection</a></main>`;
   return { head: meta(title, description, url, image, 'product', schema), body };
 }
 
@@ -108,7 +116,7 @@ export function createSeoRouter(frontendPath: string, loadDatabase: () => Promis
       response.status(404).type('text').send('Page not found');
       return;
     }
-    const page = product ? productPage(product) : collectionPage(category, matches);
+    const page = product ? productPage(product, mergeStorefrontCopy(database.content.copy)) : collectionPage(category, matches);
     const template = await readFile(path.join(frontendPath, 'index.html'), 'utf8');
     if (!template.includes('<!-- SEO_START -->') || !template.includes('<!-- SEO_END -->') || !template.includes('<div id="root"></div>')) {
       throw new Error('Storefront SEO template markers are missing');

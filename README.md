@@ -61,6 +61,8 @@ background jobs have not been made safe for multiple instances.
 
 Open **Owner Studio** from the storefront footer and enter the configured owner key. The key stays in browser memory and is sent only to owner APIs using `X-Owner-Key`. The dashboard includes sales and low-stock overview, product and ghost-mannequin editing, storefront content, fulfillment and return requests, integration status, an AI owner agent, reviewed customer-email drafts, and social caption generation. **Owner Studio → Storefront** edits the announcement, hero and story, campaign banners, homepage section headings, service promises, contact and newsletter copy, and footer text. Product names and descriptions are edited in **Products & stock**. These changes are saved with the storefront content in the persistent database.
 
+In **Products & stock**, optionally add fabric, pattern, components and up to 10 bullet points (one per line) for each product. They appear on product detail pages when provided. Their headings can be edited in **Storefront → Additional storefront text → Product cards & details**.
+
 To change the customer-support chatbot portrait, open **Owner Studio → Storefront → Chatbot portrait**, upload a JPG, PNG or WebP, and select **Publish storefront text**. The preview shows the circular crop. Custom portraits are static; choose **Use default portrait** and publish to restore the animated default.
 Use **Search storefront settings and text** at the top of the Storefront editor to find an editing field or section and jump to it.
 
@@ -287,16 +289,37 @@ The production server serves the built frontend and API from one origin on `PORT
 
 ## Deploy from GitHub with Railway
 
-GitHub Pages cannot host this application because it needs the Express API for the catalog, customer accounts, orders, checkout, and Owner Studio. GitHub Actions deploys the full Node application to Railway after the checks pass:
+GitHub Pages cannot host this application because it needs the Express API for the catalog, customer accounts, orders, checkout, and Owner Studio. Railway deploys the full Node application from the connected GitHub branch; GitHub Actions runs verification checks:
 
-1. Create a Railway project and an empty service for this application. In the service settings, set the build command to `npm ci && npm run build`, the start command to `npm start`, and the health-check path to `/api/health`. Do not enable Railway's own GitHub auto-deploy; GitHub Actions performs the deploy after verification.
+1. Create a Railway project and an empty service for this application. In the service settings, set the build command to `npm ci && npm run build`, the start command to `npm start`, and the health-check path to `/api/health`. Connect the service to the intended GitHub branch.
 2. Add a Railway volume to the service mounted at `/app/.data`. Set `DATA_FILE=/app/.data/ahuza-db.json` and `SESSION_FILE_PATH=/app/.data/sessions` so the JSON database, customer sessions and files survive deploys and restarts. To use PostgreSQL instead, follow the explicit import procedure above and set `STOREFRONT_DATABASE_URL`; retain the volume for sessions and files. Keep this as a single service instance.
 3. Add `SESSION_SECRET` (a stable random value of at least 32 characters) and `OWNER_API_KEY` in Railway's service variables. Railway supplies `PORT`. Configure PayU credentials and its webhook as described above for UPI checkout. Gmail OAuth is optional for reviewing legacy bank credits.
-4. Create a Railway project token. In the GitHub repository, add it under **Settings → Secrets and variables → Actions → Secrets** as `RAILWAY_TOKEN`. Add the Railway web service name or ID under **Settings → Secrets and variables → Actions → Variables** as `RAILWAY_SERVICE`. Do not commit or paste the token into the repository.
-5. Push to `main` or manually run **Actions → Verify and deploy to Railway**. The workflow runs `npm test` and `npm run build` first, then deploys only if those checks pass. Once Railway assigns a public domain, verify `/api/health` and the storefront.
-6. Before accepting online payments, configure Ahuza Pay and complete a small live transaction end to end, including bank reconciliation.
+4. Push to the connected branch. The GitHub Actions workflow runs `npm test` and `npm run build`; it does not deploy or gate Railway's automatic deployments. Once Railway assigns a public domain, verify `/api/health` and the storefront.
+5. Before accepting online payments, configure PayU and complete a small live transaction end to end, including bank reconciliation.
 
 Configure a Railway volume and stable secrets before treating the deployment as production-ready.
+
+## Deploy from GitHub with Render
+
+The root `render.yaml` defines the production Node web service and its persistent
+disk. In Render, create a **Blueprint Instance** from this GitHub repository
+and deploy the `ahuza-web` service. Keep it as a single instance so the JSON
+database, file sessions, and uploads use the mounted disk consistently.
+
+After the Blueprint creates the service, set the secret environment variables
+in **Render → ahuza-web → Environment**. Copy the PayU merchant key and salt
+from the current secure source (such as the Railway service variables) directly
+into Render; never commit them or put them in the Blueprint. Set `PAYU_MODE` to
+`test` while validating checkout, then use `production` only with production
+credentials. The callback and webhook URLs in the Blueprint use the canonical
+`www.ahuzawear.com` domain; update them if the Render service uses a different
+public domain. Configure those same HTTPS endpoints in the PayU dashboard.
+
+Set `OWNER_API_KEY` and any required integration credentials in Render as well.
+The `SESSION_SECRET` is generated by the Blueprint. Before launch, verify
+`/api/health`, test a payment in the selected PayU mode, and confirm the service
+has a healthy persistent disk. Railway environment variables are not shared
+with Render, so adding them to Railway alone does not configure this service.
 
 ## Custom domain and search indexing
 
@@ -310,7 +333,7 @@ After DNS is correct, add `https://www.ahuzawear.com/` as a URL-prefix property 
 
 - `GET /api/products`, `GET /api/products/:id`
 - `POST /api/auth/signup`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
-- `GET /api/payments/config`, `POST /api/payments/orders`, `GET /api/payments/orders/:id/status`, `POST /api/payments/orders/:id/cancel` (Ahuza Pay UPI checkout; customer status is never trusted for confirmation)
+- `GET /api/payments/config`, `POST /api/payments/orders`, `GET /api/payments/orders/:id/status`, `POST /api/payments/orders/:id/cancel` (PayU UPI checkout; customer status is never trusted for confirmation)
 - `GET /api/orders`, `GET /api/orders/:id`, `GET /api/orders/:id/invoice` (PDF after payment confirmation), `POST /api/orders/:id/returns`
 - Storefront content: `GET /api/storefront`; owner edits via `PATCH /api/owner/content`
 - Owner: `GET/PATCH/POST /api/owner/inventory`, `GET/PATCH /api/owner/orders`, `GET /api/owner/analytics`, `GET/PATCH /api/owner/integrations`, `GET/PATCH /api/owner/support-tickets`, `POST /api/owner/chat`, `POST /api/owner/agent/execute` to approve proposed actions, `POST /api/owner/email-agent/draft`, `POST /api/owner/email-agent/send`, `POST /api/owner/social-post`, and `POST /api/owner/automations/test` for non-conversion webhook diagnostics.

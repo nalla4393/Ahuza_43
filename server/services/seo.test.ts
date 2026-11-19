@@ -11,6 +11,7 @@ test('SEO pages and sitemap reflect the published active catalog', async () => {
     id: 'shirt-1', name: 'Linen & Cotton', description: 'Soft </script> & easy', sku: 'SHIRT-1',
     price: 2490, stock: 2, category: 'Kurta Sets', imageUrl: '/uploads/shirt.webp',
     active: true, ghostMannequin: { tags: [] },
+    fabric: 'Cotton & linen', pattern: 'Striped', components: 'Top & trousers', bulletPoints: ['Soft <fabric>'],
   };
   const database: Database = {
     products: [product, { ...product, id: 'hidden', active: false }],
@@ -34,6 +35,10 @@ test('SEO pages and sitemap reflect the published active catalog', async () => {
     assert.match(html, /property="og:image" content="https:\/\/www\.ahuzawear\.com\/uploads\/shirt\.webp"/);
     assert.match(html, /<h1>Linen &amp; Cotton<\/h1>/);
     assert.match(html, /Soft &lt;\/script&gt; &amp; easy/);
+    assert.match(html, /<dt>Fabric<\/dt><dd>Cotton &amp; linen<\/dd>/);
+    assert.match(html, /<dt>Pattern<\/dt><dd>Striped<\/dd>/);
+    assert.match(html, /<dt>Components<\/dt><dd>Top &amp; trousers<\/dd>/);
+    assert.match(html, /<h2>About this item<\/h2><ul><li>Soft &lt;fabric&gt;<\/li><\/ul>/);
     const schema = JSON.parse(html.match(/<script type="application\/ld\+json">(.*?)<\/script>/s)![1]!);
     assert.equal(schema.offers.price, '2490.00');
     assert.equal(schema.offers.availability, 'https://schema.org/InStock');
