@@ -180,8 +180,9 @@ html,body,body *{font-family:var(--site-font) !important}
 .wordmark .wordmark-tagline{margin-top:3px;font-size:10px;font-weight:500;letter-spacing:.04em;color:var(--muted,#6b6b63);-webkit-text-fill-color:currentColor}
 @media(max-width:760px){.wordmark .wordmark-tagline{font-size:9px;letter-spacing:.02em}}
 .wordmark-logo{display:block;width:auto;height:42px;flex-shrink:0;transform-origin:center;animation:wordmarkZoom 3.6s ease-in-out infinite}
-.wordmark .wordmark-star{font-size:1.15em;line-height:1;color:var(--ahuza-brand);animation:starTwinkle 2.4s ease-in-out infinite}
-.wordmark-mark .wordmark-star{position:absolute;top:50%;left:50%;z-index:0;font-size:180px;line-height:1;transform:translate(-50%,-50%);transform-origin:center}
+.wordmark .wordmark-star{display:block;overflow:visible;color:var(--ahuza-brand);animation:starTwinkle 2.4s ease-in-out infinite}
+.wordmark-mark .wordmark-star{position:absolute;top:50%;left:50%;z-index:0;width:190px;height:158px;opacity:.72;transform:translate(-50%,-50%);transform-origin:center}
+.wordmark-mark .wordmark-star polygon{fill:none;stroke:currentColor;stroke-width:1.2;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 .wordmark-mark .wordmark-logo{position:relative;z-index:1;width:68%;height:auto}
 .wordmark-sparkles{position:absolute;inset:-8px -10px;pointer-events:none}
 .wordmark-sparkles i{position:absolute;font-style:normal;font-size:12px;color:#d4a017;opacity:0;animation:sparkle 2.6s ease-in-out infinite}
@@ -199,7 +200,7 @@ html,body,body *{font-family:var(--site-font) !important}
   .site-header{grid-template-columns:max-content minmax(48px,1fr) max-content;grid-template-areas:"logo search actions" "menu menu menu";column-gap:6px;row-gap:6px;padding:8px 3%}
   .site-header>.wordmark{justify-self:start;font-size:25px;margin:0}
   .site-header .wordmark-mark{width:clamp(112px,36vw,170px);height:clamp(96px,30vw,130px)}
-  .site-header .wordmark-mark .wordmark-star{font-size:clamp(108px,30vw,142px)}
+  .site-header .wordmark-mark .wordmark-star{width:clamp(108px,30vw,142px);height:auto}
   .site-header .wordmark-mark .wordmark-logo{width:68%;height:auto}
   .site-header .wordmark-tagline{font-size:7px;letter-spacing:0}
   .site-header .header-search{min-width:0;max-width:none;padding:0 3px 0 8px}
@@ -218,7 +219,7 @@ html,body,body *{font-family:var(--site-font) !important}
   .site-header{grid-template-columns:max-content minmax(40px,1fr) max-content;column-gap:4px;padding-right:2%;padding-left:2%}
   .site-header>.wordmark{font-size:22px}
   .site-header .wordmark-mark{width:104px;height:92px}
-  .site-header .wordmark-mark .wordmark-star{font-size:102px}
+  .site-header .wordmark-mark .wordmark-star{width:102px;height:auto}
   .site-header .wordmark-tagline{font-size:6px}
   .site-header .header-actions{gap:1px}
   .site-header .header-actions>button{min-width:25px;padding:3px}

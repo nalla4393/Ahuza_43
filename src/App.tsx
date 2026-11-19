@@ -971,7 +971,7 @@ export default function App() {
             </div>
             : <button key={label} type="button" onClick={() => openNavItem(label)}>{label}</button>)}
         </nav>
-        <a className="wordmark" href="#home" aria-label="AHUZA home"><span className="wordmark-mark"><span className="wordmark-star" aria-hidden="true">☆</span><img src="/ahuza-wordmark.png" alt="" className="wordmark-logo" /></span></a>
+        <a className="wordmark" href="#home" aria-label="AHUZA home"><span className="wordmark-mark"><svg className="wordmark-star" viewBox="0 0 120 100" aria-hidden="true"><polygon points="60,3 74,37 111,39 83,61 92,96 60,77 28,96 37,61 9,39 46,37" /></svg><img src="/ahuza-wordmark.png" alt="" className="wordmark-logo" /></span></a>
         <form className="header-search" role="search" onSubmit={(event) => { event.preventDefault(); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>
           <label className="sr-only" htmlFor="header-search-input">Search AHUZA</label>
           <input id="header-search-input" type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); if (event.target.value) setCatalogOpen(true); }} placeholder={storefrontText('searchPlaceholder')} autoComplete="off" />
