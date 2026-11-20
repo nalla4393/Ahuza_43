@@ -121,7 +121,7 @@ export const storefrontCopyFields = [
   { id: 'checkoutBilling', label: 'Checkout: billing heading', group: 'Checkout', defaultValue: 'Billing address · India' },
   { id: 'checkoutDelivery', label: 'Checkout: delivery heading', group: 'Checkout', defaultValue: 'Delivery address · India' },
   { id: 'checkoutPaymentMethod', label: 'Checkout: payment method legend', group: 'Checkout', defaultValue: 'Payment method' },
-  { id: 'checkoutPayUpi', label: 'Checkout: UPI option', group: 'Checkout', defaultValue: 'Pay by UPI ID or UPI number' },
+  { id: 'checkoutPayUpi', label: 'Checkout: UPI option', group: 'Checkout', defaultValue: 'Pay with UPI via PayU' },
   { id: 'checkoutCod', label: 'Checkout: cash on delivery option', group: 'Checkout', defaultValue: 'Cash on delivery' },
   { id: 'checkoutUpiUnavailable', label: 'Checkout: UPI unavailable notice', group: 'Checkout', defaultValue: 'Online payment is unavailable right now Cash on delivery is still available' },
   { id: 'checkoutUpiChecking', label: 'Checkout: checking UPI notice', group: 'Checkout', defaultValue: 'Checking payment availability… Cash on delivery is available' },

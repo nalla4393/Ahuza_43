@@ -79,7 +79,7 @@ export async function createPayUIntent(
   clientIp: string,
   userAgent: string,
 ): Promise<{ value: string; expiresAt: string }> {
-  if (!clientIp || !userAgent || !order.reservationExpiresAt) {
+  if (!clientIp?.trim() || !userAgent?.trim() || !order.reservationExpiresAt) {
     throw new Error('PayU UPI intent request is missing device or reservation information');
   }
   const checkout = await createPayUCheckout(order, email);
@@ -91,19 +91,22 @@ export async function createPayUIntent(
       pg: 'UPI',
       bankcode: 'INTENT',
       txn_s2s_flow: '4',
-      s2s_client_ip: clientIp,
-      s2s_device_info: userAgent,
+      s2s_client_ip: clientIp.trim(),
+      s2s_device_info: userAgent.trim(),
     }),
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(20000),
   });
   if (!response.ok) throw new Error(`PayU UPI intent API returned HTTP ${response.status}`);
   const data = object(await response.json());
   const metadata = object(data?.metaData);
   const result = object(data?.result);
+  console.debug(`PayU intent response validation: txnId=${metadata?.txnId}, amount=${result?.amount}, expected=${(order.amount/100).toFixed(2)}, merchantVpa=${result?.merchantVpa}`);
   if (!metadata || metadata.txnId !== order.payuTxnId || typeof metadata.txnStatus !== 'string'
-    || metadata.txnStatus.toLowerCase() !== 'pending' || !result
+    || (metadata.txnStatus as string).toLowerCase() !== 'pending' || !result
     || payuAmountInPaise(result.amount) !== order.amount || typeof result.merchantVpa !== 'string'
     || typeof result.intentURIData !== 'string' || result.intentURIData.length > 4096) {
+    const receivedAmount = payuAmountInPaise(result?.amount);
+    console.error(`PayU intent validation failed: txnMismatch=${metadata?.txnId !== order.payuTxnId}, statusMismatch=${(metadata?.txnStatus as string | undefined)?.toLowerCase() !== 'pending'}, amountMismatch=${receivedAmount} vs ${order.amount}, missingResult=${!result}, missingIntentData=${!result?.intentURIData}, missingVpa=${!result?.merchantVpa}`);
     throw new Error('PayU returned an invalid UPI intent response');
   }
   const intent = new URL(`upi://pay?${result.intentURIData}`);
@@ -119,7 +122,7 @@ export async function createPayUIntent(
 }
 
 export async function createPayUQr(order: Order, email: string, clientIp: string, userAgent: string): Promise<{ value: string; expiresAt: string }> {
-  if (!clientIp || !userAgent || !order.reservationExpiresAt) throw new Error('PayU QR request is missing device or reservation information');
+  if (!clientIp?.trim() || !userAgent?.trim() || !order.reservationExpiresAt) throw new Error('PayU QR request is missing device or reservation information');
   const checkout = await createPayUCheckout(order, email);
   const remaining = Math.floor((Date.parse(order.reservationExpiresAt) - Date.now()) / 1000);
   const expirySeconds = Math.min(1800, remaining);
@@ -130,18 +133,21 @@ export async function createPayUQr(order: Order, email: string, clientIp: string
     headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
     body: new URLSearchParams({
       ...checkout.fields, pg: 'DBQR', bankcode: 'UPIDBQR', txn_s2s_flow: '4',
-      expiry_time: String(expirySeconds), s2s_client_ip: clientIp, s2s_device_info: userAgent,
+      expiry_time: String(expirySeconds), s2s_client_ip: clientIp.trim(), s2s_device_info: userAgent.trim(),
     }),
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(20000),
   });
   if (!response.ok) throw new Error(`PayU QR API returned HTTP ${response.status}`);
   const data = object(await response.json());
   const metadata = object(data?.metaData);
   const result = object(data?.result);
+  console.debug(`PayU QR response validation: txnId=${metadata?.txnId}, amount=${result?.amount}, expected=${(order.amount/100).toFixed(2)}, merchantVpa=${result?.merchantVpa}`);
   if (!metadata || metadata.txnId !== order.payuTxnId || typeof metadata.txnStatus !== 'string'
-    || metadata.txnStatus.toLowerCase() !== 'pending' || !result
+    || (metadata.txnStatus as string).toLowerCase() !== 'pending' || !result
     || payuAmountInPaise(result.amount) !== order.amount || typeof result.qrString !== 'string'
     || typeof result.merchantVpa !== 'string' || result.qrString.length > 4096) {
+    const receivedAmount = payuAmountInPaise(result?.amount);
+    console.error(`PayU QR validation failed: txnMismatch=${metadata?.txnId !== order.payuTxnId}, statusMismatch=${(metadata?.txnStatus as string | undefined)?.toLowerCase() !== 'pending'}, amountMismatch=${receivedAmount} vs ${order.amount}, missingResult=${!result}, missingQrString=${!result?.qrString}, missingVpa=${!result?.merchantVpa}`);
     throw new Error('PayU returned an invalid QR response');
   }
   const qr = new URL(result.qrString);
@@ -193,7 +199,9 @@ function object(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
-export function parsePayUStatus(data: unknown, txnid: string, amountPaise: number): { confirmed: boolean; transactionReference?: string } {
+type PayUStatus = { confirmed: boolean; failed?: boolean; transactionReference?: string };
+
+export function parsePayUStatus(data: unknown, txnid: string, amountPaise: number): PayUStatus {
   const response = object(data);
   if (!response || Number(response.status) !== 1) return { confirmed: false };
   const transactions = object(response.transaction_details);
@@ -205,14 +213,17 @@ export function parsePayUStatus(data: unknown, txnid: string, amountPaise: numbe
       && payuAmountInPaise(transaction.amount) !== amountPaise)) {
     throw new Error('PayU transaction does not match order');
   }
-  if (typeof transaction.status !== 'string' || transaction.status.toLowerCase() !== 'success') return { confirmed: false };
+  if (typeof transaction.status !== 'string') throw new Error('PayU transaction status is missing');
+  const status = transaction.status.toLowerCase();
+  if (status === 'failure' || status === 'failed') return { confirmed: false, failed: true };
+  if (status !== 'success') return { confirmed: false };
   if (typeof transaction.mihpayid !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(transaction.mihpayid)) {
     throw new Error('PayU transaction reference is missing');
   }
   return { confirmed: true, transactionReference: transaction.mihpayid };
 }
 
-export async function getPayUStatus(txnid: string, amountPaise: number): Promise<{ confirmed: boolean; transactionReference?: string }> {
+export async function getPayUStatus(txnid: string, amountPaise: number): Promise<PayUStatus> {
   const settings = await getPayUSettings();
   if (!settings || !callbackUrl(settings.callbackUrl) || !/^[a-zA-Z0-9_-]{1,64}$/.test(txnid)) throw new Error('PayU is not configured or transaction ID is invalid');
   const key = settings.merchantKey;

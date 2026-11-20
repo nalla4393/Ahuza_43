@@ -78,11 +78,15 @@ The AI owner agent reads current store data and can propose inventory updates, o
 
 ## Online payments
 
-Checkout supports billing addresses worldwide but delivery is currently limited to India.
+Cash-on-delivery checkout supports billing addresses worldwide but delivery is currently limited to India.
 Product pages show approximate USD prices using the INR/USD rate from Frankfurter; the server
 caches the latest rate for up to one hour and rejects rates older than seven days. The browser
 refreshes the estimate hourly and shows it as unavailable if the rate cannot be fetched.
-All checkout charges remain in INR.
+Cash-on-delivery checkout charges remain in INR.
+
+The UPI option creates an order and reserves stock before requesting an
+order-specific PayU payment. The order is confirmed only after the server
+verifies payment with PayU. Cash on delivery remains available separately.
 
 In **Owner Studio → Storefront → Shipping charge**, set the delivery charge for
 new orders below ₹2,500 (₹100 by default). Orders of ₹2,500 or more retain free
@@ -91,9 +95,6 @@ is checking out, they are asked to review the updated total before ordering.
 
 ### Legacy manual UPI orders
 
-New UPI orders use PayU hosted checkout; direct manual UPI and the paise
-identification adjustment are no longer offered for new orders. Until PayU is
-configured, UPI checkout is unavailable and cash on delivery remains available.
 Existing manual UPI orders retain their original amounts, payment instructions,
 and owner-review workflow; they cannot be automatically reconciled by PayU.
 
@@ -182,7 +183,7 @@ validated order association, and no official independent bank integration is
 configured. The customer-editable UPI note, screenshots and customer-entered
 references are not independent proof.
 
-### PayU India hosted checkout
+### PayU checkout and server integration
 
 Configure your PayU India merchant key and salt on the server:
 
@@ -210,7 +211,7 @@ status and shows the payment-success page only once payment is verified.
 Refreshing that page rechecks the status; customers can view their order or
 continue shopping from there. If browser storage is unavailable, the return
 link restores the order after the customer signs in with the account used to
-place it. When enabled, new UPI orders use an order-specific PayU Dynamic QR and continue
+place it. Order-specific Dynamic QR orders continue
 checking the PayU verification API after the customer scans it. On a phone,
 the same QR payment can be opened in a UPI app. The QR expires no later than
 30 minutes after generation and is not regenerated for the same order if
@@ -218,7 +219,7 @@ generation fails or its outcome is uncertain; contact AHUZA if money was
 debited or the QR is unavailable. Older hosted PayU orders can still reopen
 their payment attempt while the reservation is valid.
 
-Without Dynamic QR enabled, checkout creates an order-specific PayU UPI Intent
+For orders without Dynamic QR enabled, the server creates an order-specific PayU UPI Intent
 server-to-server (`pg=UPI`, `bankcode=INTENT`, `txn_s2s_flow=4`). On supported
 phones, the store opens the returned UPI app intent; on desktop, it displays a
 QR code for the same order-specific intent. The customer is returned to the
@@ -230,15 +231,22 @@ PayU must enable Dynamic QR (`DBQR`) for the merchant account. Test QR
 generation and a complete payment with PayU before enabling it in production;
 PayU notes that test-mode QR transactions may require their support team's
 assistance. See [PayU's Dynamic QR documentation](https://docs.payu.in/reference/dynamic-qr-generation-api).
-Set `PAYU_DYNAMIC_QR_ENABLED=true` to enable QR for new orders; without it,
-new orders use PayU UPI Intent checkout.
+Set `PAYU_DYNAMIC_QR_ENABLED=true` to enable QR for new PayU orders;
+without it, those orders use PayU UPI Intent.
+
+If initiation fails or times out, the order is retained with a failed initiation
+status and its outcome may be uncertain. Do not retry or create another order
+without checking the existing order and contacting AHUZA, especially if money
+was debited. Stock remains reserved until the reservation expires. PayU-verified
+failures are shown as failed; reconciliation continues in case PayU later
+confirms a payment. Verification errors do not establish that a payment failed.
 
 The PayU key, salt, mode, and endpoints can also be edited or deleted from
 **Owner Studio → Payments → PayU India checkout**. Credentials entered there
 are encrypted in the storefront database using `PAYMENT_CONFIG_KEY` (or
 `SESSION_SECRET` when the dedicated key is unset); only configured/not-configured
-status is returned to the dashboard. Removing the saved settings disables PayU
-for new orders and clears its encrypted credentials; it also prevents
+status is returned to the dashboard. Removing the saved settings disables
+order-specific PayU API checkout and clears its encrypted credentials; it also prevents
 verification of outstanding PayU payments until the appropriate credentials
 are restored. If older Owner Studio settings select manual UPI, save PayU
 settings in Owner Studio to replace them; those saved settings override
@@ -319,9 +327,9 @@ GitHub Pages cannot host this application because it needs the Express API for t
 
 1. Create a Railway project and an empty service for this application. In the service settings, set the build command to `npm ci && npm run build`, the start command to `npm start`, and the health-check path to `/api/health`. Connect the service to the intended GitHub branch.
 2. Add a Railway volume to the service mounted at `/app/.data`. Set `DATA_FILE=/app/.data/ahuza-db.json` and `SESSION_FILE_PATH=/app/.data/sessions` so the JSON database, customer sessions and files survive deploys and restarts. To use PostgreSQL instead, follow the explicit import procedure above and set `STOREFRONT_DATABASE_URL`; retain the volume for sessions and files. Keep this as a single service instance.
-3. Add `SESSION_SECRET` (a stable random value of at least 32 characters) and `OWNER_API_KEY` in Railway's service variables. Railway supplies `PORT`. Configure PayU credentials and its webhook as described above for UPI checkout. Gmail OAuth is optional for reviewing legacy bank credits.
+3. Add `SESSION_SECRET` (a stable random value of at least 32 characters) and `OWNER_API_KEY` in Railway's service variables. Railway supplies `PORT`. Retain PayU credentials and its webhook as described above for existing order-specific payments. Gmail OAuth is optional for reviewing legacy bank credits.
 4. Push to the connected branch. The GitHub Actions workflow runs `npm test` and `npm run build`; it does not deploy or gate Railway's automatic deployments. Once Railway assigns a public domain, verify `/api/health` and the storefront.
-5. Before accepting online payments, configure PayU and complete a small live transaction end to end, including bank reconciliation.
+5. Before accepting online payments, confirm the standalone PayU link and manual order process with a small live transaction and bank reconciliation.
 
 Configure a Railway volume and stable secrets before treating the deployment as production-ready.
 
@@ -359,7 +367,7 @@ After DNS is correct, add `https://www.ahuzawear.com/` as a URL-prefix property 
 
 - `GET /api/products`, `GET /api/products/:id`
 - `POST /api/auth/signup`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
-- `GET /api/payments/config`, `POST /api/payments/orders`, `GET /api/payments/orders/:id/status`, `POST /api/payments/orders/:id/cancel` (PayU UPI checkout; customer status is never trusted for confirmation)
+- `GET /api/payments/config`, `POST /api/payments/orders`, `GET /api/payments/orders/:id/status`, `POST /api/payments/orders/:id/cancel` (COD and order-specific PayU API; customer status is never trusted for confirmation)
 - `GET /api/orders`, `GET /api/orders/:id`, `GET /api/orders/:id/invoice` (PDF after payment confirmation), `POST /api/orders/:id/returns`
 - Storefront content: `GET /api/storefront`; owner edits via `PATCH /api/owner/content`
 - Owner: `GET/PATCH/POST /api/owner/inventory`, `GET/PATCH /api/owner/orders`, `GET /api/owner/analytics`, `GET/PATCH /api/owner/integrations`, `GET/PATCH /api/owner/support-tickets`, `POST /api/owner/chat`, `POST /api/owner/agent/execute` to approve proposed actions, `POST /api/owner/email-agent/draft`, `POST /api/owner/email-agent/send`, `POST /api/owner/social-post`, and `POST /api/owner/automations/test` for non-conversion webhook diagnostics.

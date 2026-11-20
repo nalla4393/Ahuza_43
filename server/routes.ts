@@ -453,7 +453,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
       ? { checkoutMode: 'qr' as const }
       : {
         checkoutMode: 'intent' as const,
-        intentUri: (await createPayUIntent(placed, customerEmail!, request.ip || '', request.get('user-agent') || '')).value,
+        intentUri: (await createPayUIntent(placed, customerEmail!, request.ip || request.socket?.remoteAddress || '', request.get('user-agent') || '')).value,
       };
     if (customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
     void enqueueOrderEmail(localOrderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
@@ -463,8 +463,40 @@ async function createPaymentOrder(request: Request, response: Response): Promise
       status: 'pending', items: placed.items.map(({ name, quantity, size }) => ({ name, quantity, size })),
     });
   } catch (error) {
-    console.error(`PayU checkout creation failed for order ${localOrderId}:`, error);
-    response.status(503).json({ error: 'Could not start PayU checkout' });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`PayU ${usePayuQr ? 'QR' : 'intent'} checkout creation failed for order ${localOrderId}: ${errorMessage}`);
+
+    if (usePayuQr) {
+      console.warn(`QR mode failed, falling back to intent mode for order ${localOrderId}`);
+      try {
+        const intentUri = (await createPayUIntent(placed, customerEmail!, request.ip || request.socket?.remoteAddress || '', request.get('user-agent') || '')).value;
+        if (customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
+        void enqueueOrderEmail(localOrderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
+        response.status(201).json({
+          orderId: localOrderId, paymentMethod, paymentReference, provider: 'payu',
+          checkoutMode: 'intent' as const, intentUri, amount, currency: 'INR', expiresAt: placed.reservationExpiresAt,
+          status: 'pending', items: placed.items.map(({ name, quantity, size }) => ({ name, quantity, size })),
+        });
+        return;
+      } catch (intentError) {
+        const intentErrorMessage = intentError instanceof Error ? intentError.message : String(intentError);
+        console.error(`Intent fallback also failed for order ${localOrderId}: ${intentErrorMessage}`);
+      }
+    }
+
+    await mutateDatabase((database) => {
+      const order = database.orders.find((entry) => entry.id === localOrderId);
+      if (order?.status === 'pending_payment' && order.paymentStatus === 'pending') {
+        order.paymentStatus = 'failed';
+        order.payuPaymentIssue = 'initiation_failed';
+      }
+    });
+    response.status(503).json({
+      orderId: localOrderId, paymentMethod: 'upi', provider: 'payu', checkoutMode: usePayuQr ? 'qr' : 'intent',
+      amount, currency: 'INR', paymentReference, expiresAt: placed.reservationExpiresAt,
+      payuPaymentIssue: 'initiation_failed',
+      error: 'Could not start PayU checkout. The outcome may be uncertain; check your order history and contact AHUZA before trying again, especially if money was debited.',
+    });
   }
 }
 
@@ -473,7 +505,7 @@ api.get('/payments/config', async (_request, response) => {
   response.json({ configured, automaticVerification: configured, provider: 'payu' });
 });
 
-api.post('/payments/payu/callback', express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {
+api.post('/payments/payu/callback', paymentLimit, express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {
   const payload = request.body as Record<string, unknown>;
   if (!await verifyPayUResponseHash(payload)) {
     console.error('PayU callback rejected: invalid response hash');
@@ -492,13 +524,13 @@ api.post('/payments/payu/callback', express.urlencoded({ extended: false, limit:
     response.status(400).send('Payment response does not match an order');
     return;
   }
-  if (typeof payload.status === 'string' && payload.status.toLowerCase() === 'success') {
+  if (typeof payload.status === 'string' && ['success', 'failure', 'failed'].includes(payload.status.toLowerCase())) {
     await confirmPayUWebhookPayment(txnid).catch((error) => console.error(`PayU callback verification failed for order ${order.id}:`, error));
   }
   response.redirect(303, `/order-success?order=${encodeURIComponent(order.id)}`);
 });
 
-api.post('/payments/payu/webhook', express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {
+api.post('/payments/payu/webhook', paymentLimit, express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {
   const payload = request.body as Record<string, unknown>;
   if (!await verifyPayUResponseHash(payload)) {
     console.error('PayU webhook rejected: invalid response hash');
@@ -517,8 +549,8 @@ api.post('/payments/payu/webhook', express.urlencoded({ extended: false, limit: 
     response.status(400).json({ error: 'PayU transaction does not match an order' });
     return;
   }
-  if (typeof payload.status === 'string' && payload.status.toLowerCase() === 'success') {
-    await confirmPayUWebhookPayment(txnid);
+  if (typeof payload.status === 'string' && ['success', 'failure', 'failed'].includes(payload.status.toLowerCase())) {
+    await confirmPayUWebhookPayment(txnid).catch((error) => console.error(`PayU webhook verification failed for order ${txnid}:`, error));
   }
   response.status(200).json({ received: true });
 });
@@ -533,14 +565,16 @@ api.post('/payments/orders/:id/qr', requireCustomer, paymentLimit, async (reques
   const result = await mutateDatabase((database) => {
     const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
     if (!order) return { kind: 'missing' as const };
-    if (order.payuCheckoutMode !== 'qr' || !order.payuTxnId || order.status !== 'pending_payment'
+    if (order.payuCheckoutMode !== 'qr' || !order.payuTxnId || order.payuPaymentIssue || order.status !== 'pending_payment'
       || !['pending', 'failed'].includes(order.paymentStatus || 'pending') || !order.reservationExpiresAt
       || !Number.isFinite(Date.parse(order.reservationExpiresAt)) || Date.parse(order.reservationExpiresAt) <= Date.now()) return { kind: 'closed' as const };
     if (order.payuQr) return { kind: 'existing' as const, qr: order.payuQr };
     const customer = database.customers.find((entry) => entry.id === order.userId);
-    if (!customer?.email || !request.ip || !request.get('user-agent')) return { kind: 'unavailable' as const };
+    const clientIp = request.ip || request.socket?.remoteAddress || '';
+    const userAgent = request.get('user-agent') || '';
+    if (!customer?.email || !clientIp || !userAgent) return { kind: 'unavailable' as const };
     order.payuQr = { state: 'starting', startedAt };
-    return { kind: 'create' as const, order: structuredClone(order), email: customer.email, ip: request.ip, userAgent: request.get('user-agent')! };
+    return { kind: 'create' as const, order: structuredClone(order), email: customer.email, ip: clientIp, userAgent };
   });
   if (result.kind === 'missing') { response.status(404).json({ error: 'Order not found' }); return; }
   if (result.kind === 'closed') { response.status(409).json({ error: 'This payment request can no longer be used' }); return; }
@@ -552,13 +586,16 @@ api.post('/payments/orders/:id/qr', requireCustomer, paymentLimit, async (reques
     if (result.qr.state === 'starting' && Date.now() - Date.parse(result.qr.startedAt) < 30000) {
       response.status(202).json({ pending: true }); return;
     }
+    if (result.qr.state === 'error') {
+      response.status(503).json({ error: 'QR generation failed. Please use the UPI app link instead or contact AHUZA for help.' }); return;
+    }
     response.status(409).json({ error: 'This QR is unavailable or expired. Do not pay again if money was debited; contact AHUZA.' }); return;
   }
   try {
     const qr = await createPayUQr(result.order, result.email, result.ip, result.userAgent);
     const saved = await mutateDatabase((database) => {
       const order = database.orders.find((entry) => entry.id === result.order.id && entry.userId === request.session.userId);
-      if (!order || order.status !== 'pending_payment' || !['pending', 'failed'].includes(order.paymentStatus || 'pending')
+      if (!order || order.status !== 'pending_payment' || order.payuPaymentIssue || !['pending', 'failed'].includes(order.paymentStatus || 'pending')
         || order.payuQr?.state !== 'starting' || order.payuQr.startedAt !== startedAt
         || !order.reservationExpiresAt || Date.parse(order.reservationExpiresAt) <= Date.now()) return false;
       order.payuQr = { state: 'ready', startedAt, ...qr };
@@ -566,13 +603,43 @@ api.post('/payments/orders/:id/qr', requireCustomer, paymentLimit, async (reques
     });
     if (!saved) { response.status(409).json({ error: 'This payment request can no longer be used' }); return; }
     response.set('Cache-Control', 'no-store').json({ qr: qr.value, expiresAt: qr.expiresAt });
-  } catch (error) {
-    console.error(`PayU QR generation failed for order ${result.order.id}:`, error);
+  } catch (qrError) {
+    const qrErrorMessage = qrError instanceof Error ? qrError.message : String(qrError);
+    console.error(`PayU QR generation failed for order ${result.order.id}: ${qrErrorMessage}, attempting intent fallback`);
+
+    try {
+      const customer = (await getDatabase()).customers.find((entry) => entry.id === result.order.userId);
+      if (customer?.email) {
+        const intent = await createPayUIntent(result.order, customer.email, result.ip, result.userAgent);
+        const saved = await mutateDatabase((database) => {
+          const order = database.orders.find((entry) => entry.id === result.order.id && entry.userId === request.session.userId);
+          if (!order || order.status !== 'pending_payment' || order.payuPaymentIssue) return false;
+          delete order.payuQr;
+          delete order.payuCheckoutMode;
+          return true;
+        });
+        if (saved) {
+          console.warn(`QR fallback to intent succeeded for order ${result.order.id}`);
+          response.status(200).json({ intentUri: intent.value, fallback: true });
+          return;
+        }
+      }
+    } catch (intentError) {
+      const intentErrorMessage = intentError instanceof Error ? intentError.message : String(intentError);
+      console.error(`QR fallback to intent also failed for order ${result.order.id}: ${intentErrorMessage}`);
+    }
+
     await mutateDatabase((database) => {
       const order = database.orders.find((entry) => entry.id === result.order.id);
-      if (order?.payuQr?.state === 'starting' && order.payuQr.startedAt === startedAt) order.payuQr.state = 'error';
+      if (order?.payuQr?.state === 'starting' && order.payuQr.startedAt === startedAt) {
+        order.payuQr.state = 'error';
+        if (order.status === 'pending_payment' && ['pending', 'failed'].includes(order.paymentStatus || 'pending') && !order.payuPaymentIssue) {
+          order.paymentStatus = 'failed';
+          order.payuPaymentIssue = 'initiation_failed';
+        }
+      }
     });
-    response.status(503).json({ error: 'Could not create the PayU QR. Do not pay again if money was debited; contact AHUZA.' });
+    response.status(503).json({ error: 'Could not create the PayU QR. Please contact AHUZA for help or use the UPI app link instead.' });
   }
 });
 
@@ -581,7 +648,7 @@ api.post('/payments/orders/:id/checkout', requireCustomer, paymentLimit, async (
   const database = await getDatabase();
   const order = database.orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
-  if (order.paymentMethod !== 'upi' || !order.payuTxnId || order.payuCheckoutMode === 'qr' || order.status !== 'pending_payment'
+  if (order.paymentMethod !== 'upi' || !order.payuTxnId || order.payuCheckoutMode === 'qr' || order.payuPaymentIssue || order.status !== 'pending_payment'
     || !['pending', 'failed'].includes(order.paymentStatus || 'pending')
     || !order.reservationExpiresAt || !Number.isFinite(Date.parse(order.reservationExpiresAt)) || Date.parse(order.reservationExpiresAt) <= Date.now()) {
     response.status(409).json({ error: 'This payment request can no longer be used' }); return;
@@ -589,11 +656,28 @@ api.post('/payments/orders/:id/checkout', requireCustomer, paymentLimit, async (
   const customer = database.customers.find((entry) => entry.id === request.session.userId);
   if (!customer?.email) { response.status(409).json({ error: 'A customer email is required for PayU checkout' }); return; }
   try {
-    const intent = await createPayUIntent(order, customer.email, request.ip || '', request.get('user-agent') || '');
+    const intent = await createPayUIntent(order, customer.email, request.ip || request.socket?.remoteAddress || '', request.get('user-agent') || '');
+    const available = await mutateDatabase((current) => {
+      const currentOrder = current.orders.find((entry) => entry.id === order.id && entry.userId === request.session.userId);
+      if (!currentOrder || currentOrder.status !== 'pending_payment' || currentOrder.payuPaymentIssue
+        || !['pending', 'failed'].includes(currentOrder.paymentStatus || 'pending')
+        || !currentOrder.reservationExpiresAt || Date.parse(currentOrder.reservationExpiresAt) <= Date.now()) return false;
+      currentOrder.paymentStatus = 'pending';
+      return true;
+    });
+    if (!available) { response.status(409).json({ error: 'This payment request can no longer be used' }); return; }
     response.set('Cache-Control', 'no-store').json({ intentUri: intent.value });
   } catch (error) {
-    console.error(`PayU checkout retry failed for order ${order.id}:`, error);
-    response.status(503).json({ error: 'Could not open PayU checkout. Please try again.' });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`PayU checkout retry failed for order ${order.id}: ${errorMessage}`);
+    await mutateDatabase((current) => {
+      const currentOrder = current.orders.find((entry) => entry.id === order.id && entry.userId === request.session.userId);
+      if (currentOrder?.status === 'pending_payment' && ['pending', 'failed'].includes(currentOrder.paymentStatus || 'pending') && !currentOrder.payuPaymentIssue) {
+        currentOrder.paymentStatus = 'failed';
+        currentOrder.payuPaymentIssue = 'initiation_failed';
+      }
+    });
+    response.status(503).json({ error: 'Could not open PayU checkout. The outcome may be uncertain; contact AHUZA before trying again.' });
   }
 });
 
@@ -643,7 +727,7 @@ api.get('/payments/orders/:id/status', requireCustomer, paymentLimit, async (req
   await syncPayUPayment(String(request.params.id), request.session.userId!).catch((error) => console.error('PayU status sync failed:', error));
   const order = (await getDatabase()).orders.find((entry) => entry.id === request.params.id && entry.userId === request.session.userId);
   if (!order) { response.status(404).json({ error: 'Order not found' }); return; }
-  response.json({ orderId: order.id, status: order.paymentStatus || 'pending', orderStatus: order.status, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt, paymentProofSubmitted: Boolean(order.manualPaymentProof), verification: order.paymentVerificationMethod || 'awaiting_payment_verification' });
+  response.json({ orderId: order.id, status: order.paymentStatus || 'pending', orderStatus: order.status, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt, paymentProofSubmitted: Boolean(order.manualPaymentProof), verification: order.paymentVerificationMethod || 'awaiting_payment_verification', ...(order.payuPaymentIssue ? { payuPaymentIssue: order.payuPaymentIssue } : {}) });
 });
 
 api.post('/payments/orders/:id/failure', requireCustomer, paymentLimit, async (request, response) => {
@@ -688,8 +772,8 @@ api.get('/orders', requireCustomer, async (request, response) => {
   const orders = database.orders
     .filter((order) => order.userId === request.session.userId)
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-    .map(({ id, amount, currency, status, paymentMethod, paymentStatus, paymentVerifiedAt, createdAt, items, trackingNumber, trackingUrl, review }) => ({
-      id, amount, currency, status, paymentMethod, paymentStatus, paymentVerifiedAt, createdAt, items, trackingNumber, trackingUrl, review,
+    .map(({ id, amount, currency, status, paymentMethod, paymentStatus, payuPaymentIssue, paymentVerifiedAt, createdAt, items, trackingNumber, trackingUrl, review }) => ({
+      id, amount, currency, status, paymentMethod, paymentStatus, payuPaymentIssue, paymentVerifiedAt, createdAt, items, trackingNumber, trackingUrl, review,
     }));
   response.json({ orders });
 });

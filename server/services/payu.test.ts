@@ -184,7 +184,8 @@ test('PayU verification accepts only matching successful transactions', () => {
     confirmed: true, transactionReference: '987654321',
   });
   assert.deepEqual(parsePayUStatus({ status: 0 }, order.payuTxnId!, order.amount), { confirmed: false });
-  assert.deepEqual(parsePayUStatus({ status: 1, transaction_details: { [order.payuTxnId!]: { ...transaction, status: 'failure' } } }, order.payuTxnId!, order.amount), { confirmed: false });
+  assert.deepEqual(parsePayUStatus({ status: 1, transaction_details: { [order.payuTxnId!]: { ...transaction, status: 'failure' } } }, order.payuTxnId!, order.amount), { confirmed: false, failed: true });
+  assert.deepEqual(parsePayUStatus({ status: 1, transaction_details: { [order.payuTxnId!]: { ...transaction, status: 'pending' } } }, order.payuTxnId!, order.amount), { confirmed: false });
   assert.throws(() => parsePayUStatus({ status: 1, transaction_details: { [order.payuTxnId!]: { ...transaction, amount: '1.00' } } }, order.payuTxnId!, order.amount));
   const documented = { txnid: order.payuTxnId, transaction_amount: '680.00', amt: '680.00', status: 'success', mihpayid: '987654321' };
   assert.equal(parsePayUStatus({ status: 1, transaction_details: { [order.payuTxnId!]: documented } }, order.payuTxnId!, order.amount).confirmed, true);
@@ -322,6 +323,9 @@ test('PayU webhook confirms the matching order only after server-side verificati
     assert.equal((await originalFetch(failedQrUrl, { method: 'POST', headers: { Cookie: cookie } })).status, 503);
     assert.equal((await originalFetch(failedQrUrl, { method: 'POST', headers: { Cookie: cookie } })).status, 409);
     assert.equal(qrCalls, 2);
+    const failedQrOrder = (await getDatabase()).orders.find((entry) => entry.id === 'failed-qr-order');
+    assert.equal(failedQrOrder?.paymentStatus, 'failed');
+    assert.equal(failedQrOrder?.payuPaymentIssue, 'initiation_failed');
     globalThis.fetch = originalFetch;
 
     process.env.PAYU_DYNAMIC_QR_ENABLED = 'false';
@@ -332,6 +336,7 @@ test('PayU webhook confirms the matching order only after server-side verificati
     globalThis.fetch = async (input, init) => {
       assert.equal(String(input), 'https://test.payu.in/_payment');
       const body = init?.body as URLSearchParams;
+      assert.ok((await getDatabase()).orders.some((entry) => entry.payuTxnId === body.get('txnid')));
       return Response.json({
         metaData: { txnId: body.get('txnid'), txnStatus: 'pending' },
         result: {
@@ -356,6 +361,45 @@ test('PayU webhook confirms the matching order only after server-side verificati
     assert.equal(directPayment.checkoutMode, 'intent');
     assert.match(directPayment.intentUri, /^upi:\/\/pay\?/);
     assert.equal(directPayment.paymentForm, undefined);
+    assert.equal(JSON.stringify(directPayment).includes('test-salt'), false);
+    await mutateDatabase((database) => {
+      database.products.find((entry) => entry.id === 'soft-form-shirt')!.stock = 2;
+    });
+    globalThis.fetch = async () => { throw new Error('test provider timeout'); };
+    const failedCreate = await originalFetch(`${base}/api/payments/orders`, {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json', 'User-Agent': 'test-browser' },
+      body: JSON.stringify({
+        paymentMethod: 'upi',
+        expectedShippingAmount: 12345,
+        items: [{ productId: 'soft-form-shirt', quantity: 1 }],
+        shippingAddress: { name: 'Test Customer', addressLine1: 'Test Street', city: 'Chennai', state: 'Tamil Nadu', postalCode: '600001', country: 'India', phone: '9876543210' },
+      }),
+    });
+    assert.equal(failedCreate.status, 503);
+    const failedPayment = await failedCreate.json() as { orderId: string; error: string };
+    assert.match(failedPayment.error, /outcome may be uncertain/);
+    const failedOrder = (await getDatabase()).orders.find((entry) => entry.id === failedPayment.orderId);
+    assert.equal(failedOrder?.paymentStatus, 'failed');
+    assert.equal(failedOrder?.payuPaymentIssue, 'initiation_failed');
+    assert.equal((await originalFetch(`${base}/api/payments/orders/${failedPayment.orderId}/checkout`, { method: 'POST', headers: { Cookie: cookie } })).status, 409);
+    globalThis.fetch = async () => Response.json({ status: 0 });
+    const orders = await (await originalFetch(`${base}/api/orders`, { headers: { Cookie: cookie } })).json() as { orders: { id: string; payuPaymentIssue?: string }[] };
+    assert.equal(orders.orders.find((entry) => entry.id === failedPayment.orderId)?.payuPaymentIssue, 'initiation_failed');
+    assert.ok(failedOrder?.payuTxnId);
+    globalThis.fetch = async () => Response.json({
+      status: 1, transaction_details: {
+        [failedOrder.payuTxnId!]: { txnid: failedOrder.payuTxnId, transaction_amount: (failedOrder.amount / 100).toFixed(2), status: 'pending' },
+      },
+    });
+    const failedStatusUrl = `${base}/api/payments/orders/${failedPayment.orderId}/status`;
+    assert.equal((await (await originalFetch(failedStatusUrl, { headers: { Cookie: cookie } })).json() as { status: string }).status, 'failed');
+    globalThis.fetch = async () => Response.json({
+      status: 1, transaction_details: {
+        [failedOrder.payuTxnId!]: { txnid: failedOrder.payuTxnId, transaction_amount: (failedOrder.amount / 100).toFixed(2), status: 'success', mihpayid: 'late-payment' },
+      },
+    });
+    assert.equal((await (await originalFetch(failedStatusUrl, { headers: { Cookie: cookie } })).json() as { status: string }).status, 'paid');
     globalThis.fetch = originalFetch;
 
     await mutateDatabase((database) => {
@@ -436,6 +480,25 @@ test('PayU webhook confirms the matching order only after server-side verificati
     assert.equal((await webhook(mismatched)).status, 400);
     assert.equal((await webhook(callback)).status, 200);
     assert.equal((await getDatabase()).orders.find((entry) => entry.id === payment.orderId)?.paymentStatus, 'pending');
+    const failureCallback: Record<string, string> = { ...callback, status: 'failure' };
+    failureCallback.hash = createHash('sha512').update([
+      'test-salt', failureCallback.status, '', '', '', '', '',
+      failureCallback.udf5, failureCallback.udf4, failureCallback.udf3, failureCallback.udf2, failureCallback.udf1,
+      failureCallback.email, failureCallback.firstname, failureCallback.productinfo, failureCallback.amount, failureCallback.txnid, failureCallback.key,
+    ].join('|')).digest('hex');
+    const failedReturn = () => originalFetch(`${base}/api/payments/payu/callback`, {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(failureCallback), redirect: 'manual',
+    });
+    assert.equal((await failedReturn()).status, 303);
+    assert.equal((await getDatabase()).orders.find((entry) => entry.id === payment.orderId)?.paymentStatus, 'pending');
+    remoteStatus = 'failure';
+    assert.equal((await failedReturn()).status, 303);
+    const failedStatus = await (await originalFetch(statusUrl, { headers: { Cookie: cookie } })).json() as { status: string; payuPaymentIssue?: string };
+    assert.equal(failedStatus.status, 'failed');
+    assert.equal(failedStatus.payuPaymentIssue, 'provider_failed');
+    assert.equal((await webhook(failureCallback)).status, 200);
+    assert.equal((await originalFetch(qrUrl, { method: 'POST', headers: { Cookie: cookie } })).status, 409);
     remoteStatus = 'success';
     assert.equal((await webhook(callback)).status, 200);
     assert.equal((await webhook(callback)).status, 200);
@@ -449,6 +512,7 @@ test('PayU webhook confirms the matching order only after server-side verificati
     assert.equal(returned.headers.get('location'), `/order-success?order=${payment.orderId}`);
     const stored = (await getDatabase()).orders.find((entry) => entry.id === payment.orderId);
     assert.equal(stored?.paymentStatus, 'paid');
+    assert.equal(stored?.payuPaymentIssue, undefined);
     assert.equal((await originalFetch(retryUrl, { method: 'POST', headers: { Cookie: cookie } })).status, 409);
     assert.equal((await (await originalFetch(statusUrl, { headers: { Cookie: cookie } })).json() as { status: string }).status, 'paid');
     assert.equal(stored?.paymentVerificationMethod, 'payu');

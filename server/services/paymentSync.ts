@@ -35,6 +35,7 @@ async function finalizeVerifiedPayment(
       if (missing.length) {
         order.paymentStatus = 'paid';
         order.paymentVerificationMethod = provider;
+        delete order.payuPaymentIssue;
         if (transactionReference) order.manualPaymentReference = transactionReference;
         order.paymentVerifiedAt = new Date().toISOString();
         delete order.reservationExpiresAt;
@@ -50,6 +51,7 @@ async function finalizeVerifiedPayment(
     order.status = 'paid';
     order.paymentStatus = 'paid';
     order.paymentVerificationMethod = provider;
+    delete order.payuPaymentIssue;
     if (transactionReference) order.manualPaymentReference = transactionReference;
     order.paymentVerifiedAt = new Date().toISOString();
     delete order.reservationExpiresAt;
@@ -77,6 +79,15 @@ export async function syncPayUPayment(orderId: string, userId?: string): Promise
   if (!order || order.paymentMethod !== 'upi' || order.paymentStatus === 'paid' || !order.payuTxnId || !OPEN_STATUSES.includes(order.status)) return false;
 
   const remote = await getPayUStatus(order.payuTxnId, order.amount);
+  if (remote.failed) {
+    await mutateDatabase((database) => {
+      const current = database.orders.find((entry) => entry.id === order.id && entry.payuTxnId === order.payuTxnId && entry.amount === order.amount);
+      if (current?.status === 'pending_payment' && current.paymentStatus !== 'paid' && current.paymentStatus !== 'cancelled') {
+        current.paymentStatus = 'failed';
+        current.payuPaymentIssue = 'provider_failed';
+      }
+    });
+  }
   if (!remote.confirmed) return false;
   return finalizeVerifiedPayment(order.id, order.payuTxnId, order.amount, remote.transactionReference, userId, 'payu');
 }
