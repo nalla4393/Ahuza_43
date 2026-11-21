@@ -27,6 +27,17 @@ test('storefront copy ignores unknown and non-string persisted fields', () => {
   assert.equal(Object.hasOwn(copy, 'notAField'), false);
 });
 
+test('stored brand copy uses AHUZAH without changing the existing domain', () => {
+  const copy = mergeStorefrontCopy({
+    newsletterBody: 'New offers from AHUZA',
+    askAhuzaLabel: 'Ask Ahuza',
+    contactEmail: 'info@ahuzawear.com',
+  });
+  assert.equal(copy.newsletterBody, 'New offers from AHUZAH');
+  assert.equal(copy.askAhuzaLabel, 'Ask Ahuzah');
+  assert.equal(copy.contactEmail, 'info@ahuzawear.com');
+});
+
 test('replaces only the obsolete UPI checkout message', () => {
   const legacy = {
     checkoutUpiNote: 'UPI opens directly in your app Payment remains pending until AHUZA manually verifies the bank settlement',

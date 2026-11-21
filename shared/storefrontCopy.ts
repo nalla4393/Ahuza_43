@@ -207,7 +207,8 @@ export function mergeStorefrontCopy(value: unknown): StorefrontCopy {
     for (const { id } of storefrontCopyFields) {
       const entry = (value as Record<string, unknown>)[id];
       if (typeof entry === 'string') {
-        copy[id] = obsoleteStorefrontCopy[id]?.includes(entry) ? defaultStorefrontCopy[id] : entry;
+        const merged = obsoleteStorefrontCopy[id]?.includes(entry) ? defaultStorefrontCopy[id] : entry;
+        copy[id] = merged.replace(/\bAHUZA\b/g, 'AHUZAH').replace(/\bAhuza\b/g, 'Ahuzah');
       }
     }
   }
