@@ -1,6 +1,7 @@
 import { getDatabase, isUnreviewedBankPaymentAlert, mutateDatabase, type Database, type Order } from './database.js';
 import { getPayUStatus, payuConfigured } from './payu.js';
 import { enqueueOrderEmail } from './integrations.js';
+import { productIsPurchasable } from '../../shared/productPricing.js';
 
 const OPEN_STATUSES = ['pending_payment', 'cancelled'];
 type Confirmation = { kind: 'confirmed' } | { kind: 'held'; items: string[] };
@@ -12,7 +13,10 @@ export function outOfStockItems(database: Database, order: Pick<Order, 'items'>)
     line.quantity += item.quantity;
     needed.set(item.productId, line);
   }
-  return [...needed].filter(([productId, line]) => (database.products.find((entry) => entry.id === productId)?.stock ?? 0) < line.quantity).map(([, line]) => line.name);
+  return [...needed].filter(([productId, line]) => {
+    const product = database.products.find((entry) => entry.id === productId);
+    return !product || !productIsPurchasable(product) || product.stock < line.quantity;
+  }).map(([, line]) => line.name);
 }
 
 async function finalizeVerifiedPayment(

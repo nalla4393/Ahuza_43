@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { Database, Product } from './services/database.js';
 import { mergeStorefrontCopy, type StorefrontCopy } from '../shared/storefrontCopy.js';
 import { findProductBySlug, productPath } from '../shared/productUrl.js';
+import { productIsPurchasable, productPricing, productStockStatus } from '../shared/productPricing.js';
 
 const origin = 'https://www.ahuzawear.com';
 const defaultImage = `${origin}/ahuza-brand-social.jpg`;
@@ -59,18 +60,27 @@ function productPage(product: Product, copy: StorefrontCopy): { head: string; bo
       url,
       priceCurrency: 'INR',
       price: product.price.toFixed(2),
-      availability: product.stock > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+      availability: productIsPurchasable(product) ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
     },
   };
   const price = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(product.price);
+  const pricing = productPricing(product.price, product.discountPercent);
+  const stockStatus = productStockStatus(product);
   const attributes = [
     { label: copy.detailFabric, value: product.fabric },
+    { label: 'Colour', value: product.color },
     { label: copy.detailPattern, value: product.pattern },
-    { label: copy.detailComponents, value: product.components },
+    { label: 'Fit', value: product.fit },
+    { label: 'Style', value: product.style },
+    { label: 'Occasion / use', value: product.occasion },
+    { label: 'Specifications / components', value: product.components },
+    { label: 'Care instructions', value: product.careInstructions },
   ].filter((entry): entry is { label: string; value: string } => Boolean(entry.value));
   const details = attributes.length ? `<dl>${attributes.map(({ label, value }) => `<dt>${escape(label)}</dt><dd>${escape(value)}</dd>`).join('')}</dl>` : '';
   const highlights = product.bulletPoints?.length ? `<h2>${escape(copy.detailBulletPoints)}</h2><ul>${product.bulletPoints.map((point) => `<li>${escape(point)}</li>`).join('')}</ul>` : '';
-  const body = `<main><a href="/">AHUZA Apparel</a><h1>${escape(product.name)}</h1><p>${escape(description)}</p><img src="${escape(image)}" alt="${escape(product.name)}" width="400"><p>${escape(price)}</p><p>${product.stock > 0 ? 'In stock' : 'Out of stock'}</p><p>SKU: ${escape(product.sku)}</p>${details}${highlights}<a href="/">Shop the collection</a></main>`;
+  const priceMarkup = pricing ? `<p><del>${escape(new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(pricing.mrp))}</del> ${escape(price)} · ${pricing.discountPercent}% OFF</p>` : `<p>${escape(price)}</p>`;
+  const availability = stockStatus === 'sold_out' ? 'Sold Out' : stockStatus === 'limited_stock' ? 'Limited Stock' : 'In Stock';
+  const body = `<main><a href="/">AHUZA Apparel</a><h1>${escape(product.name)}</h1><p>${escape(description)}</p><img src="${escape(image)}" alt="${escape(product.name)}" width="400">${priceMarkup}<p>${availability}</p><p>SKU: ${escape(product.sku)}</p>${details}${highlights}<a href="/">Shop the collection</a></main>`;
   return { head: meta(title, description, url, image, 'product', schema), body };
 }
 

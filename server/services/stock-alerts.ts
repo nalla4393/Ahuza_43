@@ -1,17 +1,18 @@
 import { getDatabase, mutateDatabase } from './database.js';
 import { isEmailConfigured, sendEmail } from './integrations.js';
+import { productIsPurchasable } from '../../shared/productPricing.js';
 
 export async function sendRestockAlerts(): Promise<void> {
   if (!isEmailConfigured()) return;
   const database = await getDatabase();
   const pending = (database.stockAlerts || []).filter((alert) => {
-    const product = database.products.find((entry) => entry.id === alert.productId && entry.active && entry.stock > 0);
+    const product = database.products.find((entry) => entry.id === alert.productId && entry.active && productIsPurchasable(entry));
     return !alert.notifiedAt && Boolean(product);
   });
 
   for (const alert of pending) {
     const snapshot = await getDatabase();
-    const product = snapshot.products.find((entry) => entry.id === alert.productId && entry.active && entry.stock > 0);
+    const product = snapshot.products.find((entry) => entry.id === alert.productId && entry.active && productIsPurchasable(entry));
     const customer = snapshot.customers.find((entry) => entry.id === alert.customerId);
     if (!product || !customer || snapshot.stockAlerts?.find((entry) => entry.id === alert.id)?.notifiedAt) continue;
 

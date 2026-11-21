@@ -50,6 +50,17 @@
 .product-meta strong{font-size:13px;font-weight:600}
 .product-meta small{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .product-meta b{white-space:nowrap;font-size:12px;font-weight:400}
+.product-card-price del,.product-detail-price del{color:var(--muted);font-size:.84em;font-weight:400}
+.product-card-price em,.product-detail-price em{color:var(--accent);font-style:normal;font-size:11px;font-weight:700}
+.product-card-price{white-space:normal}
+.product-card-price del,.product-card-price small,.product-card-price em{display:block}
+.product-card-price small{white-space:normal;overflow-wrap:anywhere}
+.product-detail-price{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px}
+.product-detail-price strong{font-size:22px}
+.product-availability{margin:0;font-size:12px;font-weight:600}
+.product-availability.sold_out,.card-stock.out{color:#b00020}
+.product-availability.limited_stock,.card-stock.low,.product-availability.in_stock{color:var(--accent)}
+.product-delivery-note{color:var(--muted);font-size:12px;line-height:1.5}
 .brand-tagline{font-family:'Playfair Display',serif!important;font-size:20px!important;color:var(--ink)!important;margin-top:3px!important}
 .trust-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;padding:22px 8.3%;background:var(--line)}
 .trust-strip div{display:grid;gap:7px;padding:20px;background:#fbfaf6}

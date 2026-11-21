@@ -21,6 +21,7 @@
 .checkout-items-heading button,.checkout-remove-item{border:0;background:transparent;color:#3a493c;text-decoration:underline;cursor:pointer;font-size:11px}
 .checkout-items-heading button:disabled,.checkout-remove-item:disabled,.quantity-control button:disabled{opacity:.5;cursor:not-allowed}
 .checkout-remove-item{display:block;margin-top:8px;padding:2px 0}
+.bag-line-copy>p del{margin-right:5px;color:var(--muted);font-size:11px}
 .bag-lines{flex:none;max-height:27vh}
 .bag-footer{flex:none;padding-bottom:8px}
 .account-dialog{max-height:min(88svh,780px);overflow-y:auto}

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getDatabase, mutateDatabase, type Product, type SocialPlatform, type SocialPost, type SocialSchedule } from './database.js';
 import { generateSocialPost } from './ai.js';
+import { productIsPurchasable } from '../../shared/productPricing.js';
 
 const GRAPH = 'https://graph.facebook.com/v21.0';
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
@@ -101,7 +102,7 @@ export async function publishSocialPost(postId: string, captionOverride?: string
 }
 
 function pickProduct(schedule: SocialSchedule, products: Product[], posts: SocialPost[]): Product | null {
-  const live = products.filter((product) => product.active && product.stock > 0 && productImage(product));
+  const live = products.filter((product) => product.active && productIsPurchasable(product) && productImage(product));
   if (!live.length) return null;
   if (schedule.productMode === 'newest') return [...live].sort((a, b) => b.id.localeCompare(a.id))[0];
   const lastUsed = (productId: string) => Math.max(0, ...posts.filter((post) => post.scheduleId === schedule.id && post.productId === productId).map((post) => new Date(post.createdAt).getTime()));

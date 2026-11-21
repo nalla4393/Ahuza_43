@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 150">
+  <defs>
+    <style>
+      @keyframes logoFlow { 0% { opacity: 0; transform: scale(.95) translateY(2px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
+      .logo-container { transform-origin: center; animation: logoFlow .8s cubic-bezier(.34,1.56,.4,1) both; }
+    </style>
+  </defs>
+  <g class="logo-container">
+    <g fill="#8b1538">
+      <path d="M70 30 Q55 55 65 85 Q75 110 95 115 Q110 118 120 110 L100 90 Q95 100 85 102 Q72 104 68 85 Q60 55 70 30Z"/>
+      <path d="M80 50 Q72 70 78 90 Q83 100 95 102 L85 80Z"/>
+    </g>
+    <text x="145" y="104" font-family="Georgia,serif" font-size="74" font-weight="600" fill="#ffffff">AHUZAH</text>
+  </g>
+</svg>

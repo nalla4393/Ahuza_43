@@ -97,7 +97,7 @@ export async function createPayUIntent(
     signal: AbortSignal.timeout(20000),
   });
   if (!response.ok) throw new Error(`PayU UPI intent API returned HTTP ${response.status}`);
-  const data = object(await response.json());
+  const data = object(await readPayUJson(response, 'UPI intent'));
   const metadata = object(data?.metaData);
   const result = object(data?.result);
   console.debug(`PayU intent response validation: txnId=${metadata?.txnId}, amount=${result?.amount}, expected=${(order.amount/100).toFixed(2)}, merchantVpa=${result?.merchantVpa}`);
@@ -138,7 +138,7 @@ export async function createPayUQr(order: Order, email: string, clientIp: string
     signal: AbortSignal.timeout(20000),
   });
   if (!response.ok) throw new Error(`PayU QR API returned HTTP ${response.status}`);
-  const data = object(await response.json());
+  const data = object(await readPayUJson(response, 'QR'));
   const metadata = object(data?.metaData);
   const result = object(data?.result);
   console.debug(`PayU QR response validation: txnId=${metadata?.txnId}, amount=${result?.amount}, expected=${(order.amount/100).toFixed(2)}, merchantVpa=${result?.merchantVpa}`);
@@ -199,6 +199,15 @@ function object(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
+async function readPayUJson(response: Response, label: string): Promise<unknown> {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`PayU ${label} API returned a non-JSON response (likely a PayU outage page): ${text.replace(/\s+/g, ' ').slice(0, 200)}`);
+  }
+}
+
 type PayUStatus = { confirmed: boolean; failed?: boolean; transactionReference?: string };
 
 export function parsePayUStatus(data: unknown, txnid: string, amountPaise: number): PayUStatus {
@@ -241,5 +250,5 @@ export async function getPayUStatus(txnid: string, amountPaise: number): Promise
     signal: AbortSignal.timeout(15000),
   });
   if (!response.ok) throw new Error(`PayU verify-payment API returned HTTP ${response.status}`);
-  return parsePayUStatus(await response.json(), txnid, amountPaise);
+  return parsePayUStatus(await readPayUJson(response, 'verify-payment'), txnid, amountPaise);
 }

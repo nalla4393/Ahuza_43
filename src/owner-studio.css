@@ -35,3 +35,8 @@
 
 .studio-payee .studio-form-grid{margin:12px 0}
 .studio-payee-actions{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 12px}
+.studio-product-preview{display:grid;gap:6px;padding:12px;border:1px solid var(--studio-line,#d8d4c8);background:#f7f7f3;font-size:12px}
+.studio-product-preview strong{font-size:13px}
+.studio-product-preview del{color:var(--studio-muted,#73766d)}
+.studio-copy-actions{display:grid;justify-items:start;gap:6px}
+.studio-copy-actions small{color:var(--studio-muted,#73766d);font-size:11px;line-height:1.5}

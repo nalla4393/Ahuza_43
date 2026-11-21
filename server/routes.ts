@@ -24,6 +24,7 @@ import { getExchangeRate } from './services/exchangeRate.js';
 import { deletePaymentProof, readPaymentProof, savePaymentProof } from './services/paymentProof.js';
 import { rankPaymentCandidates } from './services/paymentTriage.js';
 import { defaultShippingCharge, maxShippingCharge, shippingForSubtotal } from '../shared/shipping.js';
+import { productIsPurchasable } from '../shared/productPricing.js';
 
 export const api = Router();
 const authLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false });
@@ -132,7 +133,7 @@ api.post('/products/:id/stock-alert', requireCustomer, async (request, response)
   const result = await mutateDatabase<{ error: string; status: number } | { subscribed: true; alreadySubscribed: boolean }>((database) => {
     const product = database.products.find((entry) => entry.id === request.params.id && entry.active);
     if (!product) return { error: 'Product not found', status: 404 };
-    if (product.stock > 0) return { error: 'This item is available now', status: 409 };
+    if (productIsPurchasable(product)) return { error: 'This item is available now', status: 409 };
     const customer = database.customers.find((entry) => entry.id === request.session.userId);
     if (!customer) return { error: 'Sign in to receive a restock alert', status: 401 };
     database.stockAlerts ||= [];
@@ -384,7 +385,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   const orderItems: Order['items'] = [];
   for (const { productId, size, quantity } of requested.values()) {
     const product = products.find((entry) => entry.id === productId && entry.active);
-    if (!product || product.stock < quantity) { response.status(409).json({ error: `Product ${productId} is unavailable in the requested quantity` }); return; }
+    if (!product || !productIsPurchasable(product) || product.stock < quantity) { response.status(409).json({ error: `Product ${productId} is unavailable in the requested quantity` }); return; }
     if (product.sizes?.length && (!size || !product.sizes.some((available) => available.toLowerCase() === size.toLowerCase()))) {
       response.status(400).json({ error: `Choose an available size for ${product.name}` }); return;
     }
@@ -405,7 +406,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   const persisted = await mutateDatabase((database) => {
     const available = !outOfStockItems(database, { items: orderItems }).length && orderItems.every((item) => {
       const product = database.products.find((entry) => entry.id === item.productId && entry.active);
-      return product && product.stock >= item.quantity && product.price === item.unitPrice;
+      return product && productIsPurchasable(product) && product.stock >= item.quantity && product.price === item.unitPrice;
     });
     if (!available) return 'stock_changed' as const;
     const shippingChargeAmount = database.shippingChargeAmount ?? defaultShippingCharge;
@@ -465,24 +466,6 @@ async function createPaymentOrder(request: Request, response: Response): Promise
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`PayU ${usePayuQr ? 'QR' : 'intent'} checkout creation failed for order ${localOrderId}: ${errorMessage}`);
-
-    if (usePayuQr) {
-      console.warn(`QR mode failed, falling back to intent mode for order ${localOrderId}`);
-      try {
-        const intentUri = (await createPayUIntent(placed, customerEmail!, request.ip || request.socket?.remoteAddress || '', request.get('user-agent') || '')).value;
-        if (customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((error) => console.error('Order received email queue failed:', error));
-        void enqueueOrderEmail(localOrderId, 'owner_new_order').catch((error) => console.error('Owner order email queue failed:', error));
-        response.status(201).json({
-          orderId: localOrderId, paymentMethod, paymentReference, provider: 'payu',
-          checkoutMode: 'intent' as const, intentUri, amount, currency: 'INR', expiresAt: placed.reservationExpiresAt,
-          status: 'pending', items: placed.items.map(({ name, quantity, size }) => ({ name, quantity, size })),
-        });
-        return;
-      } catch (intentError) {
-        const intentErrorMessage = intentError instanceof Error ? intentError.message : String(intentError);
-        console.error(`Intent fallback also failed for order ${localOrderId}: ${intentErrorMessage}`);
-      }
-    }
 
     await mutateDatabase((database) => {
       const order = database.orders.find((entry) => entry.id === localOrderId);
@@ -586,9 +569,6 @@ api.post('/payments/orders/:id/qr', requireCustomer, paymentLimit, async (reques
     if (result.qr.state === 'starting' && Date.now() - Date.parse(result.qr.startedAt) < 30000) {
       response.status(202).json({ pending: true }); return;
     }
-    if (result.qr.state === 'error') {
-      response.status(503).json({ error: 'QR generation failed. Please use the UPI app link instead or contact AHUZA for help.' }); return;
-    }
     response.status(409).json({ error: 'This QR is unavailable or expired. Do not pay again if money was debited; contact AHUZA.' }); return;
   }
   try {
@@ -605,30 +585,7 @@ api.post('/payments/orders/:id/qr', requireCustomer, paymentLimit, async (reques
     response.set('Cache-Control', 'no-store').json({ qr: qr.value, expiresAt: qr.expiresAt });
   } catch (qrError) {
     const qrErrorMessage = qrError instanceof Error ? qrError.message : String(qrError);
-    console.error(`PayU QR generation failed for order ${result.order.id}: ${qrErrorMessage}, attempting intent fallback`);
-
-    try {
-      const customer = (await getDatabase()).customers.find((entry) => entry.id === result.order.userId);
-      if (customer?.email) {
-        const intent = await createPayUIntent(result.order, customer.email, result.ip, result.userAgent);
-        const saved = await mutateDatabase((database) => {
-          const order = database.orders.find((entry) => entry.id === result.order.id && entry.userId === request.session.userId);
-          if (!order || order.status !== 'pending_payment' || order.payuPaymentIssue) return false;
-          delete order.payuQr;
-          delete order.payuCheckoutMode;
-          return true;
-        });
-        if (saved) {
-          console.warn(`QR fallback to intent succeeded for order ${result.order.id}`);
-          response.status(200).json({ intentUri: intent.value, fallback: true });
-          return;
-        }
-      }
-    } catch (intentError) {
-      const intentErrorMessage = intentError instanceof Error ? intentError.message : String(intentError);
-      console.error(`QR fallback to intent also failed for order ${result.order.id}: ${intentErrorMessage}`);
-    }
-
+    console.error(`PayU QR generation failed for order ${result.order.id}: ${qrErrorMessage}`);
     await mutateDatabase((database) => {
       const order = database.orders.find((entry) => entry.id === result.order.id);
       if (order?.payuQr?.state === 'starting' && order.payuQr.startedAt === startedAt) {
@@ -639,7 +596,7 @@ api.post('/payments/orders/:id/qr', requireCustomer, paymentLimit, async (reques
         }
       }
     });
-    response.status(503).json({ error: 'Could not create the PayU QR. Please contact AHUZA for help or use the UPI app link instead.' });
+    response.status(503).json({ error: 'Could not create the PayU QR. Do not pay again if money was debited; contact AHUZA.' });
   }
 });
 
@@ -878,7 +835,7 @@ api.patch('/owner/site-status', requireOwner, ownerLimit, async (request, respon
 api.get('/owner/inventory', requireOwner, ownerLimit, async (_request, response) => response.json({ products: (await getDatabase()).products }));
 
 api.post('/owner/inventory', requireOwner, ownerLimit, async (request, response) => {
-  const { name, description, price, sku, stock, category, imageUrl, ghostMannequin, images, mainImageId, active, sizes, fabric, pattern, components, bulletPoints } = request.body || {};
+  const { name, description, price, sku, stock, stockStatus, discountPercent, category, imageUrl, ghostMannequin, images, mainImageId, active, sizes, fabric, color, pattern, fit, style, occasion, careInstructions, components, bulletPoints } = request.body || {};
   const hasImages = Array.isArray(images) && images.length > 0;
   if (!stringValue(name, 120) || !stringValue(description, 1000) || !Number.isFinite(price) || price <= 0 || price > 10000000 || !stringValue(sku, 80) || !Number.isInteger(stock) || stock < 0 || stock > 100000 || !stringValue(category, 80) || (!hasImages && !httpsUrl(imageUrl))) {
     response.status(400).json({ error: 'Provide a title, description, positive price, SKU, stock, category, and at least one uploaded image' }); return;
@@ -886,11 +843,13 @@ api.post('/owner/inventory', requireOwner, ownerLimit, async (request, response)
   if (images !== undefined && !validImageIds(images, mainImageId)) { response.status(400).json({ error: 'Image list is invalid' }); return; }
   if (sizes !== undefined && !validProductSizes(sizes)) { response.status(400).json({ error: 'Sizes must be a list of up to 20 unique labels, each 1 to 20 characters' }); return; }
   if (active !== undefined && typeof active !== 'boolean') { response.status(400).json({ error: 'Status must be Published or Unpublished' }); return; }
+  if (stockStatus !== undefined && !validStockStatus(stockStatus)) { response.status(400).json({ error: 'Choose In Stock, Sold Out, or Limited Stock' }); return; }
+  if (discountPercent !== undefined && (!Number.isInteger(discountPercent) || discountPercent < 0 || discountPercent > 99)) { response.status(400).json({ error: 'Discount must be a whole percentage from 0 to 99' }); return; }
   if (ghostMannequin !== undefined && !validGhostMannequin(ghostMannequin)) { response.status(400).json({ error: 'Ghost mannequin metadata is invalid' }); return; }
-  if (!validProductDetails({ fabric, pattern, components, bulletPoints })) { response.status(400).json({ error: 'Product details must have text fields of at most 200 characters and up to 10 bullet points of 300 characters each' }); return; }
+  if (!validProductDetails({ fabric, color, pattern, fit, style, occasion, careInstructions, components, bulletPoints })) { response.status(400).json({ error: 'Product details must have text fields of at most 200 characters and up to 10 bullet points of 300 characters each' }); return; }
   const product = await mutateDatabase((database) => {
     if (database.products.some((entry) => entry.sku.toLowerCase() === sku.trim().toLowerCase())) return null;
-    const created: Product = { id: randomUUID(), name: name.trim(), description: description.trim(), price, sku: sku.trim(), stock, category: category.trim(), imageUrl: imageUrl || '', active: active ?? true, ghostMannequin: { tags: [], ...(ghostMannequin as Product['ghostMannequin'] | undefined) }, ...(sizes?.length ? { sizes } : {}), ...cleanProductDetails({ fabric, pattern, components, bulletPoints }) };
+    const created: Product = { id: randomUUID(), name: name.trim(), description: description.trim(), price, sku: sku.trim(), stock, stockStatus: stockStatus ?? 'in_stock', ...(discountPercent ? { discountPercent } : {}), category: category.trim(), imageUrl: imageUrl || '', active: active ?? true, ghostMannequin: { tags: [], ...(ghostMannequin as Product['ghostMannequin'] | undefined) }, ...(sizes?.length ? { sizes } : {}), ...cleanProductDetails({ fabric, color, pattern, fit, style, occasion, careInstructions, components, bulletPoints }) };
     if (images !== undefined && !applyImages(database, created, images, mainImageId)) return 'bad-images' as const;
     database.products.push(created);
     return created;
@@ -901,7 +860,7 @@ api.post('/owner/inventory', requireOwner, ownerLimit, async (request, response)
 });
 
 api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, response) => {
-  const { name, description, price, category, imageUrl, stock, sku, active, ghostMannequin, images, mainImageId, sizes, fabric, pattern, components, bulletPoints } = request.body || {};
+  const { name, description, price, category, imageUrl, stock, stockStatus, discountPercent, sku, active, ghostMannequin, images, mainImageId, sizes, fabric, color, pattern, fit, style, occasion, careInstructions, components, bulletPoints } = request.body || {};
   if (images !== undefined && !validImageIds(images, mainImageId)) { response.status(400).json({ error: 'Image list is invalid' }); return; }
   if (sizes !== undefined && !validProductSizes(sizes)) { response.status(400).json({ error: 'Sizes must be a list of up to 20 unique labels, each 1 to 20 characters' }); return; }
   if (name !== undefined && !stringValue(name, 120)) { response.status(400).json({ error: 'Title must be 1 to 120 characters' }); return; }
@@ -912,8 +871,10 @@ api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, resp
   if (stock !== undefined && (!Number.isInteger(stock) || stock < 0 || stock > 100000)) { response.status(400).json({ error: 'Stock must be a non-negative whole number' }); return; }
   if (sku !== undefined && !stringValue(sku, 80)) { response.status(400).json({ error: 'SKU must be 1 to 80 characters' }); return; }
   if (active !== undefined && typeof active !== 'boolean') { response.status(400).json({ error: 'Active must be a boolean' }); return; }
+  if (stockStatus !== undefined && !validStockStatus(stockStatus)) { response.status(400).json({ error: 'Choose In Stock, Sold Out, or Limited Stock' }); return; }
+  if (discountPercent !== undefined && (!Number.isInteger(discountPercent) || discountPercent < 0 || discountPercent > 99)) { response.status(400).json({ error: 'Discount must be a whole percentage from 0 to 99' }); return; }
   if (ghostMannequin !== undefined && !validGhostMannequin(ghostMannequin)) { response.status(400).json({ error: 'Ghost mannequin metadata is invalid' }); return; }
-  if (!validProductDetails({ fabric, pattern, components, bulletPoints })) { response.status(400).json({ error: 'Product details must have text fields of at most 200 characters and up to 10 bullet points of 300 characters each' }); return; }
+  if (!validProductDetails({ fabric, color, pattern, fit, style, occasion, careInstructions, components, bulletPoints })) { response.status(400).json({ error: 'Product details must have text fields of at most 200 characters and up to 10 bullet points of 300 characters each' }); return; }
   const removedImageIds: string[] = [];
   const result = await mutateDatabase<{ product: Product } | { error: string; status: number }>((database) => {
     const product = database.products.find((entry) => entry.id === request.params.id);
@@ -926,10 +887,15 @@ api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, resp
     if (category !== undefined) product.category = category.trim();
     if (imageUrl !== undefined) product.imageUrl = imageUrl;
     if (stock !== undefined) product.stock = stock;
+    if (stockStatus !== undefined) product.stockStatus = stockStatus;
+    if (discountPercent !== undefined) {
+      if (discountPercent === 0) delete product.discountPercent;
+      else product.discountPercent = discountPercent;
+    }
     if (sku !== undefined) product.sku = sku.trim();
     if (active !== undefined) product.active = active;
     if (sizes !== undefined) product.sizes = sizes;
-    Object.assign(product, cleanProductDetails({ fabric, pattern, components, bulletPoints }));
+    Object.assign(product, cleanProductDetails({ fabric, color, pattern, fit, style, occasion, careInstructions, components, bulletPoints }));
     if (ghostMannequin !== undefined) product.ghostMannequin = { ...product.ghostMannequin, ...ghostMannequin } as Product['ghostMannequin'];
     if (images !== undefined) {
       if (!applyImages(database, product, images, mainImageId)) return { error: 'One or more images were not uploaded successfully', status: 400 };
@@ -940,20 +906,29 @@ api.patch('/owner/inventory/:id', requireOwner, ownerLimit, async (request, resp
   });
   if ('error' in result) { response.status(result.status).json({ error: result.error }); return; }
   await Promise.all(removedImageIds.map((id) => deleteProductImageFiles(id).catch((error) => console.error('Image cleanup failed:', error))));
-  if (result.product.stock > 0) void sendRestockAlerts().catch((error) => console.error('Restock alert scan failed:', error));
+  if (productIsPurchasable(result.product)) void sendRestockAlerts().catch((error) => console.error('Restock alert scan failed:', error));
   response.json(result);
 });
 
 function validProductDetails(details: Record<string, unknown>): boolean {
-  return ['fabric', 'pattern', 'components'].every((key) => details[key] === undefined || (typeof details[key] === 'string' && details[key].length <= 200))
+  return ['fabric', 'color', 'pattern', 'fit', 'style', 'occasion', 'careInstructions', 'components'].every((key) => details[key] === undefined || (typeof details[key] === 'string' && details[key].length <= 200))
     && (details.bulletPoints === undefined || (Array.isArray(details.bulletPoints) && details.bulletPoints.length <= 10
       && details.bulletPoints.every((point: unknown) => stringValue(point, 300))));
 }
 
-function cleanProductDetails(details: { fabric?: string; pattern?: string; components?: string; bulletPoints?: string[] }): Pick<Product, 'fabric' | 'pattern' | 'components' | 'bulletPoints'> {
+function validStockStatus(value: unknown): value is NonNullable<Product['stockStatus']> {
+  return value === 'in_stock' || value === 'sold_out' || value === 'limited_stock';
+}
+
+function cleanProductDetails(details: Pick<Product, 'fabric' | 'color' | 'pattern' | 'fit' | 'style' | 'occasion' | 'careInstructions' | 'components' | 'bulletPoints'>): Pick<Product, 'fabric' | 'color' | 'pattern' | 'fit' | 'style' | 'occasion' | 'careInstructions' | 'components' | 'bulletPoints'> {
   return {
     ...(details.fabric !== undefined ? { fabric: details.fabric.trim() } : {}),
+    ...(details.color !== undefined ? { color: details.color.trim() } : {}),
     ...(details.pattern !== undefined ? { pattern: details.pattern.trim() } : {}),
+    ...(details.fit !== undefined ? { fit: details.fit.trim() } : {}),
+    ...(details.style !== undefined ? { style: details.style.trim() } : {}),
+    ...(details.occasion !== undefined ? { occasion: details.occasion.trim() } : {}),
+    ...(details.careInstructions !== undefined ? { careInstructions: details.careInstructions.trim() } : {}),
     ...(details.components !== undefined ? { components: details.components.trim() } : {}),
     ...(details.bulletPoints !== undefined ? { bulletPoints: details.bulletPoints.map((point) => point.trim()) } : {}),
   };
@@ -1402,10 +1377,10 @@ api.post('/owner/agent/execute', requireOwner, ownerLimit, async (request, respo
       const current = database.products.find((entry) => entry.id === action.productId);
       if (!current || current.stock !== action.previousStock) return null;
       current.stock = action.stock;
-      return { id: current.id, name: current.name, sku: current.sku, stock: current.stock };
+      return { id: current.id, name: current.name, sku: current.sku, stock: current.stock, stockStatus: current.stockStatus };
     });
     if (!product) { response.status(409).json({ error: 'Inventory changed since this proposal Refresh and ask the agent again' }); return; }
-    if (product.stock > 0) void sendRestockAlerts().catch((error) => console.error('Restock alert scan failed:', error));
+    if (productIsPurchasable(product)) void sendRestockAlerts().catch((error) => console.error('Restock alert scan failed:', error));
     response.json({ completed: true, message: `Updated ${product.name} (${product.sku}) stock to ${product.stock}` });
     return;
   }

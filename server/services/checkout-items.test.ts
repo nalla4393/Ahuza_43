@@ -7,7 +7,7 @@ import StandalonePayULink from '../../src/StandalonePayULink.js';
 
 test('checkout shows item details and quantity and removal controls', () => {
   const markup = renderToStaticMarkup(createElement(CheckoutItems, {
-    items: [{ id: 'one', name: 'Jacket', imageUrl: '/jacket.jpg', size: 'M', quantity: 2, unitPrice: '₹100', lineTotal: '₹200', canIncrease: true }],
+    items: [{ id: 'one', name: 'Jacket', imageUrl: '/jacket.jpg', size: 'M', quantity: 2, unitPrice: '₹100', mrp: '₹125', discountPercent: 20, lineTotal: '₹200', canIncrease: true }],
     busy: false,
     onChangeQuantity: () => {},
     onRemove: () => {},
@@ -17,6 +17,8 @@ test('checkout shows item details and quantity and removal controls', () => {
   assert.match(markup, /Size M/);
   assert.match(markup, /Quantity 2/);
   assert.match(markup, /₹200/);
+  assert.match(markup, /<del>₹125<\/del>/);
+  assert.match(markup, /20% OFF/);
   assert.match(markup, /Add one Jacket size M/);
   assert.match(markup, /Remove one Jacket size M/);
   assert.match(markup, /Remove Jacket size M from order/);

@@ -7,6 +7,8 @@ type CheckoutItem = {
   size?: string;
   quantity: number;
   unitPrice: string;
+  mrp?: string;
+  discountPercent?: number;
   lineTotal: string;
   canIncrease: boolean;
 };
@@ -24,7 +26,7 @@ export default function CheckoutItems({ items, busy, onChangeQuantity, onRemove,
       <img src={item.imageUrl} alt={item.name} />
       <div className="bag-line-copy">
         <h3>{item.name}</h3>
-        <p>{item.unitPrice}{item.size ? ` · Size ${item.size}` : ''}</p>
+        <p>{item.mrp && <del>{item.mrp}</del>} {item.unitPrice}{item.discountPercent ? ` · ${item.discountPercent}% OFF` : ''}{item.size ? ` · Size ${item.size}` : ''}</p>
         <div className="quantity-control">
           <button type="button" aria-label={`Remove one ${item.name}${item.size ? ` size ${item.size}` : ''}`} onClick={() => onChangeQuantity(item.id, item.size, -1)} disabled={busy}><Minus size={13} /></button>
           <span aria-label={`Quantity ${item.quantity}`}>{item.quantity}</span>

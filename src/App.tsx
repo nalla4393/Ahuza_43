@@ -3,18 +3,19 @@ import { User, ArrowRight, ArrowUpRight, Heart, MessageCircle, Mail, MapPin, Men
 import { QRCodeSVG } from 'qrcode.react';
 import { countries, regionsForCountry } from './addressData';
 import CustomerSupportChat from './CustomerSupportChat';
-import ShoppingAssistant, { type AssistantTrip } from './ShoppingAssistant';
 import ProductRail from './ProductRail';
 import HeroCarousel, { type BannerSlide } from './HeroCarousel';
 import PaymentQr from './PaymentQr';
 import ManualPaymentInstructions from './ManualPaymentInstructions';
+import StandalonePayULink from './StandalonePayULink';
 import CheckoutItems from './CheckoutItems';
 import PaymentSuccess from './PaymentSuccess';
 import { defaultImageSettings, imageSettingsVars, mainImage, srcSet, type ImageSettings, type ProductImage } from './imageTypes';
 import { defaultStorefrontCopy, type StorefrontCopyId } from '../shared/storefrontCopy';
 import { freeShippingThreshold, maxShippingCharge, shippingForSubtotal } from '../shared/shipping';
 import { productPath } from '../shared/productUrl';
-import type { ProductDetails as ProductDetailsData } from '../shared/productDetails';
+import type { ProductDetails as ProductDetailsData, ProductStockStatus } from '../shared/productDetails';
+import { productIsPurchasable, productPricing, productStockStatus } from '../shared/productPricing';
 import ProductDetails from './ProductDetails';
 import { copyProductLink, shareProduct } from './productSharing';
 
@@ -33,6 +34,8 @@ type Product = ProductDetailsData & {
   images?: ProductImage[];
   mainImageId?: string;
   sizes?: string[];
+  stockStatus?: ProductStockStatus;
+  discountPercent?: number;
 };
 
 const galleryImages = (product: Product): { id: string; url: string; srcSet?: string; thumb: string }[] => {
@@ -53,7 +56,7 @@ const formatPaymentAmount = (amount: number) => new Intl.NumberFormat('en-IN', {
 
 type Customer = { id: string; email: string };
 type CustomerOrder = { id: string; amount: number; currency: string; status: string; paymentMethod?: 'upi' | 'cod'; paymentStatus?: string; payuPaymentIssue?: 'initiation_failed' | 'provider_failed'; paymentVerifiedAt?: string; createdAt: string; trackingNumber?: string; trackingUrl?: string; review?: { rating: number; comment?: string; createdAt: string }; items: { name: string; quantity: number; size?: string }[] };
-type StorefrontContent = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string; chatbotImageUrl?: string; circleImages?: Record<string, string>; circleLabels?: Record<string, string>; bannerImages?: Record<string, string>; copy?: Record<StorefrontCopyId, string> };
+type StorefrontContent = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string; circleImages?: Record<string, string>; circleLabels?: Record<string, string>; bannerImages?: Record<string, string>; copy?: Record<StorefrontCopyId, string> };
 type CartLine = { productId: string; quantity: number; size?: string };
 const orderStatusLabel = (order: { status: string; paymentStatus?: string; paymentMethod?: string; payuPaymentIssue?: 'initiation_failed' | 'provider_failed' }) => {
   if (order.status === 'paid') return 'Order confirmed · payment received';
@@ -133,9 +136,6 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return result;
 }
 export default function App() {
-  const [assistantTrip, setAssistantTrip] = useState<AssistantTrip | null>(null);
-  const tripNumber = useRef(0);
-  const bagButton = useRef<HTMLButtonElement>(null);
   const cartDrawer = useRef<HTMLElement>(null);
   const [exchangeRate, setExchangeRate] = useState<{ usdPerInr: number; date: string } | null>(null);
   useEffect(() => {
@@ -259,7 +259,7 @@ export default function App() {
       && (selectedSizeFilter === 'All' || product.sizes?.includes(selectedSizeFilter))
       && (!minPrice || product.price >= Number(minPrice))
       && (!maxPrice || product.price <= Number(maxPrice))
-      && (!inStockOnly || product.stock > 0)
+      && (!inStockOnly || productIsPurchasable(product))
       && (!savedOnly || wishlist.includes(product.id));
   }).sort((a, b) => sortOrder === 'price-low' ? a.price - b.price : sortOrder === 'price-high' ? b.price - a.price : sortOrder === 'newest' ? b.id.localeCompare(a.id) : 0);
   const resetFilters = () => { setSelectedCategory('All'); setSelectedSizeFilter('All'); setSearchTerm(''); setMinPrice(''); setMaxPrice(''); setInStockOnly(false); setSavedOnly(false); };
@@ -296,7 +296,7 @@ export default function App() {
   ];
   const shownProducts = matchingProducts.slice(0, visibleCount);
   const newArrivals = products.slice().sort((a, b) => b.id.localeCompare(a.id)).slice(0, 12);
-  const readyToShip = products.filter((product) => product.stock > 0).slice(0, 12);
+  const readyToShip = products.filter(productIsPurchasable).slice(0, 12);
 
   useEffect(() => { setVisibleCount(12); }, [searchTerm, selectedCategory, selectedSizeFilter, sortOrder, minPrice, maxPrice, inStockOnly, savedOnly]);
 
@@ -346,7 +346,7 @@ export default function App() {
     if (products.length === 0) return;
     setCart((current) => current.flatMap((line) => {
       const product = products.find((entry) => entry.id === line.productId);
-      if (!product || product.stock < 1) return [];
+      if (!product || !productIsPurchasable(product)) return [];
       return [{ ...line, quantity: Math.min(line.quantity, product.stock, 10) }];
     }));
   }, [products]);
@@ -695,30 +695,18 @@ export default function App() {
     }
   }
 
-  function animateAssistant(product: Product, source: HTMLElement, mode: AssistantTrip['mode']) {
-    const productRect = source.getBoundingClientRect();
-    const bagRect = bagButton.current?.getBoundingClientRect();
-    const clamp = (value: number, max: number) => Math.max(28, Math.min(max - 28, value));
-    setAssistantTrip({
-      id: ++tripNumber.current,
-      mode,
-      productName: product.name,
-      imageUrl: mainImage(product)?.variants[0]?.url || product.imageUrl,
-      productX: clamp(productRect.left + productRect.width / 2, window.innerWidth),
-      productY: clamp(productRect.top + productRect.height / 2, window.innerHeight),
-      bagX: clamp(bagRect ? bagRect.left + bagRect.width / 2 : window.innerWidth - 40, window.innerWidth),
-      bagY: clamp(bagRect ? bagRect.top + bagRect.height / 2 : 40, window.innerHeight),
-    });
-  }
-
-  function addToBag(product: Product, size?: string, source?: HTMLElement) {
+  function addToBag(product: Product, size?: string) {
     if (product.sizes?.length && !size) {
       openProduct(product);
       setNotice('Choose an available size before adding this item to your bag');
       window.setTimeout(() => setNotice(''), 3000);
       return;
     }
-    if (product.stock < 1) return;
+    if (!productIsPurchasable(product)) {
+      setNotice(`${product.name} is sold out`);
+      window.setTimeout(() => setNotice(''), 3000);
+      return;
+    }
     const maxQuantity = Math.min(product.stock, 10);
     const currentQuantity = cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0);
     if (currentQuantity >= maxQuantity) {
@@ -731,7 +719,6 @@ export default function App() {
         ? current.map((line) => line.productId === product.id && line.size === size ? { ...line, quantity: Math.min(line.quantity + 1, maxQuantity) } : line)
         : [...current, { productId: product.id, quantity: 1, ...(size ? { size } : {}) }];
     });
-    if (source) animateAssistant(product, source, 'pack');
     setNotice(`${product.name}${size ? ` · Size ${size}` : ''} added to your cart`);
     window.setTimeout(() => setNotice(''), 2400);
   }
@@ -740,7 +727,12 @@ export default function App() {
     const product = products.find((entry) => entry.id === productId);
     if (!product) return;
     const currentQuantity = cart.reduce((total, line) => line.productId === productId ? total + line.quantity : total, 0);
-    const maxQuantity = Math.min(product.stock, 10);
+    if (change > 0 && !productIsPurchasable(product)) {
+      setNotice(`${product.name} is sold out`);
+      window.setTimeout(() => setNotice(''), 3000);
+      return;
+    }
+    const maxQuantity = productIsPurchasable(product) ? Math.min(product.stock, 10) : 0;
     if (change > 0 && currentQuantity >= maxQuantity) {
       setNotice(`You can add up to ${maxQuantity} of ${product.name}`);
       return;
@@ -1131,25 +1123,28 @@ export default function App() {
     const hoverImage = imageSettings.layout.cardImage === 'hover-second' ? gallery[1] : undefined;
     const displayBackground = product.ghostMannequin?.background || `var(--tone-${index % 4})`;
     const quantityInBag = cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0);
-    const quantityLimit = Math.min(product.stock, 10);
+    const available = productIsPurchasable(product);
+    const quantityLimit = available ? Math.min(product.stock, 10) : 0;
+    const pricing = productPricing(product.price, product.discountPercent);
+    const stockStatus = productStockStatus(product);
     return <article className="product" key={product.id}>
       <div className={`product-image image-tone-${index % 4} ${product.images?.length ? 'has-upload' : ''}`} style={product.images?.length ? undefined : { background: displayBackground }}>
-        <a href={productPath(product)} className="product-open" onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); animateAssistant(product, event.currentTarget, 'preview'); openProduct(product); }} aria-label={`View ${product.name}`}>
+        <a href={productPath(product)} className="product-open" onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); openProduct(product); }} aria-label={`View ${product.name}`}>
           <img src={displayImage.url} srcSet={displayImage.srcSet} sizes="(max-width: 760px) 50vw, 25vw" alt={product.name} loading="lazy" className={product.images?.length ? 'upload-product-image' : 'ghost-product-image'} />
           {hoverImage && <img src={hoverImage.url} srcSet={hoverImage.srcSet} sizes="(max-width: 760px) 50vw, 25vw" alt="" loading="lazy" className="upload-product-image hover-image" />}
         </a>
         <span className="product-number">{String(index + 1).padStart(2, '0')}</span>
         <button className={`wishlist-toggle ${wishlist.includes(product.id) ? 'saved' : ''}`} type="button" onClick={() => void toggleWishlist(product)} aria-pressed={wishlist.includes(product.id)} aria-label={wishlist.includes(product.id) ? `Remove ${product.name} from wishlist` : `Save ${product.name} to wishlist`}><Heart size={17} fill={wishlist.includes(product.id) ? 'currentColor' : 'none'} /></button>
-        <button className={`quick-add ${product.stock < 1 ? 'notify-stock-button' : ''}`} type="button" onClick={(event) => product.stock < 1 ? void requestRestockAlert(product) : product.sizes?.length ? openProduct(product) : addToBag(product, undefined, event.currentTarget.closest<HTMLElement>('.product-image') || event.currentTarget)} disabled={product.stock > 0 && quantityInBag >= quantityLimit} aria-label={product.stock < 1 ? `Notify me when ${product.name} is back in stock` : quantityInBag >= quantityLimit ? `${product.name} quantity limit reached` : product.sizes?.length ? `Choose a size for ${product.name}` : `Add ${product.name} to cart`}>
-          {product.stock > 0 ? <ShoppingBag size={18} /> : storefrontText('cardNotify')}
+        <button className={`quick-add ${!available ? 'notify-stock-button' : ''}`} type="button" onClick={() => !available ? void requestRestockAlert(product) : product.sizes?.length ? openProduct(product) : addToBag(product)} disabled={available && quantityInBag >= quantityLimit} aria-label={!available ? `Notify me when ${product.name} is back in stock` : quantityInBag >= quantityLimit ? `${product.name} quantity limit reached` : product.sizes?.length ? `Choose a size for ${product.name}` : `Add ${product.name} to cart`}>
+          {available ? <ShoppingBag size={18} /> : storefrontText('cardNotify')}
         </button>
       </div>
       {gallery.length > 1 && <div className="card-swatches" role="group" aria-label={`${product.name} views`}>{gallery.slice(0, 6).map((image, position) => <button key={image.id} type="button" className={position === (cardView[product.id] ?? 0) ? 'active' : ''} aria-label={`Show view ${position + 1} of ${product.name}`} aria-pressed={position === (cardView[product.id] ?? 0)} onClick={() => setCardView((views) => ({ ...views, [product.id]: position }))}><img src={image.thumb} alt="" loading="lazy" /></button>)}{gallery.length > 6 && <small>+{gallery.length - 6}</small>}</div>}
       <a className="product-meta" href={productPath(product)} onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); openProduct(product); }} aria-label={`View details for ${product.name}`}>
         <span><strong>{product.name}</strong><small>{product.description}</small></span>
-        <b>{formatPrice(product.price)} <small>{usdEstimate(product.price)}</small></b>
+        <b className="product-card-price">{pricing && <del>{formatPrice(pricing.mrp)}</del>}{formatPrice(product.price)} <small>{usdEstimate(product.price)}</small>{pricing && <em>{pricing.discountPercent}% OFF</em>}</b>
         {product.sizes?.length ? <em className="card-sizes">Sizes: {product.sizes.join(' · ')}</em> : null}
-        {product.stock < 1 ? <em className="card-stock out">{storefrontText('cardOutOfStock')}</em> : product.stock <= 3 ? <em className="card-stock low">Only {product.stock} left</em> : null}
+        {stockStatus === 'sold_out' ? <em className="card-stock out">Sold Out</em> : stockStatus === 'limited_stock' ? <em className="card-stock low">Limited Stock{product.stock ? ` · ${product.stock} left` : ''}</em> : <em className="card-stock">In Stock</em>}
       </a>
     </article>;
   }
@@ -1172,14 +1167,14 @@ export default function App() {
             </div>
             : <button key={label} type="button" onClick={() => openNavItem(label)}>{label}</button>)}
         </nav>
-        <a className="wordmark" href="#home" aria-label="AHUZA home"><span className="wordmark-mark"><svg className="wordmark-logo" viewBox="0 0 500 150" aria-hidden="true"><defs><style>{`@keyframes logoFlow { 0% { opacity: 0; transform: scale(0.95) translateY(2px); } 100% { opacity: 1; transform: scale(1) translateY(0); } } .logo-container { animation: logoFlow 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) both; }`}</style></defs><g className="logo-container"><g fill="#8b1538"><path d="M 70 30 Q 55 55 65 85 Q 75 110 95 115 Q 110 118 120 110 L 100 90 Q 95 100 85 102 Q 72 104 68 85 Q 60 55 70 30 Z" /><path d="M 80 50 Q 72 70 78 90 Q 83 100 95 102 L 85 80 Z" /></g><text x="145" y="105" fontFamily="Playfair Display, serif" fontSize="80" fontWeight="600" fill="#1a1a1a" letterSpacing="2">AHUZA</text></g></svg></span></a>
+        <a className="wordmark" href="#home" aria-label="AHUZAH home"><span className="wordmark-mark"><svg className="wordmark-logo" viewBox="0 0 560 150" aria-hidden="true"><defs><style>{`@keyframes logoFlow { 0% { opacity: 0; transform: scale(0.95) translateY(2px); } 100% { opacity: 1; transform: scale(1) translateY(0); } } .logo-container { animation: logoFlow 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) both; }`}</style></defs><g className="logo-container"><g fill="#8b1538"><path d="M 70 30 Q 55 55 65 85 Q 75 110 95 115 Q 110 118 120 110 L 100 90 Q 95 100 85 102 Q 72 104 68 85 Q 60 55 70 30 Z" /><path d="M 80 50 Q 72 70 78 90 Q 83 100 95 102 L 85 80 Z" /></g><text x="145" y="104" fontFamily="Playfair Display, serif" fontSize="74" fontWeight="600" fill="#1a1a1a" letterSpacing="2">AHUZAH</text></g></svg></span></a>
         <form className="header-search" role="search" onSubmit={(event) => { event.preventDefault(); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>
           <label className="sr-only" htmlFor="header-search-input">Search AHUZA</label>
           <input id="header-search-input" type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); if (event.target.value) setCatalogOpen(true); }} placeholder={storefrontText('searchPlaceholder')} autoComplete="off" />
           {searchTerm && <button type="button" className="header-search-clear" aria-label="Clear search" onClick={() => setSearchTerm('')}><X size={16} /></button>}
           <button type="submit" className="header-search-submit" aria-label="Search"><Search size={18} /></button>
         </form>
-        <div className="header-actions"><button className="header-icon chat-link" type="button" aria-label="Ask Ahuza" onClick={() => window.dispatchEvent(new Event('ahuza:toggle-support'))}><MessageCircle size={18} /><span className="chat-label">{storefrontText('askAhuzaLabel')}</span></button><button className={`header-icon wishlist-link${savedOnly ? ' active' : ''}`} type="button" aria-label={`Wishlist, ${wishlist.length} saved`} aria-pressed={savedOnly} onClick={() => { if (!customer) { setAuthMode('login'); setAccountOpen(true); return; } setSavedOnly(true); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}><Heart size={18} fill={wishlist.length ? 'currentColor' : 'none'} />{wishlist.length > 0 && <span className="count-badge">{wishlist.length}</span>}</button><button className="account-link" aria-label={customer ? 'My account' : 'Account'} onClick={() => setAccountOpen(true)}><User size={18} aria-hidden="true" /><span>{customer ? 'My account' : 'Account'}</span></button><button ref={bagButton} className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
+        <div className="header-actions"><button className="header-icon chat-link" type="button" aria-label="Ask Ahuza" onClick={() => window.dispatchEvent(new Event('ahuza:toggle-support'))}><MessageCircle size={18} /><span className="chat-label">{storefrontText('askAhuzaLabel')}</span></button><button className={`header-icon wishlist-link${savedOnly ? ' active' : ''}`} type="button" aria-label={`Wishlist, ${wishlist.length} saved`} aria-pressed={savedOnly} onClick={() => { if (!customer) { setAuthMode('login'); setAccountOpen(true); return; } setSavedOnly(true); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}><Heart size={18} fill={wishlist.length ? 'currentColor' : 'none'} />{wishlist.length > 0 && <span className="count-badge">{wishlist.length}</span>}</button><button className="account-link" aria-label={customer ? 'My account' : 'Account'} onClick={() => setAccountOpen(true)}><User size={18} aria-hidden="true" /><span>{customer ? 'My account' : 'Account'}</span></button><button className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
       </header>
       {mobileMenuOpen && <div className="menu-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setMobileMenuOpen(false); }}>
         <aside className="menu-drawer" id="collection-drawer" role="dialog" aria-modal="true" aria-labelledby="menu-title">
@@ -1290,9 +1285,9 @@ export default function App() {
         <div className="footer-columns">
           <div><h3>{storefrontText('footerShopTitle')}</h3><ul><li><button type="button" onClick={() => openCollection('All', 'All')}>{storefrontText('footerAllWear')}</button></li>{categories.slice(1).map((category) => <li key={category}><a href={`/collections/${encodeURIComponent(category)}`} onClick={(event) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); openCollection(category, 'All'); }}>{category}</a></li>)}<li><button type="button" onClick={() => { setSortOrder('newest'); openCollection('All', 'All'); }}>{storefrontText('footerNewArrivals')}</button></li></ul></div>
           <div><h3>{storefrontText('footerCustomerTitle')}</h3><ul><li><a href="#contact">{storefrontText('footerContact')}</a></li><li><a href={`mailto:${storefrontText('contactEmail')}`}>{storefrontText('contactEmail')}</a></li><li><a href={`tel:${storefrontText('contactPhone').replace(/\s+/g, '')}`}>{storefrontText('contactPhone')}</a></li></ul></div>
-          <div><h3>AHUZA</h3><p className="footer-tagline">{storefrontText('footerBrandTagline')}</p><p className="footer-loc">{storefrontText('footerLocation')}</p></div>
+          <div><h3>AHUZAH</h3><p className="footer-tagline">{storefrontText('footerBrandTagline')}</p><p className="footer-loc">{storefrontText('footerLocation')}</p></div>
         </div>
-        <div className="footer-bottom"><a className="wordmark" href="#home" aria-label="AHUZA home"><img src="/ahuza-wordmark.png" alt="" className="wordmark-logo" /></a><span>© AHUZA 2026</span><a className="footer-terms" href="/terms.html">Terms and Conditions</a><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
+        <div className="footer-bottom"><a className="wordmark" href="#home" aria-label="AHUZAH home"><img src="/ahuzah-wordmark.svg" alt="AHUZAH" className="wordmark-logo" /></a><span>© AHUZAH 2026</span><a className="footer-terms" href="/terms.html">Terms and Conditions</a><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
       </footer>
 
       {orderSuccessPage && paymentOrder?.paymentMethod === 'upi' && paymentStatus === 'paid' && <PaymentSuccess
@@ -1339,16 +1334,21 @@ export default function App() {
             {paymentOrder.paymentMethod === 'upi' && paymentOrder.provider === 'manual_upi' && paymentStatus !== 'paid' && <ManualPaymentInstructions email={storefrontText('contactEmail')} orderId={paymentOrder.orderId} />}
             {paymentOrder.paymentMethod === 'upi' && paymentStatus !== 'paid' && <small>{paymentOrder.provider === 'manual_upi' ? 'Manual confirmation is required. Do not pay after the 60-minute reservation expires. If you have already paid, contact AHUZA with your order and bank transaction reference.' : paymentOrder.provider === 'payu' ? 'On supported phones, PayU opens a UPI app. Your order is confirmed only after PayU verifies the payment. Do not pay again if money was debited; contact AHUZA if confirmation is delayed.' : storefrontText('payVerificationNote')}</small>}
           </section> : returnedPaymentId ? <section className="payment-panel" role="status"><p>{paymentRecoveryMessage || 'Checking your payment…'}</p>{!customer && <button className="dark-button" type="button" onClick={() => { setAuthMode('login'); setAccountOpen(true); }}>Sign in to check payment</button>}</section> : cartLines.length === 0 ? <div className="empty-bag"><ShoppingBag size={25} /><p>{storefrontText('bagEmpty')}</p><button className="dark-button" onClick={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>{storefrontText('bagExplore')}</button></div> : <>
-            <CheckoutItems items={cartLines.map(({ product, quantity, size }) => ({
-              id: product.id,
-              name: product.name,
-              imageUrl: mainImage(product)?.variants[0]?.url || product.imageUrl,
-              size,
-              quantity,
-              unitPrice: formatPrice(product.price),
-              lineTotal: formatPrice(product.price * quantity),
-              canIncrease: cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0) < Math.min(product.stock, 10),
-            }))} busy={busy} onChangeQuantity={changeQuantity} onRemove={removeFromBag} onContinueShopping={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }} />
+            <CheckoutItems items={cartLines.map(({ product, quantity, size }) => {
+              const pricing = productPricing(product.price, product.discountPercent);
+              return {
+                id: product.id,
+                name: product.name,
+                imageUrl: mainImage(product)?.variants[0]?.url || product.imageUrl,
+                size,
+                quantity,
+                unitPrice: formatPrice(product.price),
+                mrp: pricing ? formatPrice(pricing.mrp) : undefined,
+                discountPercent: pricing?.discountPercent,
+                lineTotal: formatPrice(product.price * quantity),
+                canIncrease: productIsPurchasable(product) && cart.reduce((total, line) => line.productId === product.id ? total + line.quantity : total, 0) < Math.min(product.stock, 10),
+              };
+            })} busy={busy} onChangeQuantity={changeQuantity} onRemove={removeFromBag} onContinueShopping={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }} />
             <div className="bag-footer"><div className="subtotal"><span>{storefrontText('bagSubtotal')}</span><strong>{formatPrice(cartTotal)}</strong></div><div className="subtotal"><span>{storefrontText('bagShipping')}</span><strong>{estimatedShipping === null ? 'Unavailable' : estimatedShipping ? formatPaymentAmount(estimatedShipping) : storefrontText('bagComplimentary')}</strong></div><div className="subtotal"><span>{storefrontText('bagTotal')}</span><strong>{estimatedShipping === null ? 'Unavailable' : formatPaymentAmount(Math.round(cartTotal * 100) + estimatedShipping)}</strong></div>{shippingChargeAmount !== null && <p>{formatPaymentAmount(shippingChargeAmount)} shipping below {formatPaymentAmount(freeShippingThreshold)}; complimentary shipping at or above {formatPaymentAmount(freeShippingThreshold)}.</p>}<p>{storefrontText('bagShippingNote')}</p><form className="checkout-details" onSubmit={(event) => { event.preventDefault(); void checkout(); }}>
               <fieldset className="payment-method-options"><legend>{storefrontText('checkoutPaymentMethod')}</legend><label><input type="radio" name="paymentMethod" value="upi" checked={paymentMethod === 'upi'} onChange={() => setPaymentMethod('upi')} /> {storefrontText('checkoutPayUpi')}</label><label><input type="radio" name="paymentMethod" value="cod" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} /> {storefrontText('checkoutCod')}</label></fieldset>
               <p className="address-title">{storefrontText('checkoutBilling')}</p>
@@ -1359,7 +1359,7 @@ export default function App() {
               {paymentMethod === 'upi' && <p className="payment-config-warning">{storefrontText('checkoutUpiNote')}</p>}
               {checkoutError && <p className="payment-config-warning" role="alert">{checkoutError}</p>}
               <label className="consent-check"><input type="checkbox" checked={marketingConsent} onChange={(event) => setMarketingConsent(event.target.checked)} />{storefrontText('checkoutConsent')}</label><button className="dark-button checkout-button" disabled={busy || estimatedShipping === null}>{busy ? storefrontText('checkoutPlacing') : customer ? paymentMethod === 'cod' ? storefrontText('checkoutPlaceCod') : storefrontText('checkoutContinueUpi') : storefrontText('checkoutSignIn')} <ArrowRight size={16} /></button>
-              </form><small>{storefrontText('checkoutPolicy')}</small></div>
+              </form><small>{storefrontText('checkoutPolicy')}</small>{paymentMethod === 'upi' && <StandalonePayULink contactEmail={storefrontText('contactEmail')} />}</div>
           </>}
         </aside>
       </div>}
@@ -1386,6 +1386,9 @@ export default function App() {
         const layout = imageSettings.layout;
         const showAll = layout.mode === 'gallery' && gallery.length > 1;
         const current = gallery[Math.min(detailIndex, gallery.length - 1)]!;
+        const pricing = productPricing(detailProduct.price, detailProduct.discountPercent);
+        const stockStatus = productStockStatus(detailProduct);
+        const available = productIsPurchasable(detailProduct);
         return <div className="overlay product-detail-backdrop" onClick={closeProduct}>
           <section className={`product-detail thumbs-${layout.thumbnailPlacement}`} role="dialog" aria-modal="true" aria-label={detailProduct.name} style={imageSettingsVars(imageSettings) as CSSProperties} onClick={(event) => event.stopPropagation()}>
             <button className="icon-button dialog-close" aria-label="Close product" onClick={closeProduct}><X size={20} /></button>
@@ -1395,18 +1398,17 @@ export default function App() {
               </div>
               {showAll && layout.thumbnails && <div className="pd-thumbs">{gallery.map((image, position) => <button key={image.id} type="button" className={position === detailIndex ? 'active' : ''} onClick={() => { setDetailIndex(position); setZoomed(false); }} aria-label={`Show image ${position + 1}`}><img src={image.thumb} alt="" /></button>)}</div>}
             </div>
-            <div className="pd-copy"><p className="eyebrow dark-eyebrow">{detailProduct.category} · {detailProduct.sku}</p><h2>{detailProduct.name}</h2><p>{detailProduct.description}</p><strong>{formatPrice(detailProduct.price)}</strong><small>{usdEstimate(detailProduct.price)}</small><p>{detailProduct.stock > 0 ? 'In stock' : 'Out of stock'}</p>
+            <div className="pd-copy"><p className="eyebrow dark-eyebrow">{detailProduct.category} · {detailProduct.sku}</p><h2>{detailProduct.name}</h2><h3 className="product-description-heading">Product description</h3><p>{detailProduct.description}</p><div className="product-detail-price">{pricing && <del>{formatPrice(pricing.mrp)}</del>}<strong>{formatPrice(detailProduct.price)}</strong>{pricing && <em>{pricing.discountPercent}% OFF</em>}</div><small>{usdEstimate(detailProduct.price)}</small><p className={`product-availability ${stockStatus}`}>{stockStatus === 'sold_out' ? 'Sold Out' : stockStatus === 'limited_stock' ? `Limited Stock${detailProduct.stock ? ` · ${detailProduct.stock} left` : ''}` : 'In Stock'}</p><p className="product-delivery-note">{storefrontText('bagShippingNote')}</p>
               <ProductDetails product={detailProduct} text={storefrontText} />
               <div className="product-sharing"><button className="text-link" type="button" onClick={() => void handleProductSharing(detailProduct, 'share')}>Share Product</button><button className="text-link" type="button" onClick={() => void handleProductSharing(detailProduct, 'copy')}>Copy Link</button></div>
               {sharingMessage && <small role="status">{sharingMessage}</small>}
               {detailProduct.sizes?.length ? <fieldset className="customer-size-picker"><legend>{storefrontText('detailChooseSize')}</legend><div className="size-options">{detailProduct.sizes.map((size) => <button key={size} type="button" className={`size-option size-choice ${selectedSize === size ? 'selected' : ''}`} aria-pressed={selectedSize === size} onClick={() => setSelectedSize(size)}>{size}</button>)}</div></fieldset> : null}
-              {detailProduct.stock < 1 ? <button className="dark-button" type="button" onClick={() => void requestRestockAlert(detailProduct)}>{storefrontText('detailNotify')}</button> : <button className="dark-button" type="button" disabled={Boolean(detailProduct.sizes?.length && !selectedSize)} onClick={(event) => { const image = event.currentTarget.closest('.product-detail')?.querySelector<HTMLElement>('.pd-main'); addToBag(detailProduct, selectedSize || undefined, image || event.currentTarget); closeProduct(); }}>{detailProduct.sizes?.length && !selectedSize ? storefrontText('detailChooseSizeButton') : storefrontText('addToCart')}</button>}</div>
+              {!available ? <button className="dark-button" type="button" onClick={() => void requestRestockAlert(detailProduct)}>{storefrontText('detailNotify')}</button> : <button className="dark-button" type="button" disabled={Boolean(detailProduct.sizes?.length && !selectedSize)} onClick={() => { addToBag(detailProduct, selectedSize || undefined); closeProduct(); }}>{detailProduct.sizes?.length && !selectedSize ? storefrontText('detailChooseSizeButton') : storefrontText('addToCart')}</button>}</div>
           </section>
         </div>;
       })()}
       {ownerStudioOpen && <Suspense fallback={<div className="store-maintenance" role="status">Opening Owner Studio…</div>}><OwnerStudio onClose={() => setOwnerStudioOpen(false)} onProductsChange={setProducts} onContentChange={setStoreContent} onSiteStatusChange={setSitePublished} onImageSettingsChange={setImageSettings} onShippingChargeChange={setShippingChargeAmount} /></Suspense>}
-      {sitePublished && <CustomerSupportChat onOpenAccount={() => setAccountOpen(true)} avatarImageUrl={storeContent.chatbotImageUrl} />}
-      {sitePublished && <ShoppingAssistant trip={assistantTrip} onOpenBag={() => { setAssistantTrip(null); if (detailProduct) closeProduct(); setCartOpen(true); }} />}
+      {sitePublished && <CustomerSupportChat onOpenAccount={() => setAccountOpen(true)} />}
     </main>
   );
 }
