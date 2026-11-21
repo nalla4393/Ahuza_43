@@ -33,7 +33,7 @@ test('SEO pages and sitemap reflect the published active catalog', async () => {
     const response = await fetch(`${base}${productUrl}`);
     const html = await response.text();
     assert.equal(response.status, 200);
-    assert.match(html, /<title>Linen &amp; Cotton \| AHUZA Apparel<\/title>/);
+    assert.match(html, /<title>Linen &amp; Cotton \| AHUZAH Apparel<\/title>/);
     assert.match(html, /rel="canonical" href="https:\/\/www\.ahuzawear\.com\/products\/linen-cotton--shirt-1"/);
     assert.match(html, /property="og:image" content="https:\/\/www\.ahuzawear\.com\/uploads\/shirt\.webp"/);
     assert.match(html, /<h1>Linen &amp; Cotton<\/h1>/);

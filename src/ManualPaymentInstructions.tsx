@@ -2,7 +2,7 @@ export default function ManualPaymentInstructions({ email, orderId }: { email: s
   const subject = orderId ? `UPI payment for order ${orderId}` : 'UPI payment screenshot';
   return <section className="manual-payment-instructions" aria-label="Manual payment confirmation instructions">
     <strong>How UPI payment is confirmed</strong>
-    <p>The payment-successful page appears only after AHUZA manually verifies the bank credit and confirms your order. This can take time.</p>
+    <p>The payment-successful page appears only after AHUZAH manually verifies the bank credit and confirms your order. This can take time.</p>
     <p>If it does not appear after you pay:</p>
     <ol>
       <li>Return here and check your payment status. Do not pay again if money was debited.</li>

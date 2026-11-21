@@ -3,7 +3,6 @@ import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import CheckoutItems from '../../src/CheckoutItems.js';
-import StandalonePayULink from '../../src/StandalonePayULink.js';
 
 test('checkout shows item details and quantity and removal controls', () => {
   const markup = renderToStaticMarkup(createElement(CheckoutItems, {
@@ -34,13 +33,4 @@ test('checkout disables edits while placing an order', () => {
     onContinueShopping: () => {},
   }));
   assert.equal((markup.match(/disabled=""/g) || []).length, 4);
-});
-
-test('standalone PayU checkout links to the supplied page and explains that no order is created', () => {
-  const markup = renderToStaticMarkup(createElement(StandalonePayULink, { contactEmail: 'shop@example.test' }));
-  assert.match(markup, /href="https:\/\/u\.payu\.in\/PAYUMN\/YrNhcvnJ3Ya5"/);
-  assert.match(markup, /No storefront order is created/);
-  assert.match(markup, /stock is not reserved/);
-  assert.match(markup, /payment is not automatically matched or confirmed/);
-  assert.match(markup, /href="mailto:shop@example.test"/);
 });

@@ -7,7 +7,7 @@ import ManualPaymentInstructions from '../../src/ManualPaymentInstructions.js';
 test('manual payment instructions explain the pending flow before and after checkout', () => {
   for (const orderId of [undefined, 'ORDER-123']) {
     const markup = renderToStaticMarkup(createElement(ManualPaymentInstructions, { email: 'support@example.com', orderId }));
-    assert.match(markup, /only after AHUZA manually verifies the bank credit/);
+    assert.match(markup, /only after AHUZAH manually verifies the bank credit/);
     assert.match(markup, /If it does not appear after you pay/);
     assert.match(markup, /Upload your payment screenshot/);
     assert.match(markup, /bank transaction reference/);

@@ -10,7 +10,7 @@ type SupportTask = 'tracking' | 'return-status' | 'return-order' | 'return-reaso
 type ReturnDetails = { orderId: string; action: 'return' | 'replacement' };
 
 const menus: Record<string, { prompt: string; choices: Choice[] }> = {
-  home: { prompt: 'Welcome to AHUZA! I’m Beulah What problem can I help you with today? Please select the type of issue you’re facing:', choices: [
+  home: { prompt: 'Welcome to AHUZAH! I’m Beulah What problem can I help you with today? Please select the type of issue you’re facing:', choices: [
     { label: 'Billing / Order', value: 'billing' }, { label: 'Product Related', value: 'product-menu' },
     { label: 'Enquiry', value: 'enquiry' }, { label: 'Other', value: 'other' },
   ] },
@@ -164,16 +164,16 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
     setReturnDetails(null);
     if (value === 'tracking' || value === 'return-status') {
       setTask(value);
-      addMessage({ role: 'assistant', text: 'Please enter your order ID Sign in to your AHUZA account first so I can show only your order information' });
+      addMessage({ role: 'assistant', text: 'Please enter your order ID Sign in to your AHUZAH account first so I can show only your order information' });
     } else if (value === 'return-product' || value === 'exchange-product') {
       setTask('return-order');
       setReturnDetails({ orderId: '', action: value === 'exchange-product' ? 'replacement' : 'return' });
       addMessage({ role: 'assistant', text: 'Please enter the order ID for the delivered order Returns and replacements may be requested within 7 days after delivery; eligibility will be checked by the order system' });
     } else if (value === 'return-policy') {
-      addMessage({ role: 'assistant', text: 'AHUZA accepts return or replacement requests within 7 days after delivery The order system checks eligibility when a request is submitted' });
+      addMessage({ role: 'assistant', text: 'AHUZAH accepts return or replacement requests within 7 days after delivery The order system checks eligibility when a request is submitted' });
     } else if (value === 'pincode') {
       setTask('pincode');
-      addMessage({ role: 'assistant', text: 'Please enter your 6-digit PIN code I do not have access to AHUZA delivery serviceability data, so I will not guess availability' });
+      addMessage({ role: 'assistant', text: 'Please enter your 6-digit PIN code I do not have access to AHUZAH delivery serviceability data, so I will not guess availability' });
     } else if (value === 'coupon') {
       setTask('coupon');
       addMessage({ role: 'assistant', text: 'Coupon and discount data is not available in the store system, so I cannot verify a code or eligibility You can enter the code and details for a support request' });
@@ -248,7 +248,7 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
     try {
       if (task === 'pincode') {
         if (!/^[1-9]\d{5}$/.test(message)) throw new Error('Please enter a valid 6-digit Indian PIN code');
-        addMessage({ role: 'assistant', text: 'Serviceability information is unavailable in AHUZA’s system, so I cannot confirm delivery to this PIN code Would you like to contact support?' });
+        addMessage({ role: 'assistant', text: 'Serviceability information is unavailable in AHUZAH’s system, so I cannot confirm delivery to this PIN code Would you like to contact support?' });
         setRequiresHumanSupport(true);
       } else if (task === 'tracking' || task === 'return-status' || task === 'return-order') {
         const order = await lookUpOrder(message);
@@ -305,7 +305,7 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
     const values = new FormData(form);
     const email = values.get('email')?.toString().trim() || '';
     const details = values.get('details')?.toString().trim() || '';
-    const conversation = messages.slice(-10).map(({ role, text }) => `${role === 'customer' ? 'Customer' : 'AHUZA support'}: ${text}`).join('\n');
+    const conversation = messages.slice(-10).map(({ role, text }) => `${role === 'customer' ? 'Customer' : 'AHUZAH support'}: ${text}`).join('\n');
     setTicketBusy(true);
     try {
       const response = await fetch('/api/customer-support/tickets', {
@@ -328,9 +328,9 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
   const activeMenu = menus[menuPath.at(-1) || 'home'];
 
   return <div className="customer-support">
-    {open && <section className="customer-support-panel" role="dialog" aria-label="AHUZA customer support">
+    {open && <section className="customer-support-panel" role="dialog" aria-label="AHUZAH customer support">
       <header className="customer-support-header">
-        <div><strong>Beulah · AHUZA Support</strong><span className={supportAvailable ? 'support-status is-open' : 'support-status'}><i />{supportAvailable ? 'Available now' : 'Replies 10:00 AM–9:00 PM IST'}</span></div>
+        <div><strong>Beulah · AHUZAH Support</strong><span className={supportAvailable ? 'support-status is-open' : 'support-status'}><i />{supportAvailable ? 'Available now' : 'Replies 10:00 AM–9:00 PM IST'}</span></div>
         <button type="button" onClick={() => setOpen(false)} aria-label="Close support chat"><X size={18} /></button>
       </header>
       <div className="customer-support-messages" aria-live="polite">
@@ -339,7 +339,7 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
       </div>
       {!ticketOpen && <div className="support-flow-controls">
         {!leafOpen && activeMenu.choices.map((choice) => <button className="support-choice" type="button" key={`${choice.value}-${choice.label}`} onClick={() => chooseOption(choice)} disabled={busy}>{choice.label}</button>)}
-        {requiresHumanSupport && <div className="support-escalation"><p>I’m unable to resolve this issue automatically Would you like to contact AHUZA Support?</p><button type="button" onClick={() => { setTicketOpen(true); addMessage({ role: 'assistant', text: 'Please share the details needed for a support request' }); }}>Contact Support</button><button type="button" onClick={resetToMainMenu}>Back to Main Menu</button></div>}
+        {requiresHumanSupport && <div className="support-escalation"><p>I’m unable to resolve this issue automatically Would you like to contact AHUZAH Support?</p><button type="button" onClick={() => { setTicketOpen(true); addMessage({ role: 'assistant', text: 'Please share the details needed for a support request' }); }}>Contact Support</button><button type="button" onClick={resetToMainMenu}>Back to Main Menu</button></div>}
         <div className="support-navigation"><button type="button" onClick={goBack} disabled={menuPath.length === 1 && !leafOpen}>← Back</button><button type="button" onClick={resetToMainMenu}>Main Menu</button><button type="button" onClick={() => { setTicketOpen(true); setRequiresHumanSupport(true); addMessage({ role: 'assistant', text: 'Please share the details needed for a support request' }); }}>Talk to Support</button></div>
       </div>}
       {ticketOpen && <form className="customer-support-ticket" onSubmit={(event) => void raiseTicket(event)}>
@@ -352,9 +352,9 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
         <button type="submit" aria-label="Send message" disabled={busy || ticketOpen}><Send size={17} /></button>
       </form>
     </section>}
-    <button className="customer-support-launcher" type="button" onClick={() => setOpen((current) => !current)} aria-label={open ? 'Close customer support' : 'Ask Ahuza'} aria-expanded={open} title={open ? 'Close customer support' : 'Ask Ahuza'}>
+    <button className="customer-support-launcher" type="button" onClick={() => setOpen((current) => !current)} aria-label={open ? 'Close customer support' : 'Ask Ahuzah'} aria-expanded={open} title={open ? 'Close customer support' : 'Ask Ahuzah'}>
       {open ? <X size={18} /> : <MessageCircle size={18} />}
-      <span>{open ? 'Close' : 'Ask Ahuza'}</span>
+      <span>{open ? 'Close' : 'Ask Ahuzah'}</span>
     </button>
   </div>;
 }

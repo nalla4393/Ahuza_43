@@ -109,7 +109,7 @@ api.use(async (request, response, next) => {
   const existingOrders = (method === 'GET' && (path === '/orders' || /^\/orders\/[^/]+(?:\/invoice)?$/.test(path)))
     || ((method === 'POST' || method === 'PATCH') && /^\/orders\/[^/]+(?:\/returns)?$/.test(path));
   if (ownerApi || healthOrStatus || paymentReadOnly || paymentWebhook || customerAccount || existingOrders) { next(); return; }
-  response.status(503).json({ error: 'The AHUZA storefront is temporarily unavailable Please check back soon' });
+  response.status(503).json({ error: 'The AHUZAH storefront is temporarily unavailable Please check back soon' });
 });
 
 api.get('/storefront', async (_request, response) => {
@@ -149,7 +149,7 @@ api.post('/products/:id/stock-alert', requireCustomer, async (request, response)
 api.post('/newsletter/subscribe', newsletterLimit, async (request, response) => {
   const email = typeof request.body?.email === 'string' ? request.body.email.trim().toLowerCase() : '';
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254 || request.body?.consent !== true) {
-    response.status(400).json({ error: 'Enter a valid email and agree to receive AHUZA newsletter updates' }); return;
+    response.status(400).json({ error: 'Enter a valid email and agree to receive AHUZAH newsletter updates' }); return;
   }
   const result = await mutateDatabase((database) => {
     database.newsletterSubscribers ||= [];
@@ -159,7 +159,7 @@ api.post('/newsletter/subscribe', newsletterLimit, async (request, response) => 
       id: randomUUID(),
       email,
       consentedAt: new Date().toISOString(),
-      consentText: 'I agree to receive AHUZA news, new collection updates and offers by email',
+      consentText: 'I agree to receive AHUZAH news, new collection updates and offers by email',
       source: 'storefront',
     });
     return { subscribed: true as const, alreadySubscribed: false };
@@ -478,7 +478,7 @@ async function createPaymentOrder(request: Request, response: Response): Promise
       orderId: localOrderId, paymentMethod: 'upi', provider: 'payu', checkoutMode: usePayuQr ? 'qr' : 'intent',
       amount, currency: 'INR', paymentReference, expiresAt: placed.reservationExpiresAt,
       payuPaymentIssue: 'initiation_failed',
-      error: 'Could not start PayU checkout. The outcome may be uncertain; check your order history and contact AHUZA before trying again, especially if money was debited.',
+      error: 'Could not start PayU checkout. The outcome may be uncertain; check your order history and contact AHUZAH before trying again, especially if money was debited.',
     });
   }
 }
@@ -561,7 +561,7 @@ api.post('/payments/orders/:id/qr', requireCustomer, paymentLimit, async (reques
   });
   if (result.kind === 'missing') { response.status(404).json({ error: 'Order not found' }); return; }
   if (result.kind === 'closed') { response.status(409).json({ error: 'This payment request can no longer be used' }); return; }
-  if (result.kind === 'unavailable') { response.status(503).json({ error: 'Could not start PayU QR checkout. Contact AHUZA for help.' }); return; }
+  if (result.kind === 'unavailable') { response.status(503).json({ error: 'Could not start PayU QR checkout. Contact AHUZAH for help.' }); return; }
   if (result.kind === 'existing') {
     if (result.qr.state === 'ready' && result.qr.value && result.qr.expiresAt && Date.parse(result.qr.expiresAt) > Date.now()) {
       response.set('Cache-Control', 'no-store').json({ qr: result.qr.value, expiresAt: result.qr.expiresAt }); return;
@@ -569,7 +569,7 @@ api.post('/payments/orders/:id/qr', requireCustomer, paymentLimit, async (reques
     if (result.qr.state === 'starting' && Date.now() - Date.parse(result.qr.startedAt) < 30000) {
       response.status(202).json({ pending: true }); return;
     }
-    response.status(409).json({ error: 'This QR is unavailable or expired. Do not pay again if money was debited; contact AHUZA.' }); return;
+    response.status(409).json({ error: 'This QR is unavailable or expired. Do not pay again if money was debited; contact AHUZAH.' }); return;
   }
   try {
     const qr = await createPayUQr(result.order, result.email, result.ip, result.userAgent);
@@ -596,7 +596,7 @@ api.post('/payments/orders/:id/qr', requireCustomer, paymentLimit, async (reques
         }
       }
     });
-    response.status(503).json({ error: 'Could not create the PayU QR. Do not pay again if money was debited; contact AHUZA.' });
+    response.status(503).json({ error: 'Could not create the PayU QR. Do not pay again if money was debited; contact AHUZAH.' });
   }
 });
 
@@ -634,7 +634,7 @@ api.post('/payments/orders/:id/checkout', requireCustomer, paymentLimit, async (
         currentOrder.payuPaymentIssue = 'initiation_failed';
       }
     });
-    response.status(503).json({ error: 'Could not open PayU checkout. The outcome may be uncertain; contact AHUZA before trying again.' });
+    response.status(503).json({ error: 'Could not open PayU checkout. The outcome may be uncertain; contact AHUZAH before trying again.' });
   }
 });
 
@@ -698,7 +698,7 @@ api.post('/payments/orders/:id/failure', requireCustomer, paymentLimit, async (r
     return true;
   });
   if (!updated) { response.status(409).json({ error: 'This UPI order is no longer pending' }); return; }
-  response.json({ status: 'failed', note: 'Customer-reported attempt only; AHUZA bank verification is still required' });
+  response.json({ status: 'failed', note: 'Customer-reported attempt only; AHUZAH bank verification is still required' });
 });
 
 api.post('/payments/orders/:id/cancel', requireCustomer, paymentLimit, async (request, response) => {
@@ -765,7 +765,7 @@ api.get('/orders/:id/invoice', requireCustomer, async (request, response) => {
   const customerEmail = database.customers.find((customer) => customer.id === order.userId)?.email || 'Not available';
   const invoice = await buildInvoicePdf(order, customerEmail);
   response.setHeader('Content-Type', 'application/pdf');
-  response.setHeader('Content-Disposition', `attachment; filename="ahuza-invoice-${order.id}.pdf"`);
+  response.setHeader('Content-Disposition', `attachment; filename="ahuzah-invoice-${order.id}.pdf"`);
   response.setHeader('Content-Length', invoice.length);
   response.send(invoice);
 });
@@ -1409,9 +1409,9 @@ api.post('/owner/agent/execute', requireOwner, ownerLimit, async (request, respo
 const customerEmailKinds: CustomerEmailKind[] = ['alert', 'thank_you', 'follow_up'];
 
 function customerEmailSubject(kind: CustomerEmailKind, orderId: string): string {
-  if (kind === 'thank_you') return `Thank you for your AHUZA order ${orderId}`;
-  if (kind === 'follow_up') return `Checking in on your AHUZA order ${orderId}`;
-  return `An update on your AHUZA order ${orderId}`;
+  if (kind === 'thank_you') return `Thank you for your AHUZAH order ${orderId}`;
+  if (kind === 'follow_up') return `Checking in on your AHUZAH order ${orderId}`;
+  return `An update on your AHUZAH order ${orderId}`;
 }
 
 async function getEmailOrder(orderId: unknown, kind: unknown, response: Response): Promise<{ order: Order; email: string; kind: CustomerEmailKind } | null> {
@@ -1511,7 +1511,7 @@ api.post('/owner/ads/image', requireOwner, adLimit, async (request, response) =>
   if (!product) { response.status(404).json({ error: 'Active product not found' }); return; }
   if (!adImageStyles.includes(style) || !['Square', 'Portrait', 'Landscape'].includes(format) || (notes !== undefined && notes !== '' && !stringValue(notes, 300))) { response.status(400).json({ error: 'Choose a valid style and format' }); return; }
   const reference = await loadAdReference(product.images?.find((image) => image.id === product.mainImageId)?.url || product.imageUrl);
-  const prompt = `Create a ${format.toLowerCase()} advertising photograph for an Indian fashion brand called Ahuza Apparel. Style: ${style}. Product: ${product.name} (${product.category})${reference ? ' Keep the garment from the attached photo exactly as it is: same colours, pattern and shape' : ''}. ${typeof notes === 'string' ? notes : ''} Show a model wearing the garment, with clean natural lighting. Do not add any text, logos, watermarks or prices to the image.`;
+  const prompt = `Create a ${format.toLowerCase()} advertising photograph for an Indian fashion brand called AHUZAH Apparel. Style: ${style}. Product: ${product.name} (${product.category})${reference ? ' Keep the garment from the attached photo exactly as it is: same colours, pattern and shape' : ''}. ${typeof notes === 'string' ? notes : ''} Show a model wearing the garment, with clean natural lighting. Do not add any text, logos, watermarks or prices to the image.`;
   try { response.json({ image: await generateAdImage(prompt, format, reference) }); }
   catch (error) {
     if (error instanceof Error && error.message === 'AD_IMAGE_UNAVAILABLE') { response.status(503).json({ error: 'Image generation is not available on your AI plan yet Enable billing for your Gemini or OpenAI key, then try again' }); return; }

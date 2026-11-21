@@ -12,7 +12,7 @@ export async function buildInvoicePdf(order: Order, customerEmail: string): Prom
     document.on('error', reject);
   });
 
-  document.fontSize(22).font('Helvetica-Bold').text('AHUZA APPAREL');
+  document.fontSize(22).font('Helvetica-Bold').text('AHUZAH APPAREL');
   document.moveDown(0.5).fontSize(18).text('INVOICE & PAYMENT RECEIPT');
   document.moveDown(0.5).fontSize(10).font('Helvetica')
     .text(`Invoice / order reference: ${order.id}`)
@@ -39,7 +39,7 @@ export async function buildInvoicePdf(order: Order, customerEmail: string): Prom
   }
   if (order.paymentAdjustmentAmount) document.moveDown().fontSize(10).font('Helvetica').text(`UPI identification adjustment: ${order.currency} ${(order.paymentAdjustmentAmount / 100).toFixed(2)}`, { align: 'right' });
   document.moveDown().fontSize(12).font('Helvetica-Bold').text(`Total paid: ${order.currency} ${(order.amount / 100).toFixed(2)}`, { align: 'right' });
-  document.moveDown(2).fontSize(9).font('Helvetica').text('Thank you for shopping with AHUZA Apparel');
+  document.moveDown(2).fontSize(9).font('Helvetica').text('Thank you for shopping with AHUZAH Apparel');
   document.end();
 
   return pdf;

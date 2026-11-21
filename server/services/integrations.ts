@@ -33,7 +33,7 @@ export const supportEmail = (): string => process.env.SUPPORT_EMAIL?.trim() || '
 // Order and marketing mail is sent from EMAIL_FROM (orders@); replies are routed to the support inbox.
 export async function sendEmail(to: string, subject: string, text: string, attachments: EmailAttachment[] = [], html?: string): Promise<void> {
   const replyTo = supportEmail();
-  const from = process.env.EMAIL_FROM || (process.env.SMTP_USER ? `Ahuza Apparel <${process.env.SMTP_USER}>` : 'Ahuza Apparel <onboarding@resend.dev>');
+  const from = process.env.EMAIL_FROM || (process.env.SMTP_USER ? `Ahuzah Apparel <${process.env.SMTP_USER}>` : 'Ahuzah Apparel <onboarding@resend.dev>');
   if (process.env.SMTP_HOST?.trim() && process.env.SMTP_USER?.trim() && process.env.SMTP_PASS) {
     const port = Number(process.env.SMTP_PORT) || 465;
     const transport = nodemailer.createTransport({ host: process.env.SMTP_HOST.trim(), port, secure: port === 465, auth: { user: process.env.SMTP_USER.trim(), pass: process.env.SMTP_PASS }, connectionTimeout: 10000, socketTimeout: 15000 });
@@ -59,13 +59,13 @@ export async function sendEmail(to: string, subject: string, text: string, attac
 }
 
 const orderEmailSubjects: Record<OrderEmailKind, (id: string) => string> = {
-  owner_new_order: (id) => `New AHUZA order received ${id}`,
-  order_placed: (id) => `We've received your Ahuza order ${id}`,
-  payment_confirmed: (id) => `Thank you! Your Ahuza order ${id} is confirmed`,
-  shipped: (id) => `Your Ahuza order ${id} is on its way`,
-  out_for_delivery: (id) => `Your Ahuza order ${id} is out for delivery`,
-  delivered: (id) => `Your Ahuza order ${id} has been delivered`,
-  follow_up: (id) => `How are you enjoying your Ahuza order ${id}?`,
+  owner_new_order: (id) => `New AHUZAH order received ${id}`,
+  order_placed: (id) => `We've received your Ahuzah order ${id}`,
+  payment_confirmed: (id) => `Thank you! Your Ahuzah order ${id} is confirmed`,
+  shipped: (id) => `Your Ahuzah order ${id} is on its way`,
+  out_for_delivery: (id) => `Your Ahuzah order ${id} is out for delivery`,
+  delivered: (id) => `Your Ahuzah order ${id} has been delivered`,
+  follow_up: (id) => `How are you enjoying your Ahuzah order ${id}?`,
 };
 
 function ownerOrderEmail(order: Order, customerEmail: string): string {
@@ -83,7 +83,7 @@ function paymentConfirmedEmail(order: Order): string {
   const items = order.items.map((item) => `- ${item.name}${item.size ? ` (${item.size})` : ''} × ${item.quantity}`).join('\n');
   return `Hi ${firstName(order)},
 
-Thank you so much for choosing AHUZA. We're delighted to let you know that your payment of ${order.currency} ${(order.amount / 100).toFixed(2)} has reached us and your order ${order.id} is confirmed.
+Thank you so much for choosing AHUZAH. We're delighted to let you know that your payment of ${order.currency} ${(order.amount / 100).toFixed(2)} has reached us and your order ${order.id} is confirmed.
 
 Your order
 ${items}
@@ -95,51 +95,51 @@ Your invoice and payment receipt are attached as a PDF. You can also find them a
 
 If you have any questions, or would like to change something, just reply to this email. We're always happy to help.
 
-Thank you for being part of the AHUZA family. We hope you love what's on its way to you.
+Thank you for being part of the AHUZAH family. We hope you love what's on its way to you.
 
 Warm regards,
-Team AHUZA
-AHUZA Apparel · www.ahuzawear.com`;
+Team AHUZAH
+AHUZAH Apparel · www.ahuzawear.com`;
 }
 
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 
-// Branded HTML version of the confirmation: AHUZA wordmark and rose (#c43d58) on the storefront's cream and ink.
+// Branded HTML version of the confirmation: AHUZAH wordmark and rose (#c43d58) on the storefront's cream and ink.
 function paymentConfirmedHtml(order: Order): string {
   const rows = order.items.map((item) => `<tr><td style="padding:8px 0;border-bottom:1px solid #e6e2d8;color:#222822;font-size:15px">${escapeHtml(item.name)}${item.size ? ` <span style="color:#777b71">(${escapeHtml(item.size)})</span>` : ''}</td><td style="padding:8px 0;border-bottom:1px solid #e6e2d8;color:#222822;font-size:15px;text-align:right">× ${item.quantity}</td></tr>`).join('');
   const total = `${order.currency} ${(order.amount / 100).toFixed(2)}`;
   return `<!doctype html><html><body style="margin:0;padding:0;background:#f6f3ec;font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f3ec"><tr><td align="center" style="padding:28px 12px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff">
-<tr><td style="background:#c43d58;padding:26px 32px;text-align:center"><span style="font-size:30px;font-weight:700;letter-spacing:.14em;color:#ffffff">AHUZA</span><br><span style="font-size:11px;letter-spacing:.22em;color:#f6dfe4">APPAREL</span></td></tr>
+<tr><td style="background:#c43d58;padding:26px 32px;text-align:center"><span style="font-size:30px;font-weight:700;letter-spacing:.14em;color:#ffffff">AHUZAH</span><br><span style="font-size:11px;letter-spacing:.22em;color:#f6dfe4">APPAREL</span></td></tr>
 <tr><td style="padding:32px 32px 8px;color:#222822;font-size:16px;line-height:1.65">
 <p style="margin:0 0 6px;font-size:13px;letter-spacing:.14em;color:#c43d58;font-weight:700">ORDER CONFIRMED</p>
 <h1 style="margin:0 0 18px;font-size:24px;line-height:1.3;color:#222822">Thank you, ${escapeHtml(firstName(order))}</h1>
-<p style="margin:0 0 16px">Thank you so much for choosing AHUZA. We're delighted to let you know that your payment of <strong>${total}</strong> has reached us and your order <strong style="color:#c43d58">${escapeHtml(order.id)}</strong> is confirmed.</p>
+<p style="margin:0 0 16px">Thank you so much for choosing AHUZAH. We're delighted to let you know that your payment of <strong>${total}</strong> has reached us and your order <strong style="color:#c43d58">${escapeHtml(order.id)}</strong> is confirmed.</p>
 <p style="margin:22px 0 6px;font-size:13px;letter-spacing:.12em;color:#777b71;font-weight:700">YOUR ORDER</p>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:22px">${rows}</table>
 <p style="margin:0 0 6px;font-size:13px;letter-spacing:.12em;color:#777b71;font-weight:700">WHAT HAPPENS NEXT</p>
 <p style="margin:0 0 16px">Our team is now preparing your order with care. Once it's handed to our delivery partner, we'll send you a short note with tracking details, so you'll always know where it is.</p>
 <p style="margin:0 0 16px">Your invoice and payment receipt are attached as a PDF. You can also find them anytime under Account &rsaquo; Order history at <a href="https://www.ahuzawear.com" style="color:#c43d58">www.ahuzawear.com</a>.</p>
 <p style="margin:0 0 16px">If you have any questions, or would like to change something, just reply to this email. We're always happy to help.</p>
-<p style="margin:0 0 4px">Thank you for being part of the AHUZA family. We hope you love what's on its way to you.</p>
-<p style="margin:22px 0 0">Warm regards,<br><strong>Team AHUZA</strong></p>
+<p style="margin:0 0 4px">Thank you for being part of the AHUZAH family. We hope you love what's on its way to you.</p>
+<p style="margin:22px 0 0">Warm regards,<br><strong>Team AHUZAH</strong></p>
 </td></tr>
-<tr><td style="padding:24px 32px 30px"><a href="https://www.ahuzawear.com" style="display:inline-block;background:#c43d58;color:#ffffff;text-decoration:none;padding:12px 24px;font-size:14px;font-weight:700;letter-spacing:.06em">VISIT AHUZA</a></td></tr>
-<tr><td style="background:#222822;padding:18px 32px;text-align:center;color:#d9d8cf;font-size:12px">AHUZA Apparel · <a href="https://www.ahuzawear.com" style="color:#d9d8cf">www.ahuzawear.com</a></td></tr>
+<tr><td style="padding:24px 32px 30px"><a href="https://www.ahuzawear.com" style="display:inline-block;background:#c43d58;color:#ffffff;text-decoration:none;padding:12px 24px;font-size:14px;font-weight:700;letter-spacing:.06em">VISIT AHUZAH</a></td></tr>
+<tr><td style="background:#222822;padding:18px 32px;text-align:center;color:#d9d8cf;font-size:12px">AHUZAH Apparel · <a href="https://www.ahuzawear.com" style="color:#d9d8cf">www.ahuzawear.com</a></td></tr>
 </table></td></tr></table></body></html>`;
 }
 
 function fallbackOrderEmail(kind: OrderEmailKind, order: Order): string {
   const total = `${order.currency} ${(order.amount / 100).toFixed(2)}`;
   if (kind === 'order_placed') return order.paymentMethod === 'cod'
-    ? `Hi ${order.shippingAddress.name}, your order ${order.id} (${total}) has been placed successfully and is confirmed. Order reference: ${order.id}. Track progress after signing into your AHUZA account and opening Order history.\n\nAHUZA Customer Care`
-    : `Hi ${order.shippingAddress.name}, we've received your order ${order.id} (${total}). Reference: ${order.paymentReference || order.id}. Your payment is not confirmed yet; we will email you once it is verified. Track progress in your AHUZA account under Order history.\n\nAHUZA Customer Care`;
-  if (kind === 'payment_confirmed') return `Hi ${order.shippingAddress.name}, your payment for order ${order.id} (${total}) has been received and your order is confirmed. We are now getting it ready and it will be picked up for delivery soon.\n\nAHUZA Customer Care`;
-  if (kind === 'shipped') return `Hi ${order.shippingAddress.name}, your order ${order.id} has shipped.${order.trackingNumber ? ` Tracking number: ${order.trackingNumber}.` : ''}${order.trackingUrl ? ` Track your delivery: ${order.trackingUrl}` : ''}\n\nAHUZA Customer Care`;
-  if (kind === 'out_for_delivery') return `Hi ${order.shippingAddress.name}, your order ${order.id} is out for delivery.${order.trackingNumber ? ` Tracking number: ${order.trackingNumber}.` : ''}${order.trackingUrl ? ` Track your delivery: ${order.trackingUrl}` : ''}\n\nAHUZA Customer Care`;
-  if (kind === 'delivered') return `Hi ${order.shippingAddress.name}, your order ${order.id} has been marked delivered. We hope you love it. Please sign in to your AHUZA account and open Account > Order history to rate and review your purchase.\n\nAHUZA Customer Care`;
-  return `Hi ${order.shippingAddress.name}, we hope your order ${order.id} feels right at home. You can request a return or replacement within 7 days of delivery.\n\nAHUZA Customer Care`;
+    ? `Hi ${order.shippingAddress.name}, your order ${order.id} (${total}) has been placed successfully and is confirmed. Order reference: ${order.id}. Track progress after signing into your AHUZAH account and opening Order history.\n\nAHUZAH Customer Care`
+    : `Hi ${order.shippingAddress.name}, we've received your order ${order.id} (${total}). Reference: ${order.paymentReference || order.id}. Your payment is not confirmed yet; we will email you once it is verified. Track progress in your AHUZAH account under Order history.\n\nAHUZAH Customer Care`;
+  if (kind === 'payment_confirmed') return `Hi ${order.shippingAddress.name}, your payment for order ${order.id} (${total}) has been received and your order is confirmed. We are now getting it ready and it will be picked up for delivery soon.\n\nAHUZAH Customer Care`;
+  if (kind === 'shipped') return `Hi ${order.shippingAddress.name}, your order ${order.id} has shipped.${order.trackingNumber ? ` Tracking number: ${order.trackingNumber}.` : ''}${order.trackingUrl ? ` Track your delivery: ${order.trackingUrl}` : ''}\n\nAHUZAH Customer Care`;
+  if (kind === 'out_for_delivery') return `Hi ${order.shippingAddress.name}, your order ${order.id} is out for delivery.${order.trackingNumber ? ` Tracking number: ${order.trackingNumber}.` : ''}${order.trackingUrl ? ` Track your delivery: ${order.trackingUrl}` : ''}\n\nAHUZAH Customer Care`;
+  if (kind === 'delivered') return `Hi ${order.shippingAddress.name}, your order ${order.id} has been marked delivered. We hope you love it. Please sign in to your AHUZAH account and open Account > Order history to rate and review your purchase.\n\nAHUZAH Customer Care`;
+  return `Hi ${order.shippingAddress.name}, we hope your order ${order.id} feels right at home. You can request a return or replacement within 7 days of delivery.\n\nAHUZAH Customer Care`;
 }
 
 export async function sendOrderEmail(kind: OrderEmailKind | 'follow_up', order: Order, email: string): Promise<void> {

@@ -7,7 +7,6 @@ import ProductRail from './ProductRail';
 import HeroCarousel, { type BannerSlide } from './HeroCarousel';
 import PaymentQr from './PaymentQr';
 import ManualPaymentInstructions from './ManualPaymentInstructions';
-import StandalonePayULink from './StandalonePayULink';
 import CheckoutItems from './CheckoutItems';
 import PaymentSuccess from './PaymentSuccess';
 import { defaultImageSettings, imageSettingsVars, mainImage, srcSet, type ImageSettings, type ProductImage } from './imageTypes';
@@ -61,7 +60,7 @@ type CartLine = { productId: string; quantity: number; size?: string };
 const orderStatusLabel = (order: { status: string; paymentStatus?: string; paymentMethod?: string; payuPaymentIssue?: 'initiation_failed' | 'provider_failed' }) => {
   if (order.status === 'paid') return 'Order confirmed · payment received';
   if (order.status === 'confirmed') return order.paymentMethod === 'cod' ? 'Order confirmed · pay on delivery' : 'Order confirmed';
-  if (order.status === 'pending_payment' && order.payuPaymentIssue === 'initiation_failed') return 'Payment initiation failed · contact AHUZA';
+  if (order.status === 'pending_payment' && order.payuPaymentIssue === 'initiation_failed') return 'Payment initiation failed · contact AHUZAH';
   if (order.status === 'pending_payment' && order.payuPaymentIssue === 'provider_failed') return 'PayU payment failed';
   if (order.status === 'pending_payment') return 'Awaiting payment confirmation';
   return `${order.status.replaceAll('_', ' ')}${order.paymentStatus === 'paid' ? ' · payment received' : ''}`;
@@ -427,7 +426,7 @@ export default function App() {
       }
       const result = await parseResponse<{ order?: { id: string; amount: number; currency: string; paymentMethod?: string; payuTxnId?: string; payuCheckoutMode?: 'qr'; paymentReference?: string; reservationExpiresAt?: string; items: { name: string; quantity: number; size?: string }[] }; error?: string }>(response);
       if (!response.ok || !result.order || result.order.id !== returnedPaymentId || result.order.paymentMethod !== 'upi' || !result.order.payuTxnId) {
-        throw new Error(result.error || 'Could not find this PayU order. Contact AHUZA if money was debited.');
+        throw new Error(result.error || 'Could not find this PayU order. Contact AHUZAH if money was debited.');
       }
       const order = result.order;
       setPaymentOrder({ orderId: order.id, paymentMethod: 'upi', provider: 'payu', checkoutMode: order.payuCheckoutMode, amount: order.amount, currency: order.currency, paymentReference: order.paymentReference, expiresAt: order.reservationExpiresAt, items: order.items });
@@ -437,7 +436,7 @@ export default function App() {
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
       console.error('PayU order recovery failed:', error);
-      setPaymentRecoveryMessage(error instanceof Error ? error.message : 'Could not recover your PayU order. Contact AHUZA if money was debited.');
+      setPaymentRecoveryMessage(error instanceof Error ? error.message : 'Could not recover your PayU order. Contact AHUZAH if money was debited.');
     });
     return () => controller.abort();
   }, [returnedPaymentId, paymentOrder?.orderId, customer]);
@@ -460,7 +459,7 @@ export default function App() {
         setPayuQr({ orderId: paymentOrder.orderId, value: result.qr, expiresAt: result.expiresAt });
         timer = window.setTimeout(() => {
           setPayuQr(null);
-          setPaymentLaunchError('This QR has expired. Do not pay again if money was debited; contact AHUZA.');
+          setPaymentLaunchError('This QR has expired. Do not pay again if money was debited; contact AHUZAH.');
         }, Math.max(0, Date.parse(result.expiresAt) - Date.now()));
       } catch (error) {
         if (!stopped) {
@@ -509,24 +508,24 @@ export default function App() {
           setCart([]);
           setOrdersRefresh((value) => value + 1);
           setPaymentMessage(result.orderStatus === 'cancelled'
-            ? 'Your payment was received, but the order could not be confirmed because stock is unavailable. AHUZA will contact you about the next steps.'
+            ? 'Your payment was received, but the order could not be confirmed because stock is unavailable. AHUZAH will contact you about the next steps.'
             : 'Your payment has been received and your order is confirmed. A confirmation email with your invoice is on its way');
         } else if (result.status === 'expired' || result.status === 'cancelled') {
           setPaymentMessage(result.orderStatus === 'pending_payment'
-            ? 'The UPI attempt was cancelled Inventory remains reserved briefly in case a bank credit is delayed Do not reuse the link; contact AHUZA if you sent money'
-            : 'This order is closed or expired Do not use its old UPI payment link Contact AHUZA if you already sent a payment');
+            ? 'The UPI attempt was cancelled Inventory remains reserved briefly in case a bank credit is delayed Do not reuse the link; contact AHUZAH if you sent money'
+            : 'This order is closed or expired Do not use its old UPI payment link Contact AHUZAH if you already sent a payment');
           if (result.orderStatus === 'pending_payment' || result.paymentProofSubmitted) timer = window.setTimeout(() => void poll(), 2500);
         } else if (result.status === 'failed') {
           setPaymentMessage(result.payuPaymentIssue === 'provider_failed'
-            ? 'PayU reports that this payment failed. If money was debited, contact AHUZA with the bank reference.'
+            ? 'PayU reports that this payment failed. If money was debited, contact AHUZAH with the bank reference.'
             : result.payuPaymentIssue === 'initiation_failed'
-              ? 'The payment request could not be started. Its outcome may be uncertain; contact AHUZA before trying again.'
-              : 'The UPI attempt was reported as failed; this is not bank verification If money was debited, contact AHUZA with the bank reference before retrying');
+              ? 'The payment request could not be started. Its outcome may be uncertain; contact AHUZAH before trying again.'
+              : 'The UPI attempt was reported as failed; this is not bank verification If money was debited, contact AHUZAH with the bank reference before retrying');
           timer = window.setTimeout(() => void poll(), 2500);
         } else {
           setPaymentMessage(paymentOrder.provider === 'payu'
             ? 'Payment is pending. Your order will be confirmed after PayU verifies the payment.'
-            : 'Payment is pending. AHUZA will confirm only after the bank credit is checked.');
+            : 'Payment is pending. AHUZAH will confirm only after the bank credit is checked.');
           timer = window.setTimeout(() => void poll(), 2500);
         }
       } catch (error) {
@@ -775,7 +774,7 @@ export default function App() {
     setCustomer(null);
     setPaymentSignInRequired(true);
     setPaymentMessage(orderNotFound
-      ? 'This order was not found for the signed-in account. Sign in to the account used for the order, or contact AHUZA. Do not pay again if money was debited.'
+      ? 'This order was not found for the signed-in account. Sign in to the account used for the order, or contact AHUZAH. Do not pay again if money was debited.'
       : 'Sign in to the account used for this order to check its status. Do not pay again if money was debited.');
   }
 
@@ -797,7 +796,7 @@ export default function App() {
       if (!response.ok || result.submitted !== true) throw new Error(result.error || 'Could not submit the screenshot');
       setPaymentProofSubmitted(true);
       setPaymentProofFile(null);
-      setPaymentMessage('Screenshot submitted for review. AHUZA will confirm payment only after checking the bank credit. Do not pay again if money was debited.');
+      setPaymentMessage('Screenshot submitted for review. AHUZAH will confirm payment only after checking the bank credit. Do not pay again if money was debited.');
       setPaymentStatus((status) => status === 'checking' ? 'pending' : status);
     } catch (error) {
       setPaymentProofError(error instanceof Error ? error.message : 'Could not submit the screenshot');
@@ -832,11 +831,11 @@ export default function App() {
         }),
       }).catch((error: unknown) => {
         console.error('Checkout request failed:', error);
-        throw new Error('Could not confirm whether your order was created. Check your order history and contact AHUZA before trying again.');
+        throw new Error('Could not confirm whether your order was created. Check your order history and contact AHUZAH before trying again.');
       });
       const order = await parseResponse<PaymentOrder & { error?: string; shippingChargeAmount?: number; payuPaymentIssue?: 'initiation_failed' }>(response).catch((error: unknown) => {
         console.error('Checkout response was unreadable:', error);
-        throw new Error('Could not read the checkout response. Check your order history and contact AHUZA before trying again.');
+        throw new Error('Could not read the checkout response. Check your order history and contact AHUZAH before trying again.');
       });
       if (response.status === 409 && typeof order.shippingChargeAmount === 'number' && Number.isSafeInteger(order.shippingChargeAmount) && order.shippingChargeAmount >= 0 && order.shippingChargeAmount <= maxShippingCharge) {
         setShippingChargeAmount(order.shippingChargeAmount);
@@ -864,7 +863,7 @@ export default function App() {
       }
       if (paymentMethod === 'upi' && (order.provider !== 'payu' || !order.paymentReference
         || (order.checkoutMode !== 'qr' && (order.checkoutMode !== 'intent' || !isPayUIntentUri(order.intentUri, order.amount))))) {
-        throw new Error(`The server returned an incomplete PayU payment request. Check order ${order.orderId} and contact AHUZA before trying again.`);
+        throw new Error(`The server returned an incomplete PayU payment request. Check order ${order.orderId} and contact AHUZAH before trying again.`);
       }
       setPaymentOrder(order);
       setPayuPaymentIssue(null);
@@ -943,17 +942,17 @@ export default function App() {
         setOrdersRefresh((value) => value + 1);
       }
       setPaymentMessage(result.status === 'paid' && result.orderStatus === 'cancelled'
-        ? 'Your payment was received, but the order could not be confirmed because stock is unavailable. AHUZA will contact you about the next steps.'
+        ? 'Your payment was received, but the order could not be confirmed because stock is unavailable. AHUZAH will contact you about the next steps.'
         : result.status === 'paid'
           ? 'Your payment has been received and your order is confirmed. A confirmation email with your invoice is on its way'
         : result.payuPaymentIssue === 'provider_failed'
-          ? 'PayU reports that this payment failed. If money was debited, contact AHUZA with the bank reference.'
+          ? 'PayU reports that this payment failed. If money was debited, contact AHUZAH with the bank reference.'
         : result.payuPaymentIssue === 'initiation_failed'
-          ? 'The payment request could not be started. Its outcome may be uncertain; contact AHUZA before trying again.'
+          ? 'The payment request could not be started. Its outcome may be uncertain; contact AHUZAH before trying again.'
         : result.status === 'cancelled' || result.status === 'expired'
           ? 'This order is closed Do not use its old UPI link'
           : paymentOrder.provider === 'manual_upi'
-            ? 'Payment is pending. AHUZA must manually verify the settled bank credit. Contact AHUZA with your bank reference if you have paid.'
+            ? 'Payment is pending. AHUZAH must manually verify the settled bank credit. Contact AHUZAH with your bank reference if you have paid.'
             : paymentOrder.provider === 'payu'
               ? 'Payment is still pending. PayU has not confirmed it yet.'
               : 'Payment is still pending.');
@@ -973,7 +972,7 @@ export default function App() {
       const result = await parseResponse<{ status?: string; error?: string }>(response);
       if (!response.ok || result.status !== 'cancelled') throw new Error(result.error || 'Could not safely cancel the payment request');
       setPaymentStatus('cancelled');
-      setPaymentMessage('The UPI attempt was cancelled Inventory remains reserved briefly in case a bank credit is delayed Do not reuse the link; contact AHUZA if you sent money');
+      setPaymentMessage('The UPI attempt was cancelled Inventory remains reserved briefly in case a bank credit is delayed Do not reuse the link; contact AHUZAH if you sent money');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Could not cancel payment request');
     } finally {
@@ -1071,7 +1070,7 @@ export default function App() {
       const result = await response.json() as { error?: string; alreadySubscribed?: boolean };
       if (!response.ok) throw new Error(result.error || 'Could not subscribe right now');
       form.reset();
-      setNewsletterMessage(result.alreadySubscribed ? 'This email is already subscribed to AHUZA updates' : 'Thank you You are subscribed to AHUZA updates');
+      setNewsletterMessage(result.alreadySubscribed ? 'This email is already subscribed to AHUZAH updates' : 'Thank you You are subscribed to AHUZAH updates');
     } catch (error) {
       setNewsletterMessage(error instanceof Error ? error.message : 'Could not subscribe right now Please try again');
     } finally {
@@ -1107,7 +1106,7 @@ export default function App() {
       const url = URL.createObjectURL(invoice);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `ahuza-invoice-${order.id}pdf`;
+      link.download = `ahuzah-invoice-${order.id}pdf`;
       document.body.append(link);
       link.click();
       link.remove();
@@ -1151,7 +1150,7 @@ export default function App() {
 
   return (
     <main>
-      {sitePublished === null ? <section className="store-maintenance"><p className="eyebrow">AHUZA</p><h1>{storefrontText('statusChecking')}</h1><p>{storefrontText('statusWait')}</p></section> : sitePublished ? <>
+      {sitePublished === null ? <section className="store-maintenance"><p className="eyebrow">AHUZAH</p><h1>{storefrontText('statusChecking')}</h1><p>{storefrontText('statusWait')}</p></section> : sitePublished ? <>
       <div className="announcement">{storeContent.announcement}</div>
       <header className="site-header">
         <button className="icon-button mobile-menu" type="button" aria-label="Open women's collection menu" aria-expanded={mobileMenuOpen} aria-controls="collection-drawer" onClick={() => setMobileMenuOpen(true)}><Menu size={22} /></button>
@@ -1167,14 +1166,14 @@ export default function App() {
             </div>
             : <button key={label} type="button" onClick={() => openNavItem(label)}>{label}</button>)}
         </nav>
-        <a className="wordmark" href="#home" aria-label="AHUZA home"><span className="wordmark-mark"><svg className="wordmark-logo" viewBox="0 0 500 150" aria-hidden="true"><defs><style>{`@keyframes logoFlow { 0% { opacity: 0; transform: scale(0.95) translateY(2px); } 100% { opacity: 1; transform: scale(1) translateY(0); } } .logo-container { animation: logoFlow 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) both; }`}</style></defs><g className="logo-container"><g fill="#8b1538"><path d="M 70 30 Q 55 55 65 85 Q 75 110 95 115 Q 110 118 120 110 L 100 90 Q 95 100 85 102 Q 72 104 68 85 Q 60 55 70 30 Z" /><path d="M 80 50 Q 72 70 78 90 Q 83 100 95 102 L 85 80 Z" /></g><text x="145" y="105" fontFamily="Playfair Display, serif" fontSize="80" fontWeight="600" fill="#1a1a1a" letterSpacing="2">AHUZA</text></g></svg></span></a>
+        <a className="wordmark" href="#home" aria-label="AHUZAH home"><span className="wordmark-mark"><svg className="wordmark-logo" viewBox="0 0 500 150" aria-hidden="true"><defs><style>{`@keyframes logoFlow { 0% { opacity: 0; transform: scale(0.95) translateY(2px); } 100% { opacity: 1; transform: scale(1) translateY(0); } } .logo-container { animation: logoFlow 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) both; }`}</style></defs><g className="logo-container"><g fill="#8b1538"><path d="M 70 30 Q 55 55 65 85 Q 75 110 95 115 Q 110 118 120 110 L 100 90 Q 95 100 85 102 Q 72 104 68 85 Q 60 55 70 30 Z" /><path d="M 80 50 Q 72 70 78 90 Q 83 100 95 102 L 85 80 Z" /></g><text x="145" y="105" textLength="350" lengthAdjust="spacingAndGlyphs" fontFamily="Playfair Display, serif" fontSize="80" fontWeight="600" fill="#1a1a1a" letterSpacing="2">AHUZAH</text></g></svg></span></a>
         <form className="header-search" role="search" onSubmit={(event) => { event.preventDefault(); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>
-          <label className="sr-only" htmlFor="header-search-input">Search AHUZA</label>
+          <label className="sr-only" htmlFor="header-search-input">Search AHUZAH</label>
           <input id="header-search-input" type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); if (event.target.value) setCatalogOpen(true); }} placeholder={storefrontText('searchPlaceholder')} autoComplete="off" />
           {searchTerm && <button type="button" className="header-search-clear" aria-label="Clear search" onClick={() => setSearchTerm('')}><X size={16} /></button>}
           <button type="submit" className="header-search-submit" aria-label="Search"><Search size={18} /></button>
         </form>
-        <div className="header-actions"><button className="header-icon chat-link" type="button" aria-label="Ask Ahuza" onClick={() => window.dispatchEvent(new Event('ahuza:toggle-support'))}><MessageCircle size={18} /><span className="chat-label">{storefrontText('askAhuzaLabel')}</span></button><button className={`header-icon wishlist-link${savedOnly ? ' active' : ''}`} type="button" aria-label={`Wishlist, ${wishlist.length} saved`} aria-pressed={savedOnly} onClick={() => { if (!customer) { setAuthMode('login'); setAccountOpen(true); return; } setSavedOnly(true); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}><Heart size={18} fill={wishlist.length ? 'currentColor' : 'none'} />{wishlist.length > 0 && <span className="count-badge">{wishlist.length}</span>}</button><button className="account-link" aria-label={customer ? 'My account' : 'Account'} onClick={() => setAccountOpen(true)}><User size={18} aria-hidden="true" /><span>{customer ? 'My account' : 'Account'}</span></button><button className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
+        <div className="header-actions"><button className="header-icon chat-link" type="button" aria-label="Ask Ahuzah" onClick={() => window.dispatchEvent(new Event('ahuza:toggle-support'))}><MessageCircle size={18} /><span className="chat-label">{storefrontText('askAhuzaLabel')}</span></button><button className={`header-icon wishlist-link${savedOnly ? ' active' : ''}`} type="button" aria-label={`Wishlist, ${wishlist.length} saved`} aria-pressed={savedOnly} onClick={() => { if (!customer) { setAuthMode('login'); setAccountOpen(true); return; } setSavedOnly(true); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}><Heart size={18} fill={wishlist.length ? 'currentColor' : 'none'} />{wishlist.length > 0 && <span className="count-badge">{wishlist.length}</span>}</button><button className="account-link" aria-label={customer ? 'My account' : 'Account'} onClick={() => setAccountOpen(true)}><User size={18} aria-hidden="true" /><span>{customer ? 'My account' : 'Account'}</span></button><button className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
       </header>
       {mobileMenuOpen && <div className="menu-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setMobileMenuOpen(false); }}>
         <aside className="menu-drawer" id="collection-drawer" role="dialog" aria-modal="true" aria-labelledby="menu-title">
@@ -1251,7 +1250,7 @@ export default function App() {
         {catalogOpen && matchingProducts.length > visibleCount && <div className="load-more"><button className="dark-button" type="button" onClick={() => setVisibleCount((count) => count + 12)}>Load more ({matchingProducts.length - visibleCount} remaining)</button></div>}
       </section>
 
-      <section className="trust-strip" aria-label="AHUZA service promises">
+      <section className="trust-strip" aria-label="AHUZAH service promises">
         <div><strong>{storefrontText('trustDeliveryTitle')}</strong><span>{storefrontText('trustDeliveryBody')}</span></div>
         <div><strong>{storefrontText('trustCheckoutTitle')}</strong><span>{storefrontText('trustCheckoutBody')}</span></div>
         <div><strong>{storefrontText('trustHelpTitle')}</strong><span>{storefrontText('trustHelpBody')}</span></div>
@@ -1297,12 +1296,12 @@ export default function App() {
       />}
       {cartOpen && <div className="overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setCartOpen(false); }}>
         <aside ref={cartDrawer} className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="bag-title">
-          <div className="drawer-heading"><div><p className="eyebrow dark-eyebrow">AHUZA</p><h2 id="bag-title">{storefrontText('bagTitle')} <span>({cartCount})</span></h2></div><button className="icon-button" aria-label="Close bag" onClick={() => setCartOpen(false)}><X size={21} /></button></div>
+          <div className="drawer-heading"><div><p className="eyebrow dark-eyebrow">AHUZAH</p><h2 id="bag-title">{storefrontText('bagTitle')} <span>({cartCount})</span></h2></div><button className="icon-button" aria-label="Close bag" onClick={() => setCartOpen(false)}><X size={21} /></button></div>
           {paymentOrder ? <section className="payment-panel" aria-live="polite">
             {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && <CheckCircle2 className="payment-success-icon" size={46} aria-hidden="true" />}
-            <p className="eyebrow dark-eyebrow">{paymentOrder.paymentMethod === 'cod' ? storefrontText('checkoutCod') : paymentOrder.provider === 'manual_upi' ? 'Ahuza Pay · UPI' : 'PayU checkout'}</p>
+            <p className="eyebrow dark-eyebrow">{paymentOrder.paymentMethod === 'cod' ? storefrontText('checkoutCod') : paymentOrder.provider === 'manual_upi' ? 'Ahuzah Pay · UPI' : 'PayU checkout'}</p>
             <h3>{paymentOrder.paymentMethod === 'cod' ? storefrontText('payOrderConfirmed') : paymentStatus === 'paid' && paymentOrderStatus === 'cancelled' ? 'Payment received — order needs review' : paymentStatus === 'paid' ? storefrontText('payConfirmed') : paymentStatus === 'expired' || paymentStatus === 'cancelled' ? storefrontText('payClosed') : payuPaymentIssue === 'initiation_failed' ? 'Could not start PayU checkout' : payuPaymentIssue === 'provider_failed' ? 'PayU payment failed' : paymentStatus === 'failed' ? storefrontText('payFailed') : paymentStatus === 'pending' ? storefrontText('payUpiPending') : storefrontText('payPending')}</h3>
-            <p>{payuPaymentIssue === 'initiation_failed' && paymentStatus !== 'paid' ? 'The payment request could not be started. Its outcome may be uncertain; contact AHUZA before trying again.' : paymentMessage || storefrontText('payWaiting')}</p>
+            <p>{payuPaymentIssue === 'initiation_failed' && paymentStatus !== 'paid' ? 'The payment request could not be started. Its outcome may be uncertain; contact AHUZAH before trying again.' : paymentMessage || storefrontText('payWaiting')}</p>
             <p><strong>{formatPaymentAmount(paymentOrder.amount)}</strong>{paymentOrder.paymentReference ? ` · Reference ${paymentOrder.paymentReference}` : ` · Order ${paymentOrder.orderId.slice(0, 8)}`}</p>
             {paymentOrder.paymentAdjustmentAmount && <p>Includes a {formatPaymentAmount(paymentOrder.paymentAdjustmentAmount)} UPI identification adjustment. Pay the exact total shown.</p>}
             {paymentSignInRequired && <button className="dark-button" type="button" onClick={() => { setAuthMode('login'); setAccountPageOpen(false); setAccountOpen(true); }}>Sign in to check payment</button>}
@@ -1329,10 +1328,10 @@ export default function App() {
             </section>}
             {paymentStatus === 'failed' && !payuPaymentIssue && <p>{storefrontText('payFailureNote')}</p>}
             {(paymentOrder.paymentMethod === 'cod' || paymentStatus === 'paid' || paymentStatus === 'cancelled' || paymentStatus === 'expired') && <button className="dark-button" type="button" onClick={() => { window.history.replaceState({}, '', '/'); setRoutePath('/'); setReturnedPaymentId(null); setPaymentOrder(null); setPayuPaymentIssue(null); setPaymentStatus('pending'); setCartOpen(false); }}>{paymentStatus === 'cancelled' ? storefrontText('payReturn') : 'Done'}</button>}
-            {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && paymentOrderStatus === 'cancelled' && <p className="payment-next-steps">Please contact AHUZA if you need an update about fulfillment or refund arrangements.</p>}
-            {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && paymentOrderStatus !== 'cancelled' && <p className="payment-next-steps">Thank you for choosing AHUZA. Please check your email for payment confirmation and order approval. Your invoice and receipt are also available under Account › Order history. We’ll email you tracking details as soon as your order is on its way.</p>}
+            {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && paymentOrderStatus === 'cancelled' && <p className="payment-next-steps">Please contact AHUZAH if you need an update about fulfillment or refund arrangements.</p>}
+            {paymentOrder.paymentMethod === 'upi' && paymentStatus === 'paid' && paymentOrderStatus !== 'cancelled' && <p className="payment-next-steps">Thank you for choosing AHUZAH. Please check your email for payment confirmation and order approval. Your invoice and receipt are also available under Account › Order history. We’ll email you tracking details as soon as your order is on its way.</p>}
             {paymentOrder.paymentMethod === 'upi' && paymentOrder.provider === 'manual_upi' && paymentStatus !== 'paid' && <ManualPaymentInstructions email={storefrontText('contactEmail')} orderId={paymentOrder.orderId} />}
-            {paymentOrder.paymentMethod === 'upi' && paymentStatus !== 'paid' && <small>{paymentOrder.provider === 'manual_upi' ? 'Manual confirmation is required. Do not pay after the 60-minute reservation expires. If you have already paid, contact AHUZA with your order and bank transaction reference.' : paymentOrder.provider === 'payu' ? 'On supported phones, PayU opens a UPI app. Your order is confirmed only after PayU verifies the payment. Do not pay again if money was debited; contact AHUZA if confirmation is delayed.' : storefrontText('payVerificationNote')}</small>}
+            {paymentOrder.paymentMethod === 'upi' && paymentStatus !== 'paid' && <small>{paymentOrder.provider === 'manual_upi' ? 'Manual confirmation is required. Do not pay after the 60-minute reservation expires. If you have already paid, contact AHUZAH with your order and bank transaction reference.' : paymentOrder.provider === 'payu' ? 'On supported phones, PayU opens a UPI app. Your order is confirmed only after PayU verifies the payment. Do not pay again if money was debited; contact AHUZAH if confirmation is delayed.' : storefrontText('payVerificationNote')}</small>}
           </section> : returnedPaymentId ? <section className="payment-panel" role="status"><p>{paymentRecoveryMessage || 'Checking your payment…'}</p>{!customer && <button className="dark-button" type="button" onClick={() => { setAuthMode('login'); setAccountOpen(true); }}>Sign in to check payment</button>}</section> : cartLines.length === 0 ? <div className="empty-bag"><ShoppingBag size={25} /><p>{storefrontText('bagEmpty')}</p><button className="dark-button" onClick={() => { setCartOpen(false); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>{storefrontText('bagExplore')}</button></div> : <>
             <CheckoutItems items={cartLines.map(({ product, quantity, size }) => {
               const pricing = productPricing(product.price, product.discountPercent);
@@ -1359,7 +1358,7 @@ export default function App() {
               {paymentMethod === 'upi' && <p className="payment-config-warning">{storefrontText('checkoutUpiNote')}</p>}
               {checkoutError && <p className="payment-config-warning" role="alert">{checkoutError}</p>}
               <label className="consent-check"><input type="checkbox" checked={marketingConsent} onChange={(event) => setMarketingConsent(event.target.checked)} />{storefrontText('checkoutConsent')}</label><button className="dark-button checkout-button" disabled={busy || estimatedShipping === null}>{busy ? storefrontText('checkoutPlacing') : customer ? paymentMethod === 'cod' ? storefrontText('checkoutPlaceCod') : storefrontText('checkoutContinueUpi') : storefrontText('checkoutSignIn')} <ArrowRight size={16} /></button>
-              </form><small>{storefrontText('checkoutPolicy')}</small>{paymentMethod === 'upi' && <StandalonePayULink contactEmail={storefrontText('contactEmail')} />}</div>
+              </form><small>{storefrontText('checkoutPolicy')}</small></div>
           </>}
         </aside>
       </div>}
@@ -1376,7 +1375,7 @@ export default function App() {
         </section>
       </div>}
       </> : <section className="store-maintenance">
-        <p className="eyebrow">AHUZA</p>
+        <p className="eyebrow">AHUZAH</p>
         <h1>{storefrontText('maintenanceTitle')}</h1>
         <p>{storefrontText('maintenanceBody')}</p>
         <button className="dark-button" type="button" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button>

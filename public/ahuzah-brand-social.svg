@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title">
+  <title id="title">AHUZAH Apparel</title>
+  <rect width="1200" height="630" fill="#f6f3ec"/>
+  <g transform="translate(220 150) scale(2.6)" fill="#8b1538">
+    <path d="M70 30 Q55 55 65 85 Q75 110 95 115 Q110 118 120 110 L100 90 Q95 100 85 102 Q72 104 68 85 Q60 55 70 30Z"/>
+    <path d="M80 50 Q72 70 78 90 Q83 100 95 102 L85 80Z"/>
+  </g>
+  <text x="640" y="355" text-anchor="middle" font-family="Georgia,serif" font-size="120" letter-spacing="3" fill="#1a1a1a">AHUZAH</text>
+  <text x="640" y="425" text-anchor="middle" font-family="Arial,sans-serif" font-size="28" letter-spacing="12" fill="#1a1a1a">APPAREL</text>
+</svg>

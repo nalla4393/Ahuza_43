@@ -7,7 +7,7 @@ import { findProductBySlug, productPath } from '../shared/productUrl.js';
 import { productIsPurchasable, productPricing, productStockStatus } from '../shared/productPricing.js';
 
 const origin = 'https://www.ahuzawear.com';
-const defaultImage = `${origin}/ahuza-brand-social.jpg`;
+const defaultImage = `${origin}/ahuzah-brand-social.svg`;
 const categoryPath = (category: string) => `/collections/${encodeURIComponent(category)}`;
 const escape = (value: string) => value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 
@@ -31,7 +31,7 @@ function meta(title: string, description: string, url: string, image: string, ty
 <meta name="robots" content="index, follow, max-image-preview:large">
 <link rel="canonical" href="${escape(url)}">
 <meta property="og:type" content="${type}">
-<meta property="og:site_name" content="AHUZA Wear">
+<meta property="og:site_name" content="AHUZAH Wear">
 <meta property="og:title" content="${escape(title)}">
 <meta property="og:description" content="${escape(description)}">
 <meta property="og:url" content="${escape(url)}">
@@ -46,8 +46,8 @@ function meta(title: string, description: string, url: string, image: string, ty
 function productPage(product: Product, copy: StorefrontCopy): { head: string; body: string } {
   const url = origin + productPath(product);
   const image = imageUrl(product);
-  const title = `${product.name} | AHUZA Apparel`;
-  const description = product.description || `Shop ${product.name} at AHUZA Apparel.`;
+  const title = `${product.name} | AHUZAH Apparel`;
+  const description = product.description || `Shop ${product.name} at AHUZAH Apparel.`;
   const schema = {
     '@context': 'https://schema.org',
     '@type': 'Product',
@@ -80,17 +80,17 @@ function productPage(product: Product, copy: StorefrontCopy): { head: string; bo
   const highlights = product.bulletPoints?.length ? `<h2>${escape(copy.detailBulletPoints)}</h2><ul>${product.bulletPoints.map((point) => `<li>${escape(point)}</li>`).join('')}</ul>` : '';
   const priceMarkup = pricing ? `<p><del>${escape(new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(pricing.mrp))}</del> ${escape(price)} · ${pricing.discountPercent}% OFF</p>` : `<p>${escape(price)}</p>`;
   const availability = stockStatus === 'sold_out' ? 'Sold Out' : stockStatus === 'limited_stock' ? 'Limited Stock' : 'In Stock';
-  const body = `<main><a href="/">AHUZA Apparel</a><h1>${escape(product.name)}</h1><p>${escape(description)}</p><img src="${escape(image)}" alt="${escape(product.name)}" width="400">${priceMarkup}<p>${availability}</p><p>SKU: ${escape(product.sku)}</p>${details}${highlights}<a href="/">Shop the collection</a></main>`;
+  const body = `<main><a href="/">AHUZAH Apparel</a><h1>${escape(product.name)}</h1><p>${escape(description)}</p><img src="${escape(image)}" alt="${escape(product.name)}" width="400">${priceMarkup}<p>${availability}</p><p>SKU: ${escape(product.sku)}</p>${details}${highlights}<a href="/">Shop the collection</a></main>`;
   return { head: meta(title, description, url, image, 'product', schema), body };
 }
 
 function collectionPage(category: string, products: Product[]): { head: string; body: string } {
   const url = origin + categoryPath(category);
-  const title = `${category} | AHUZA Apparel`;
-  const description = `Explore ${category} at AHUZA Apparel. Shop our collection online.`;
+  const title = `${category} | AHUZAH Apparel`;
+  const description = `Explore ${category} at AHUZAH Apparel. Shop our collection online.`;
   const schema = { '@context': 'https://schema.org', '@type': 'CollectionPage', name: title, description, url };
   const items = products.map((product) => `<li><a href="${escape(productPath(product))}">${escape(product.name)}</a></li>`).join('');
-  return { head: meta(title, description, url, imageUrl(products[0]!), 'website', schema), body: `<main><a href="/">AHUZA Apparel</a><h1>${escape(category)}</h1><p>${escape(description)}</p><ul>${items}</ul></main>` };
+  return { head: meta(title, description, url, imageUrl(products[0]!), 'website', schema), body: `<main><a href="/">AHUZAH Apparel</a><h1>${escape(category)}</h1><p>${escape(description)}</p><ul>${items}</ul></main>` };
 }
 
 export function createSeoRouter(frontendPath: string, loadDatabase: () => Promise<Database>): Router {
@@ -121,7 +121,7 @@ export function createSeoRouter(frontendPath: string, loadDatabase: () => Promis
     const links = database.products.filter((product) => product.active)
       .map((product) => `<li><a href="${escape(productPath(product))}">${escape(product.name)}</a></li>`).join('');
     if (!template.includes('<div id="root"></div>')) throw new Error('Storefront root is missing');
-    response.type('html').send(template.replace('<div id="root"></div>', () => `<div id="root"><main><h1>AHUZA Wear</h1><ul>${links}</ul></main></div>`));
+    response.type('html').send(template.replace('<div id="root"></div>', () => `<div id="root"><main><h1>AHUZAH Wear</h1><ul>${links}</ul></main></div>`));
   });
 
   router.get(['/products/:slug', '/collections/:category'], async (request, response) => {

@@ -20,7 +20,7 @@ export async function sendRestockAlerts(): Promise<void> {
       await sendEmail(
         customer.email,
         `${product.name} is back in stock`,
-        `Hi ${customer.email},\n\nThe item you asked us to watch, ${product.name}, is available again. Visit AHUZA Apparel to shop while stock lasts.\n\nAHUZA Customer Care`,
+        `Hi ${customer.email},\n\nThe item you asked us to watch, ${product.name}, is available again. Visit AHUZAH Apparel to shop while stock lasts.\n\nAHUZA Customer Care`,
       );
       await mutateDatabase((current) => {
         const saved = current.stockAlerts?.find((entry) => entry.id === alert.id);
