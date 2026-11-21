@@ -184,7 +184,6 @@ html,body,body *{font-family:var(--site-font) !important}
 .wordmark-mark .wordmark-star{position:absolute;top:50%;left:50%;z-index:0;width:116px;height:auto;opacity:.72;transform:translate(-50%,-50%);transform-origin:center}
 .wordmark-mark .wordmark-star polygon{fill:none;stroke:currentColor;stroke-width:1.2;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 .wordmark-mark .wordmark-logo{position:relative;z-index:1;width:68%;height:auto}
-.site-header>.wordmark .wordmark-mark{width:144px;height:98px}
 .footer-bottom .wordmark-logo{height:36px}
 .wordmark-sparkles{position:absolute;inset:-8px -10px;pointer-events:none}
 .wordmark-sparkles i{position:absolute;font-style:normal;font-size:12px;color:#d4a017;opacity:0;animation:sparkle 2.6s ease-in-out infinite}
@@ -201,7 +200,7 @@ html,body,body *{font-family:var(--site-font) !important}
 @media(max-width:760px){
   .site-header{grid-template-columns:max-content minmax(48px,1fr) max-content;grid-template-areas:"logo search actions" "menu menu menu";column-gap:6px;row-gap:6px;padding:8px 3%}
   .site-header>.wordmark{justify-self:start;font-size:25px;margin:0}
-  .site-header .wordmark-mark{width:clamp(82px,24vw,112px);height:clamp(64px,20vw,86px)}
+  .site-header .wordmark-mark{width:clamp(90px,27vw,125px);height:clamp(70px,22vw,95px)}
   .site-header .wordmark-mark .wordmark-star{width:clamp(73px,19vw,88px);height:auto}
   .site-header .wordmark-mark .wordmark-logo{width:68%;height:auto}
   .site-header .wordmark-tagline{font-size:7px;letter-spacing:0}
