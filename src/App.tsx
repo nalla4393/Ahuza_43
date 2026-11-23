@@ -19,6 +19,7 @@ import ProductDetails from './ProductDetails';
 import { copyProductLink, shareProduct } from './productSharing';
 
 const OwnerStudio = lazy(() => import('./OwnerStudio'));
+const FIXED_PAYU_PAYMENT_LINK = 'https://u.payu.in/PAYUMN/YrNhcvnJ3Ya5';
 
 type Product = ProductDetailsData & {
   id: string;
@@ -890,13 +891,7 @@ export default function App() {
         } catch (error) {
           console.warn('Payment recovery storage is unavailable; the return link can recover the order:', error);
         }
-        if (order.checkoutMode === 'intent' && isPayUIntentUri(order.intentUri, order.amount) && isMobileDevice()) {
-          try { window.location.assign(order.intentUri); }
-          catch (error) {
-            console.error('PayU UPI app could not be opened:', error);
-            setPaymentLaunchError('Could not open the UPI app. Use the payment link below to try again.');
-          }
-        }
+        if (paymentMethod === 'upi') window.location.assign(FIXED_PAYU_PAYMENT_LINK);
       }
     } catch (error) {
       setCheckoutError(error instanceof Error ? error.message : 'Could not start checkout. Check your order history before trying again.');
@@ -1362,7 +1357,7 @@ export default function App() {
               {(sameAsBilling ? billingAddress : deliveryAddress).country !== 'India' && <p className="payment-config-warning" role="alert">Delivery is currently available only within India.</p>}
               {paymentMethod === 'upi' && <p className="payment-config-warning">{storefrontText('checkoutUpiNote')}</p>}
               {checkoutError && <p className="payment-config-warning" role="alert">{checkoutError}</p>}
-              <label className="consent-check"><input type="checkbox" checked={marketingConsent} onChange={(event) => setMarketingConsent(event.target.checked)} />{storefrontText('checkoutConsent')}</label>{paymentMethod === 'upi' && customer ? <><p className="payment-config-warning">This fixed PayU link does not receive your cart, total, delivery details, or create an automatic order confirmation. Confirm the amount with AHUZAH before paying.</p><a className="dark-button checkout-button" href="https://u.payu.in/PAYUMN/YrNhcvnJ3Ya5" target="_blank" rel="noopener noreferrer">{storefrontText('checkoutContinueUpi')} <ArrowRight size={16} /></a></> : <button className="dark-button checkout-button" disabled={busy || estimatedShipping === null}>{busy ? storefrontText('checkoutPlacing') : customer ? paymentMethod === 'cod' ? storefrontText('checkoutPlaceCod') : storefrontText('checkoutSignIn') : storefrontText('checkoutSignIn')} <ArrowRight size={16} /></button>}
+              <label className="consent-check"><input type="checkbox" checked={marketingConsent} onChange={(event) => setMarketingConsent(event.target.checked)} />{storefrontText('checkoutConsent')}</label>{paymentMethod === 'upi' && customer && <p className="payment-config-warning">Your order is created and stock is reserved before opening the fixed PayU link. The fixed link does not receive your cart total or automatically match the payment to this order; confirm the amount with AHUZAH before paying.</p>}<button className="dark-button checkout-button" disabled={busy || estimatedShipping === null}>{busy ? storefrontText('checkoutPlacing') : customer ? paymentMethod === 'cod' ? storefrontText('checkoutPlaceCod') : storefrontText('checkoutContinueUpi') : storefrontText('checkoutSignIn')} <ArrowRight size={16} /></button>
               </form><small>{storefrontText('checkoutPolicy')}</small></div>
           </>}
         </aside>
