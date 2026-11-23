@@ -27,6 +27,8 @@ services:
         sync: false
       - key: PAYU_MERCHANT_SALT
         sync: false
+      - key: PAYU_SALT
+        sync: false
       - key: PAYU_MODE
         value: test
       - key: PAYU_CALLBACK_URL
