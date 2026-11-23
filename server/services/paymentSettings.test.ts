@@ -68,6 +68,7 @@ test('Owner Studio can create, edit, and delete encrypted PayU settings', async 
       mode: 'test',
       callbackUrl: 'https://store.example/api/payments/payu/callback',
       webhookUrl: 'https://store.example/api/payments/payu/webhook',
+      paymentLink: 'https://u.payu.in/PAYUMN/example-link',
     };
     const saved = await fetch(base, { method: 'PUT', headers, body: JSON.stringify(payload) });
     assert.equal(saved.status, 200);
@@ -80,12 +81,20 @@ test('Owner Studio can create, edit, and delete encrypted PayU settings', async 
         mode: 'test',
         callbackUrl: payload.callbackUrl,
         webhookUrl: payload.webhookUrl,
+        paymentLink: payload.paymentLink,
         managedInOwnerStudio: true,
       },
       activeProvider: 'payu',
     });
     assert.equal(JSON.stringify(savedBody).includes('merchant-key-secret'), false);
     assert.equal(JSON.stringify(savedBody).includes('merchant-salt-secret'), false);
+
+    const invalidLink = await fetch(base, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ ...payload, paymentLink: 'https://example.com/payment' }),
+    });
+    assert.equal(invalidLink.status, 400);
 
     const stored = (await getDatabase()).paymentProviderSettings;
     assert.equal(stored?.provider, 'payu');

@@ -7,6 +7,7 @@ export type PayUSettings = {
   mode: 'test' | 'production';
   callbackUrl: string;
   webhookUrl: string;
+  paymentLink?: string;
 };
 
 export type PayUSettingsStatus = {
@@ -16,6 +17,7 @@ export type PayUSettingsStatus = {
   mode: 'test' | 'production';
   callbackUrl: string;
   webhookUrl: string;
+  paymentLink?: string;
   managedInOwnerStudio: boolean;
 };
 
@@ -43,6 +45,7 @@ export async function getPayUSettings(): Promise<PayUSettings | null> {
       mode: saved.payuMode || 'test',
       callbackUrl: saved.payuCallbackUrl || defaultCallbackUrl,
       webhookUrl: saved.payuWebhookUrl || defaultWebhookUrl,
+      ...(saved.payuPaymentLink ? { paymentLink: saved.payuPaymentLink } : {}),
     };
   }
   const merchantKey = process.env.PAYU_MERCHANT_KEY?.trim() || '';
@@ -55,6 +58,7 @@ export async function getPayUSettings(): Promise<PayUSettings | null> {
     mode,
     callbackUrl: process.env.PAYU_CALLBACK_URL?.trim() || defaultCallbackUrl,
     webhookUrl: process.env.PAYU_WEBHOOK_URL?.trim() || defaultWebhookUrl,
+    ...(process.env.PAYU_PAYMENT_LINK?.trim() ? { paymentLink: process.env.PAYU_PAYMENT_LINK.trim() } : {}),
   };
 }
 
@@ -68,6 +72,7 @@ export async function getPayUSettingsStatus(): Promise<PayUSettingsStatus> {
     mode: settings?.mode || saved?.payuMode || envMode() || 'test',
     callbackUrl: settings?.callbackUrl || saved?.payuCallbackUrl || process.env.PAYU_CALLBACK_URL?.trim() || defaultCallbackUrl,
     webhookUrl: settings?.webhookUrl || saved?.payuWebhookUrl || process.env.PAYU_WEBHOOK_URL?.trim() || defaultWebhookUrl,
+    paymentLink: settings?.paymentLink || saved?.payuPaymentLink || process.env.PAYU_PAYMENT_LINK?.trim() || undefined,
     managedInOwnerStudio: Boolean(saved),
   };
 }
@@ -78,6 +83,7 @@ export async function savePayUSettings(input: {
   mode: 'test' | 'production';
   callbackUrl: string;
   webhookUrl: string;
+  paymentLink?: string;
 }): Promise<PayUSettingsStatus> {
   const current = await getPayUSettings();
   if (current && current.mode !== input.mode && (!input.merchantKey.trim() || !input.merchantSalt.trim())) {
@@ -95,6 +101,7 @@ export async function savePayUSettings(input: {
       payuMode: input.mode,
       payuCallbackUrl: input.callbackUrl,
       payuWebhookUrl: input.webhookUrl,
+      ...(input.paymentLink ? { payuPaymentLink: input.paymentLink } : {}),
     };
   });
   return getPayUSettingsStatus();

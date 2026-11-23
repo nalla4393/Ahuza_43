@@ -293,6 +293,7 @@ export type Database = {
     payuMode?: 'test' | 'production';
     payuCallbackUrl?: string;
     payuWebhookUrl?: string;
+    payuPaymentLink?: string;
   };
 };
 

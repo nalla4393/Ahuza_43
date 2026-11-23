@@ -19,8 +19,8 @@ type Content = { announcement: string; heroEyebrow: string; heroTitle: string; h
 type Order = { id: string; status: string; amount: number; currency: string; createdAt: string; paymentMethod?: 'upi' | 'cod'; paymentReference?: string; payuTxnId?: string; payerUpiId?: string; trackingNumber?: string; trackingUrl?: string; paymentVerifiedAt?: string; paymentStatus?: string; manualPaymentReference?: string; manualPaymentProof?: { id: string; mimeType: string; uploadedAt: string }; paymentProofPreviewUrl?: string; paymentVerificationMethod?: string; shippingAddress: { name: string; addressLine1: string; addressLine2?: string; city: string; state: string; postalCode: string; phone: string }; items: { name: string; sku: string; quantity: number; size?: string }[]; review?: { rating: number; comment?: string; createdAt: string }; returnRequest?: { action: string; reason: string; status: string } };
 type Analytics = { eventCounts: Record<string, number>; orderCount: number; paidRevenue: number; currency: string; lowStock: { id: string; name: string; sku: string; stock: number }[] };
 type IntegrationStatus = { email: boolean; followUps: boolean; ai: boolean };
-type PayUSettingsStatus = { configured: boolean; hasMerchantKey: boolean; hasMerchantSalt: boolean; mode: 'test' | 'production'; callbackUrl: string; webhookUrl: string; managedInOwnerStudio: boolean };
-type PayUSettingsForm = { merchantKey: string; merchantSalt: string; mode: 'test' | 'production'; callbackUrl: string; webhookUrl: string };
+type PayUSettingsStatus = { configured: boolean; hasMerchantKey: boolean; hasMerchantSalt: boolean; mode: 'test' | 'production'; callbackUrl: string; webhookUrl: string; paymentLink?: string; managedInOwnerStudio: boolean };
+type PayUSettingsForm = { merchantKey: string; merchantSalt: string; mode: 'test' | 'production'; callbackUrl: string; webhookUrl: string; paymentLink: string };
 type SupportTicket = { id: string; email: string; message: string; category: 'delivery' | 'complaint' | 'general'; status: 'open' | 'resolved'; createdAt: string };
 type PaymentAlert = { id: string; amount: number; transactionReference: string; receivedAt: string; status: string; matchedOrderId?: string; reviewedAt?: string; transactionAt?: string; transactionTimezone?: string; transactionType?: string; accountSuffix?: string; additionalReference?: string; sender?: string; duplicateConflict?: boolean; history?: { at: string; action: string; messageId?: string; orderId?: string }[]; candidates: { id: string; createdAt: string; status: string; customerName: string; matchLevel: 'amount_and_time' | 'amount_only' | 'timing_mismatch'; reasons: string[] }[] };
 type PaymentAlertHistory = Omit<PaymentAlert, 'candidates'>;
@@ -153,7 +153,7 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
   const [integrations, setIntegrations] = useState<IntegrationStatus | null>(null);
   const [payuSettings, setPayuSettings] = useState<PayUSettingsStatus | null>(null);
   const [activePaymentProvider, setActivePaymentProvider] = useState('payu');
-  const [payuForm, setPayuForm] = useState<PayUSettingsForm>({ merchantKey: '', merchantSalt: '', mode: 'test', callbackUrl: 'https://www.ahuzawear.com/api/payments/payu/callback', webhookUrl: 'https://www.ahuzawear.com/api/payments/payu/webhook' });
+  const [payuForm, setPayuForm] = useState<PayUSettingsForm>({ merchantKey: '', merchantSalt: '', mode: 'test', callbackUrl: 'https://www.ahuzawear.com/api/payments/payu/callback', webhookUrl: 'https://www.ahuzawear.com/api/payments/payu/webhook', paymentLink: '' });
   const [editingPayU, setEditingPayU] = useState(false);
   const [emailOrderId, setEmailOrderId] = useState('');
   const [emailKind, setEmailKind] = useState<EmailKind>('thank_you');
@@ -236,6 +236,7 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
         mode: payuResult.settings.mode,
         callbackUrl: payuResult.settings.callbackUrl,
         webhookUrl: payuResult.settings.webhookUrl,
+        paymentLink: payuResult.settings.paymentLink || '',
       });
       setEditingPayU(!payuResult.settings.configured);
       setReady(true);
@@ -675,7 +676,7 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
               <div className="studio-panel-heading"><div><h3>PayU India checkout</h3><span>{payuSettings?.configured ? `Configured · ${payuSettings.mode} mode` : 'Not configured'}</span></div><CreditCard size={18} /></div>
               {payuSettings?.configured && !editingPayU && <div className="studio-form-actions">
                 <p className="studio-muted">Merchant key and salt are encrypted at rest and never shown again. The webhook URL must also be registered in your PayU merchant dashboard.</p>
-                <p><strong>Callback URL:</strong> {payuSettings.callbackUrl}<br /><strong>Webhook URL:</strong> {payuSettings.webhookUrl}</p>
+                <p><strong>Callback URL:</strong> {payuSettings.callbackUrl}<br /><strong>Webhook URL:</strong> {payuSettings.webhookUrl}<br /><strong>Payment link:</strong> {payuSettings.paymentLink ? <a href={payuSettings.paymentLink} target="_blank" rel="noopener noreferrer">Open configured link</a> : 'Not configured'}</p>
                 <button className="studio-secondary" type="button" disabled={busyAction} onClick={() => setEditingPayU(true)}>Edit PayU settings</button>
                 <button className="studio-secondary" type="button" disabled={busyAction} onClick={() => void removePayUConfiguration()}>Delete PayU settings</button>
               </div>}
@@ -686,9 +687,10 @@ export default function OwnerStudio({ onClose, onProductsChange, onContentChange
                 {payuSettings?.configured && payuSettings.mode !== payuForm.mode && <p className="studio-muted">Switching replaces the currently saved credentials; save them securely first. Verification of outstanding {payuSettings.mode} payments may be unavailable until those credentials are restored.</p>}
                 <label>Payment callback URL<input type="url" required value={payuForm.callbackUrl} onChange={(event) => setPayuForm({ ...payuForm, callbackUrl: event.target.value })} maxLength={2000} /></label>
                 <label>PayU webhook URL<input type="url" required value={payuForm.webhookUrl} onChange={(event) => setPayuForm({ ...payuForm, webhookUrl: event.target.value })} maxLength={2000} /></label>
+                <label>PayU payment link (optional)<input type="url" pattern="https://u\.payu\.in/.+" value={payuForm.paymentLink} onChange={(event) => setPayuForm({ ...payuForm, paymentLink: event.target.value })} maxLength={2000} placeholder="https://u.payu.in/..." /><small>Stored for owner reference only. Automatic order-linked checkout remains the customer payment flow.</small></label>
                 <small>Get test credentials in your PayU dashboard: switch to Test Mode, then open Developer → API Keys. Use the key and Salt-32 bit. <a href="https://docs.payu.in/docs/generate-test-merchant-key-and-salt" target="_blank" rel="noopener noreferrer">PayU instructions</a>. Never share your key or salt. Configure the webhook URL in PayU as well.</small>
                 <div className="studio-form-actions"><button className="studio-primary" type="submit" disabled={busyAction}>{busyAction ? 'Saving…' : payuSettings?.configured ? 'Save PayU changes' : 'Save and enable PayU'} <Check size={15} /></button>
-                  {payuSettings?.configured && <button className="studio-secondary" type="button" disabled={busyAction} onClick={() => { setPayuForm({ merchantKey: '', merchantSalt: '', mode: payuSettings.mode, callbackUrl: payuSettings.callbackUrl, webhookUrl: payuSettings.webhookUrl }); setEditingPayU(false); }}>Cancel edit</button>}
+                  {payuSettings?.configured && <button className="studio-secondary" type="button" disabled={busyAction} onClick={() => { setPayuForm({ merchantKey: '', merchantSalt: '', mode: payuSettings.mode, callbackUrl: payuSettings.callbackUrl, webhookUrl: payuSettings.webhookUrl, paymentLink: payuSettings.paymentLink || '' }); setEditingPayU(false); }}>Cancel edit</button>}
                   {payuSettings?.configured && <button className="studio-secondary" type="button" disabled={busyAction} onClick={() => void removePayUConfiguration()}>Delete PayU settings</button>}
                 </div>
               </form>}

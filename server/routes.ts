@@ -1164,6 +1164,17 @@ function validPayUEndpoint(value: unknown, endpoint: 'callback' | 'webhook'): va
   }
 }
 
+function validPayUPaymentLink(value: unknown): value is string {
+  if (value === undefined || value === '') return true;
+  if (!stringValue(value, 2000)) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password && url.hostname === 'u.payu.in';
+  } catch {
+    return false;
+  }
+}
+
 api.get('/owner/payment-provider/payu', requireOwner, ownerLimit, async (_request, response) => {
   const [settings, provider] = await Promise.all([getPayUSettingsStatus(), activePaymentProvider()]);
   response.json({ settings, activeProvider: provider });
@@ -1172,12 +1183,13 @@ api.get('/owner/payment-provider/payu', requireOwner, ownerLimit, async (_reques
 api.put('/owner/payment-provider/payu', requireOwner, ownerLimit, async (request, response) => {
   const body = request.body;
   if (!body || typeof body !== 'object' || Array.isArray(body)
-    || Object.keys(body).some((key) => !['merchantKey', 'merchantSalt', 'mode', 'callbackUrl', 'webhookUrl'].includes(key))
+    || Object.keys(body).some((key) => !['merchantKey', 'merchantSalt', 'mode', 'callbackUrl', 'webhookUrl', 'paymentLink'].includes(key))
     || (body.merchantKey !== undefined && (typeof body.merchantKey !== 'string' || body.merchantKey.length > 256))
     || (body.merchantSalt !== undefined && (typeof body.merchantSalt !== 'string' || body.merchantSalt.length > 256))
     || !['test', 'production'].includes(body.mode)
     || !validPayUEndpoint(body.callbackUrl, 'callback')
-    || !validPayUEndpoint(body.webhookUrl, 'webhook')) {
+    || !validPayUEndpoint(body.webhookUrl, 'webhook')
+    || !validPayUPaymentLink(body.paymentLink)) {
     response.status(400).json({ error: 'Provide valid PayU credentials, test or production mode, and HTTPS callback and webhook URLs' });
     return;
   }
@@ -1188,6 +1200,7 @@ api.put('/owner/payment-provider/payu', requireOwner, ownerLimit, async (request
       mode: body.mode,
       callbackUrl: body.callbackUrl,
       webhookUrl: body.webhookUrl,
+      paymentLink: body.paymentLink || '',
     });
     response.json({ settings, activeProvider: await activePaymentProvider() });
   } catch (error) {
