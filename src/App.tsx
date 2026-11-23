@@ -1176,7 +1176,7 @@ export default function App() {
             </div>
             : <button key={label} type="button" onClick={() => openNavItem(label)}>{label}</button>)}
         </nav>
-        <a className="wordmark" href="#home" aria-label="AHUZAH home"><span className="wordmark-mark"><svg className="wordmark-star" viewBox="0 0 120 120" aria-hidden="true"><polygon points="60,4 72,43 114,43 80,68 93,109 60,84 27,109 40,68 6,43 48,43" /></svg><span className="wordmark-sparkles" aria-hidden="true"><i>✦</i><i>✦</i><i>✦</i><i>✦</i><i>✦</i></span><img className="wordmark-logo" src="/ahuzah-logo.svg" alt="AHUZAH" /></span></a>
+        <a className="wordmark" href="#home" aria-label="AHUZAH home"><span className="wordmark-mark"><svg className="wordmark-star" viewBox="0 0 120 120" aria-hidden="true"><polygon points="60,4 72,43 114,43 80,68 93,109 60,84 27,109 40,68 6,43 48,43" /></svg><span className="wordmark-sparkles" aria-hidden="true"><i>✦</i><i>✦</i><i>✦</i><i>✦</i><i>✦</i></span><img className="wordmark-logo" src="/ahuzah-logo.svg?v=2" alt="AHUZAH" /></span></a>
         <form className="header-search" role="search" onSubmit={(event) => { event.preventDefault(); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>
           <label className="sr-only" htmlFor="header-search-input">Search AHUZAH</label>
           <input id="header-search-input" type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); if (event.target.value) setCatalogOpen(true); }} placeholder={storefrontText('searchPlaceholder')} autoComplete="off" />
