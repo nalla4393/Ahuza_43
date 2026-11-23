@@ -40,3 +40,7 @@
 .studio-product-preview del{color:var(--studio-muted,#73766d)}
 .studio-copy-actions{display:grid;justify-items:start;gap:6px}
 .studio-copy-actions small{color:var(--studio-muted,#73766d);font-size:11px;line-height:1.5}
+.studio-logo-editor{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.studio-logo-editor>img{width:min(320px,100%);height:110px;object-fit:contain;background:#f6f3ec;border:1px solid var(--studio-line,#d8d4c8)}
+.studio-logo-actions{display:grid;justify-items:start;gap:8px}
+.studio-logo-actions small{color:var(--studio-muted,#73766d);font-size:11px;line-height:1.5}

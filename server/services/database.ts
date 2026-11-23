@@ -194,6 +194,7 @@ export type StorefrontContent = {
   storyHeading: string;
   storyBody: string;
   storyImageUrl: string;
+  brandLogoUrl?: string;
   chatbotImageUrl: string;
   circleImages: Record<string, string>;
   circleLabels: Record<string, string>;
@@ -213,6 +214,7 @@ export const defaultStorefrontContent: StorefrontContent = {
   storyHeading: 'Wear what feels like you',
   storyBody: 'We make pieces to live in, not just look at Easy silhouettes, tactile fabrics, and the quiet confidence of getting dressed without overthinking it',
   storyImageUrl: 'https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1200&q=85',
+  brandLogoUrl: '',
   chatbotImageUrl: '',
   circleImages: {},
   circleLabels: {},

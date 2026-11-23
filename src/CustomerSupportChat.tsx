@@ -115,8 +115,8 @@ export default function CustomerSupportChat({ onOpenAccount }: Props) {
 
   useEffect(() => {
     const toggle = () => setOpen((current) => !current);
-    window.addEventListener('ahuza:toggle-support', toggle);
-    return () => window.removeEventListener('ahuza:toggle-support', toggle);
+    window.addEventListener('ahuzah:toggle-support', toggle);
+    return () => window.removeEventListener('ahuzah:toggle-support', toggle);
   }, []);
 
   useEffect(() => {

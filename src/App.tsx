@@ -56,7 +56,7 @@ const formatPaymentAmount = (amount: number) => new Intl.NumberFormat('en-IN', {
 
 type Customer = { id: string; email: string };
 type CustomerOrder = { id: string; amount: number; currency: string; status: string; paymentMethod?: 'upi' | 'cod'; paymentStatus?: string; payuPaymentIssue?: 'initiation_failed' | 'provider_failed'; paymentVerifiedAt?: string; createdAt: string; trackingNumber?: string; trackingUrl?: string; review?: { rating: number; comment?: string; createdAt: string }; items: { name: string; quantity: number; size?: string }[] };
-type StorefrontContent = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string; circleImages?: Record<string, string>; circleLabels?: Record<string, string>; bannerImages?: Record<string, string>; copy?: Record<StorefrontCopyId, string> };
+type StorefrontContent = { announcement: string; heroEyebrow: string; heroTitle: string; heroDescription: string; heroImageUrl: string; storyHeading: string; storyBody: string; storyImageUrl: string; brandLogoUrl?: string; circleImages?: Record<string, string>; circleLabels?: Record<string, string>; bannerImages?: Record<string, string>; copy?: Record<StorefrontCopyId, string> };
 type CartLine = { productId: string; quantity: number; size?: string };
 const orderStatusLabel = (order: { status: string; paymentStatus?: string; paymentMethod?: string; payuPaymentIssue?: 'initiation_failed' | 'provider_failed' }) => {
   if (order.status === 'paid') return 'Order confirmed · payment received';
@@ -137,6 +137,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 export default function App() {
   const cartDrawer = useRef<HTMLElement>(null);
+  const pendingPaymentStorageKey = 'ahuzah.pendingPayment';
   const [payuPaymentLink, setPayuPaymentLink] = useState(FIXED_PAYU_PAYMENT_LINK);
   useEffect(() => {
     fetch('/api/payments/config')
@@ -193,7 +194,7 @@ export default function App() {
   const [reviewMessages, setReviewMessages] = useState<Record<string, string>>({});
   const [paymentOrder, setPaymentOrder] = useState<PaymentOrder | null>(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem('ahuza.pendingPayment') || 'null') as PaymentOrder | null;
+      const saved = JSON.parse(localStorage.getItem(pendingPaymentStorageKey) || localStorage.getItem('ahuza.pendingPayment') || 'null') as PaymentOrder | null;
       const returnedId = window.location.pathname === '/order-success' ? new URLSearchParams(window.location.search).get('order') : null;
       if (returnedId && saved?.orderId !== returnedId) return null;
       return saved?.paymentMethod === 'upi' && saved.orderId ? saved : null;
@@ -414,8 +415,8 @@ export default function App() {
   // Recheck the order after returning from the payment app or reloading the confirmation.
   useEffect(() => {
     try {
-      if (paymentOrder?.paymentMethod === 'upi') localStorage.setItem('ahuza.pendingPayment', JSON.stringify(paymentOrder));
-      else localStorage.removeItem('ahuza.pendingPayment');
+      if (paymentOrder?.paymentMethod === 'upi') localStorage.setItem(pendingPaymentStorageKey, JSON.stringify(paymentOrder));
+      else localStorage.removeItem(pendingPaymentStorageKey);
     } catch { /* storage unavailable */ }
   }, [paymentOrder]);
 
@@ -897,7 +898,7 @@ export default function App() {
         window.history.replaceState({}, '', `/order-success?order=${encodeURIComponent(order.orderId)}`);
         setReturnedPaymentId(order.orderId);
         try {
-          localStorage.setItem('ahuza.pendingPayment', JSON.stringify(order));
+          localStorage.setItem(pendingPaymentStorageKey, JSON.stringify(order));
         } catch (error) {
           console.warn('Payment recovery storage is unavailable; the return link can recover the order:', error);
         }
@@ -1176,14 +1177,14 @@ export default function App() {
             </div>
             : <button key={label} type="button" onClick={() => openNavItem(label)}>{label}</button>)}
         </nav>
-        <a className="wordmark" href="#home" aria-label="AHUZAH home"><span className="wordmark-mark"><svg className="wordmark-star" viewBox="0 0 120 120" aria-hidden="true"><polygon points="60,4 72,43 114,43 80,68 93,109 60,84 27,109 40,68 6,43 48,43" /></svg><span className="wordmark-sparkles" aria-hidden="true"><i>✦</i><i>✦</i><i>✦</i><i>✦</i><i>✦</i></span><img className="wordmark-logo" src="/ahuzah-logo.svg?v=2" alt="AHUZAH" /></span></a>
+        <a className="wordmark" href="#home" aria-label="AHUZAH home"><span className="wordmark-mark"><svg className="wordmark-star" viewBox="0 0 120 120" aria-hidden="true"><polygon points="60,4 72,43 114,43 80,68 93,109 60,84 27,109 40,68 6,43 48,43" /></svg><span className="wordmark-sparkles" aria-hidden="true"><i>✦</i><i>✦</i><i>✦</i><i>✦</i><i>✦</i></span><img className="wordmark-logo" src={storeContent.brandLogoUrl || '/ahuzah-logo.svg?v=2'} alt="AHUZAH" /></span></a>
         <form className="header-search" role="search" onSubmit={(event) => { event.preventDefault(); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}>
           <label className="sr-only" htmlFor="header-search-input">Search AHUZAH</label>
           <input id="header-search-input" type="search" value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); if (event.target.value) setCatalogOpen(true); }} placeholder={storefrontText('searchPlaceholder')} autoComplete="off" />
           {searchTerm && <button type="button" className="header-search-clear" aria-label="Clear search" onClick={() => setSearchTerm('')}><X size={16} /></button>}
           <button type="submit" className="header-search-submit" aria-label="Search"><Search size={18} /></button>
         </form>
-        <div className="header-actions"><button className="header-icon chat-link" type="button" aria-label="Ask Ahuzah" onClick={() => window.dispatchEvent(new Event('ahuza:toggle-support'))}><MessageCircle size={18} /><span className="chat-label">{storefrontText('askAhuzaLabel')}</span></button><button className={`header-icon wishlist-link${savedOnly ? ' active' : ''}`} type="button" aria-label={`Wishlist, ${wishlist.length} saved`} aria-pressed={savedOnly} onClick={() => { if (!customer) { setAuthMode('login'); setAccountOpen(true); return; } setSavedOnly(true); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}><Heart size={18} fill={wishlist.length ? 'currentColor' : 'none'} />{wishlist.length > 0 && <span className="count-badge">{wishlist.length}</span>}</button><button className="account-link" aria-label={customer ? 'My account' : 'Account'} onClick={() => setAccountOpen(true)}><User size={18} aria-hidden="true" /><span>{customer ? 'My account' : 'Account'}</span></button><button className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
+        <div className="header-actions"><button className="header-icon chat-link" type="button" aria-label="Ask Ahuzah" onClick={() => window.dispatchEvent(new Event('ahuzah:toggle-support'))}><MessageCircle size={18} /><span className="chat-label">{storefrontText('askAhuzaLabel')}</span></button><button className={`header-icon wishlist-link${savedOnly ? ' active' : ''}`} type="button" aria-label={`Wishlist, ${wishlist.length} saved`} aria-pressed={savedOnly} onClick={() => { if (!customer) { setAuthMode('login'); setAccountOpen(true); return; } setSavedOnly(true); setCatalogOpen(true); document.querySelector('#shop')?.scrollIntoView({ behavior: 'smooth' }); }}><Heart size={18} fill={wishlist.length ? 'currentColor' : 'none'} />{wishlist.length > 0 && <span className="count-badge">{wishlist.length}</span>}</button><button className="account-link" aria-label={customer ? 'My account' : 'Account'} onClick={() => setAccountOpen(true)}><User size={18} aria-hidden="true" /><span>{customer ? 'My account' : 'Account'}</span></button><button className="bag-button" aria-label={`Shopping bag, ${cartCount} items`} onClick={() => setCartOpen(true)}><ShoppingBag size={18} /><span>Bag ({cartCount})</span></button></div>
       </header>
       {mobileMenuOpen && <div className="menu-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) setMobileMenuOpen(false); }}>
         <aside className="menu-drawer" id="collection-drawer" role="dialog" aria-modal="true" aria-labelledby="menu-title">
@@ -1296,7 +1297,7 @@ export default function App() {
           <div><h3>{storefrontText('footerCustomerTitle')}</h3><ul><li><a href="#contact">{storefrontText('footerContact')}</a></li><li><a href={`mailto:${storefrontText('contactEmail')}`}>{storefrontText('contactEmail')}</a></li><li><a href={`tel:${storefrontText('contactPhone').replace(/\s+/g, '')}`}>{storefrontText('contactPhone')}</a></li></ul></div>
           <div><h3>AHUZAH</h3><p className="footer-tagline">{storefrontText('footerBrandTagline')}</p><p className="footer-loc">{storefrontText('footerLocation')}</p></div>
         </div>
-        <div className="footer-bottom"><a className="wordmark" href="#home" aria-label="AHUZAH home"><img src="/ahuzah-wordmark.svg" alt="AHUZAH" className="wordmark-logo" /></a><span>© AHUZAH 2026</span><a className="footer-terms" href="/terms.html">Terms and Conditions</a><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
+        <div className="footer-bottom"><a className="wordmark" href="#home" aria-label="AHUZAH home"><img src={storeContent.brandLogoUrl || '/ahuzah-wordmark.svg'} alt="AHUZAH" className="wordmark-logo" /></a><span>© AHUZAH 2026</span><a className="footer-terms" href="/terms.html">Terms and Conditions</a><button className="owner-entry" onClick={() => setOwnerStudioOpen(true)}>Owner Studio</button></div>
       </footer>
 
       {orderSuccessPage && paymentOrder?.paymentMethod === 'upi' && paymentStatus === 'paid' && <PaymentSuccess

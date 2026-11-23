@@ -26,20 +26,28 @@ test('owner can upload, publish and reset chatbot portrait; in-use image cannot 
     headers: authorized ? ownerHeaders : { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chatbotImageUrl: value }),
   });
+  const patchBrandLogo = (brandLogoUrl: string) => fetch(`${base}/owner/content`, {
+    method: 'PATCH', headers: ownerHeaders, body: JSON.stringify({ brandLogoUrl }),
+  });
   try {
     assert.equal((await patch('', false)).status, 403);
     assert.equal((await patch('javascript:alert(1)')).status, 400);
+    assert.equal((await patchBrandLogo('javascript:alert(1)')).status, 400);
     const imageBytes = await readFile('public/beulah-avatar.jpg');
     const upload = await fetch(`${base}/owner/images`, { method: 'POST', headers: { 'X-Owner-Key': 'test-owner-key', 'Content-Type': 'image/jpeg' }, body: imageBytes });
     assert.equal(upload.status, 201);
     const { image } = await upload.json() as { image: { id: string; url: string } };
     assert.equal((await patch(image.url)).status, 200);
-    const storefront = await (await fetch(`${base}/storefront`)).json() as { content: { chatbotImageUrl: string } };
+    assert.equal((await patchBrandLogo(image.url)).status, 200);
+    const storefront = await (await fetch(`${base}/storefront`)).json() as { content: { chatbotImageUrl: string; brandLogoUrl?: string } };
     assert.equal(storefront.content.chatbotImageUrl, image.url);
+    assert.equal(storefront.content.brandLogoUrl, image.url);
     assert.equal((await fetch(`${base}/owner/images/${image.id}`, { method: 'DELETE', headers: ownerHeaders })).status, 409);
     assert.equal((await patch('')).status, 200);
     const reset = await (await fetch(`${base}/storefront`)).json() as { content: { chatbotImageUrl: string } };
     assert.equal(reset.content.chatbotImageUrl, '');
+    assert.equal((await fetch(`${base}/owner/images/${image.id}`, { method: 'DELETE', headers: ownerHeaders })).status, 409);
+    assert.equal((await patchBrandLogo('')).status, 200);
     assert.equal((await fetch(`${base}/owner/images/${image.id}`, { method: 'DELETE', headers: ownerHeaders })).status, 200);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
