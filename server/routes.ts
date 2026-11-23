@@ -15,7 +15,7 @@ import { enqueueOrderEmail, expirePendingOrders, notifySupportTicket, recordMark
 import { createPayUIntent, createPayUQr, payuAmountInPaise, payuConfigured, verifyPayUResponseHash } from './services/payu.js';
 import { customerDataConfigured, decryptCustomerValue, encryptCustomerValue, isValidUpiId } from './services/customerData.js';
 import { confirmPayUWebhookPayment, confirmUpiPaymentByOwner, outOfStockItems, syncPayUPayment } from './services/paymentSync.js';
-import { activePaymentProvider, deletePayUSettings, getPayUSettingsStatus, savePayUSettings } from './services/paymentSettings.js';
+import { activePaymentProvider, deletePayUSettings, getPayUSettings, getPayUSettingsStatus, savePayUSettings } from './services/paymentSettings.js';
 import { gmailPaymentAlertsConfigured } from './services/gmailPaymentAlerts.js';
 import { buildInvoicePdf } from './services/invoice.js';
 import { storefrontCopyFields } from '../shared/storefrontCopy.js';
@@ -501,8 +501,8 @@ async function createPaymentOrder(request: Request, response: Response): Promise
 }
 
 api.get('/payments/config', async (_request, response) => {
-  const configured = await payuConfigured();
-  response.json({ configured, automaticVerification: configured, provider: 'payu' });
+  const [configured, settings] = await Promise.all([payuConfigured(), getPayUSettings()]);
+  response.json({ configured, automaticVerification: configured, provider: 'payu', paymentLink: settings?.paymentLink });
 });
 
 api.post('/payments/payu/callback', paymentLimit, express.urlencoded({ extended: false, limit: '16kb' }), async (request, response) => {

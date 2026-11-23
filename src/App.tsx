@@ -137,6 +137,16 @@ async function parseResponse<T>(response: Response): Promise<T> {
 }
 export default function App() {
   const cartDrawer = useRef<HTMLElement>(null);
+  const [payuPaymentLink, setPayuPaymentLink] = useState(FIXED_PAYU_PAYMENT_LINK);
+  useEffect(() => {
+    fetch('/api/payments/config')
+      .then(async (response) => {
+        if (!response.ok) return;
+        const config = await response.json() as { paymentLink?: unknown };
+        if (typeof config.paymentLink === 'string' && config.paymentLink.startsWith('https://u.payu.in/')) setPayuPaymentLink(config.paymentLink);
+      })
+      .catch(() => undefined);
+  }, []);
   const [exchangeRate, setExchangeRate] = useState<{ usdPerInr: number; date: string } | null>(null);
   useEffect(() => {
     const controller = new AbortController();
@@ -891,7 +901,7 @@ export default function App() {
         } catch (error) {
           console.warn('Payment recovery storage is unavailable; the return link can recover the order:', error);
         }
-        if (paymentMethod === 'upi') window.location.assign(FIXED_PAYU_PAYMENT_LINK);
+        if (paymentMethod === 'upi') window.location.assign(payuPaymentLink);
       }
     } catch (error) {
       setCheckoutError(error instanceof Error ? error.message : 'Could not start checkout. Check your order history before trying again.');

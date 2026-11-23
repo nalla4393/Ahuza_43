@@ -49,7 +49,7 @@ export async function getPayUSettings(): Promise<PayUSettings | null> {
     };
   }
   const merchantKey = process.env.PAYU_MERCHANT_KEY?.trim() || '';
-  const merchantSalt = process.env.PAYU_MERCHANT_SALT?.trim() || '';
+  const merchantSalt = process.env.PAYU_MERCHANT_SALT?.trim() || process.env.PAYU_SALT?.trim() || '';
   const mode = envMode();
   if (!merchantKey || !merchantSalt || !mode) return null;
   return {
