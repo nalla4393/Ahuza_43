@@ -453,8 +453,13 @@ export default function App() {
         const response = await fetch(`/api/payments/orders/${encodeURIComponent(paymentOrder.orderId)}/qr`, { method: 'POST' });
         if (stopped) return;
         if (response.status === 401) { requirePaymentSignIn(); return; }
-        const result = await parseResponse<{ qr?: string; expiresAt?: string; pending?: boolean; error?: string }>(response);
+        const result = await parseResponse<{ qr?: string; expiresAt?: string; intentUri?: string; pending?: boolean; error?: string }>(response);
         if (response.status === 202 && result.pending) { timer = window.setTimeout(() => void load(), 2000); return; }
+        if (response.ok && result.intentUri && isPayUIntentUri(result.intentUri, paymentOrder.amount)) {
+          setPaymentOrder((current) => current ? { ...current, checkoutMode: 'intent', intentUri: result.intentUri } : current);
+          if (isMobileDevice()) window.location.assign(result.intentUri);
+          return;
+        }
         if (!response.ok || !result.qr || !result.expiresAt) throw new Error(result.error || 'Could not load the PayU QR');
         setPayuQr({ orderId: paymentOrder.orderId, value: result.qr, expiresAt: result.expiresAt });
         timer = window.setTimeout(() => {

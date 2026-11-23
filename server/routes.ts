@@ -467,6 +467,23 @@ async function createPaymentOrder(request: Request, response: Response): Promise
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`PayU ${usePayuQr ? 'QR' : 'intent'} checkout creation failed for order ${localOrderId}: ${errorMessage}`);
 
+    if (usePayuQr) {
+      try {
+        const intentUri = (await createPayUIntent(placed, customerEmail!, request.ip || request.socket?.remoteAddress || '', request.get('user-agent') || '')).value;
+        if (customerEmail) void enqueueOrderEmail(localOrderId, 'order_placed').catch((emailError) => console.error('Order received email queue failed:', emailError));
+        void enqueueOrderEmail(localOrderId, 'owner_new_order').catch((emailError) => console.error('Owner order email queue failed:', emailError));
+        response.status(201).json({
+          orderId: localOrderId, paymentMethod, paymentReference, provider: 'payu',
+          checkoutMode: 'intent' as const, intentUri, amount, currency: 'INR', expiresAt: placed.reservationExpiresAt,
+          status: 'pending', items: placed.items.map(({ name, quantity, size }) => ({ name, quantity, size })),
+        });
+        return;
+      } catch (intentError) {
+        const intentMessage = intentError instanceof Error ? intentError.message : String(intentError);
+        console.error(`PayU QR fallback to intent failed for order ${localOrderId}: ${intentMessage}`);
+      }
+    }
+
     await mutateDatabase((database) => {
       const order = database.orders.find((entry) => entry.id === localOrderId);
       if (order?.status === 'pending_payment' && order.paymentStatus === 'pending') {
@@ -586,6 +603,25 @@ api.post('/payments/orders/:id/qr', requireCustomer, paymentLimit, async (reques
   } catch (qrError) {
     const qrErrorMessage = qrError instanceof Error ? qrError.message : String(qrError);
     console.error(`PayU QR generation failed for order ${result.order.id}: ${qrErrorMessage}`);
+
+    try {
+      const intent = await createPayUIntent(result.order, result.email, result.ip, result.userAgent);
+      const saved = await mutateDatabase((database) => {
+        const order = database.orders.find((entry) => entry.id === result.order.id && entry.userId === request.session.userId);
+        if (!order || order.status !== 'pending_payment' || order.payuPaymentIssue || order.payuQr?.state !== 'starting' || order.payuQr.startedAt !== startedAt) return false;
+        delete order.payuQr;
+        delete order.payuCheckoutMode;
+        return true;
+      });
+      if (saved) {
+        response.set('Cache-Control', 'no-store').json({ intentUri: intent.value, fallback: true });
+        return;
+      }
+    } catch (intentError) {
+      const intentMessage = intentError instanceof Error ? intentError.message : String(intentError);
+      console.error(`PayU QR fallback to intent failed for order ${result.order.id}: ${intentMessage}`);
+    }
+
     await mutateDatabase((database) => {
       const order = database.orders.find((entry) => entry.id === result.order.id);
       if (order?.payuQr?.state === 'starting' && order.payuQr.startedAt === startedAt) {

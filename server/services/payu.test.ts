@@ -318,14 +318,29 @@ test('PayU webhook confirms the matching order only after server-side verificati
       const current = database.orders.find((entry) => entry.id === payment.orderId)!;
       database.orders.push({ ...current, id: 'failed-qr-order', payuTxnId: 'failed-qr-transaction', payuQr: undefined });
     });
-    globalThis.fetch = async () => { qrCalls++; throw new Error('test provider timeout'); };
+    qrCalls = 0;
+    globalThis.fetch = async (_input, init) => {
+      qrCalls++;
+      if (qrCalls === 1) throw new Error('test provider timeout');
+      const body = init?.body as URLSearchParams;
+      return Response.json({
+        metaData: { txnId: body.get('txnid'), txnStatus: 'pending' },
+        result: {
+          amount: body.get('amount'),
+          merchantVpa: 'merchant@payu',
+          intentURIData: `pa=merchant%40payu&pn=Merchant&tr=provider-reference&am=${body.get('amount')}&cu=INR`,
+        },
+      });
+    };
     const failedQrUrl = `${base}/api/payments/orders/failed-qr-order/qr`;
-    assert.equal((await originalFetch(failedQrUrl, { method: 'POST', headers: { Cookie: cookie } })).status, 503);
+    const failedQrResponse = await originalFetch(failedQrUrl, { method: 'POST', headers: { Cookie: cookie } });
+    assert.equal(failedQrResponse.status, 200);
+    assert.match((await failedQrResponse.json() as { intentUri: string }).intentUri, /^upi:\/\/pay\?/);
     assert.equal((await originalFetch(failedQrUrl, { method: 'POST', headers: { Cookie: cookie } })).status, 409);
     assert.equal(qrCalls, 2);
     const failedQrOrder = (await getDatabase()).orders.find((entry) => entry.id === 'failed-qr-order');
-    assert.equal(failedQrOrder?.paymentStatus, 'failed');
-    assert.equal(failedQrOrder?.payuPaymentIssue, 'initiation_failed');
+    assert.equal(failedQrOrder?.paymentStatus, 'pending');
+    assert.equal(failedQrOrder?.payuPaymentIssue, undefined);
     globalThis.fetch = originalFetch;
 
     process.env.PAYU_DYNAMIC_QR_ENABLED = 'false';
