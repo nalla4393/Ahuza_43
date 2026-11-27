@@ -181,7 +181,7 @@ html,body,body *{font-family:var(--site-font) !important}
 @media(max-width:760px){.wordmark .wordmark-tagline{font-size:9px;letter-spacing:.02em}}
 .wordmark-logo{display:block;width:auto;height:42px;flex-shrink:0;transform-origin:center;animation:wordmarkZoom 3.6s ease-in-out infinite}
 .wordmark .wordmark-star{display:block;overflow:visible;color:var(--ahuza-brand);animation:starTwinkle 2.4s ease-in-out infinite}
-.wordmark-mark .wordmark-star{position:absolute;top:50%;left:50%;z-index:0;width:116px;height:auto;opacity:.72;transform:translate(-50%,-50%);transform-origin:center}
+.wordmark-mark .wordmark-star{position:absolute;top:50%;left:50%;z-index:2;width:116px;height:auto;opacity:.72;transform:translate(-50%,-50%);transform-origin:center}
 .wordmark-mark .wordmark-star polygon{fill:none;stroke:currentColor;stroke-width:1.2;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 .wordmark-mark .wordmark-logo{position:relative;z-index:1;width:68%;height:auto}
 .footer-bottom .wordmark-logo{height:36px}
